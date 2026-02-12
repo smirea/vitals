@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
     bloodworkLabSchema,
+    bloodworkReferenceRangeSchema,
     buildBloodworkFileName,
     buildBloodworkS3Key,
     normalizeIsoDate,
@@ -35,6 +36,35 @@ describe('bloodworkLabSchema', () => {
 
         expect(payload.date).toBe('2025-08-29');
         expect(payload.measurements).toHaveLength(1);
+    });
+});
+
+describe('bloodworkReferenceRangeSchema', () => {
+    test('normalizes comparator and legacy range shapes to min/max bounds', () => {
+        expect(bloodworkReferenceRangeSchema.parse({ text: '<100' })).toEqual({ max: 100 });
+        expect(bloodworkReferenceRangeSchema.parse({ text: '>59' })).toEqual({ min: 59 });
+        expect(bloodworkReferenceRangeSchema.parse({ lower: 3.5, upper: 5.5 })).toEqual({
+            min: 3.5,
+            max: 5.5,
+        });
+    });
+});
+
+describe('measurement note support', () => {
+    test('accepts optional measurement note', () => {
+        const payload = bloodworkLabSchema.parse({
+            date: '2025-08-29',
+            labName: 'Muenchen Lab',
+            measurements: [{
+                name: 'Hemoglobin',
+                value: 14.1,
+                note: 'Fasting sample',
+                referenceRange: { text: '<15.0' },
+            }],
+        });
+
+        expect(payload.measurements[0]?.note).toBe('Fasting sample');
+        expect(payload.measurements[0]?.referenceRange).toEqual({ max: 15 });
     });
 });
 

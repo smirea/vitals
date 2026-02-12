@@ -31,6 +31,7 @@ const MODEL_MAX_OUTPUT_TOKENS = 1_400;
 const METADATA_MAX_OUTPUT_TOKENS = 280;
 const NORMALIZATION_MAX_OUTPUT_TOKENS = 6_000;
 const GLOSSARY_VALIDATION_MAX_OUTPUT_TOKENS = 1_600;
+const MODEL_REQUEST_TIMEOUT_MS = 30_000;
 const MAX_MEASUREMENTS_PER_PAGE = 120;
 const MAX_NORMALIZATION_CANDIDATES = 320;
 const MAX_GLOSSARY_DECISIONS = 64;
@@ -325,9 +326,8 @@ const measurementNormalizationSchema = z.object({
 });
 
 const glossaryRangeSchema = z.object({
-    lower: z.number().finite().optional(),
-    upper: z.number().finite().optional(),
-    text: z.string().trim().min(1).optional(),
+    min: z.number().finite().optional(),
+    max: z.number().finite().optional(),
     unit: z.string().trim().min(1).optional(),
 });
 
@@ -348,7 +348,7 @@ const bloodworkGlossarySchema = z.object({
 
 const glossaryValidationDecisionSchema = z.object({
     index: z.number().int().nonnegative(),
-    action: z.enum(['alias', 'new_valid', 'invalid']),
+    action: z.string().trim().min(1),
     targetCanonicalName: z.string().trim().min(1).optional(),
     canonicalName: z.string().trim().min(1).optional(),
     aliases: z.array(z.string().trim().min(1)).max(6).optional(),
@@ -841,9 +841,8 @@ function sortUniqueStrings(values: string[]): string[] {
 
 function buildGlossaryRangeFingerprint(range: z.infer<typeof glossaryRangeSchema>): string {
     return [
-        range.lower?.toString() ?? '',
-        range.upper?.toString() ?? '',
-        normalizeTextForMatch(range.text ?? ''),
+        range.min?.toString() ?? '',
+        range.max?.toString() ?? '',
         normalizeTextForMatch(range.unit ?? ''),
     ].join('|');
 }
@@ -865,16 +864,13 @@ function normalizeGlossaryEntry(entry: BloodworkGlossaryEntry): BloodworkGlossar
 
     for (const range of entry.knownRanges) {
         const normalizedRange: z.infer<typeof glossaryRangeSchema> = {
-            lower: range.lower,
-            upper: range.upper,
-            text: range.text?.trim() || undefined,
+            min: range.min,
+            max: range.max,
             unit: range.unit?.trim() || undefined,
         };
         const hasAnyValue =
-            normalizedRange.lower !== undefined ||
-            normalizedRange.upper !== undefined ||
-            normalizedRange.text !== undefined ||
-            normalizedRange.unit !== undefined;
+            normalizedRange.min !== undefined ||
+            normalizedRange.max !== undefined;
         if (!hasAnyValue) {
             continue;
         }
@@ -1036,16 +1032,13 @@ function upsertRangeIntoGlossaryEntry(entry: BloodworkGlossaryEntry, measurement
         return;
     }
     const nextRange: z.infer<typeof glossaryRangeSchema> = {
-        lower: measurement.referenceRange.lower,
-        upper: measurement.referenceRange.upper,
-        text: measurement.referenceRange.text?.trim() || undefined,
+        min: measurement.referenceRange.min,
+        max: measurement.referenceRange.max,
         unit: measurement.unit?.trim() || undefined,
     };
     const hasRangeValue =
-        nextRange.lower !== undefined ||
-        nextRange.upper !== undefined ||
-        nextRange.text !== undefined ||
-        nextRange.unit !== undefined;
+        nextRange.min !== undefined ||
+        nextRange.max !== undefined;
     if (!hasRangeValue) {
         return;
     }
@@ -1089,10 +1082,11 @@ function createGlossaryEntryFromMeasurement({
 }
 
 function cleanMeasurementCandidate(measurement: BloodworkMeasurement): BloodworkMeasurement {
+    const { notes: legacyNotes, ...measurementWithoutLegacyNotes } = measurement;
     const name = measurement.name.replace(/\s+/g, ' ').trim();
     const originalName = measurement.originalName?.replace(/\s+/g, ' ').trim() || undefined;
     let unit = measurement.unit?.replace(/\s+/g, ' ').trim() || undefined;
-    const notes = measurement.notes?.replace(/\s+/g, ' ').trim() || undefined;
+    const note = measurement.note?.replace(/\s+/g, ' ').trim() || legacyNotes?.replace(/\s+/g, ' ').trim() || undefined;
     const category = measurement.category?.replace(/\s+/g, ' ').trim() || undefined;
     let normalizedName = name;
     let flag = measurement.flag;
@@ -1125,11 +1119,11 @@ function cleanMeasurementCandidate(measurement: BloodworkMeasurement): Bloodwork
     }
 
     return {
-        ...measurement,
+        ...measurementWithoutLegacyNotes,
         name: normalizedName,
         originalName,
         unit,
-        notes,
+        note,
         category,
         flag,
     };
@@ -1359,19 +1353,29 @@ function parseReferenceRangeFromText(text: string): BloodworkMeasurement['refere
     }
     const pair = trimmed.match(/([<>]?\d+(?:[.,]\d+)?)\s*-\s*([<>]?\d+(?:[.,]\d+)?)/);
     if (pair) {
-        const lower = Number.parseFloat(pair[1]!.replace(/[<>]/g, '').replace(',', '.'));
-        const upper = Number.parseFloat(pair[2]!.replace(/[<>]/g, '').replace(',', '.'));
+        const min = Number.parseFloat(pair[1]!.replace(/[<>]/g, '').replace(',', '.'));
+        const max = Number.parseFloat(pair[2]!.replace(/[<>]/g, '').replace(',', '.'));
         return {
-            lower: Number.isFinite(lower) ? lower : undefined,
-            upper: Number.isFinite(upper) ? upper : undefined,
+            min: Number.isFinite(min) ? min : undefined,
+            max: Number.isFinite(max) ? max : undefined,
         };
     }
-    if (/[<>]\s*\d/.test(trimmed)) {
-        return {
-            text: trimmed,
-        };
+
+    const comparator = trimmed.match(/([<>]=?)\s*(-?\d+(?:[.,]\d+)?)/);
+    if (!comparator) {
+        return undefined;
     }
-    return undefined;
+
+    const bound = Number.parseFloat(comparator[2]!.replace(',', '.'));
+    if (!Number.isFinite(bound)) {
+        return undefined;
+    }
+
+    if (comparator[1]!.includes('<')) {
+        return { max: bound };
+    }
+
+    return { min: bound };
 }
 
 function parseMeasurementFromTableLine(line: string): BloodworkMeasurement | null {
@@ -1608,7 +1612,10 @@ function buildMeasurementExtractionPrompt({
         'Do not include demographics, addresses, contact details, page headers/footers, IDs, notes, interpretations, guideline paragraphs, or section labels.',
         'Use concise standardized English names in `name`.',
         'If source text is non-English, preserve the raw source label in `originalName` and translate `name` to English.',
-        'Keep values, units, and reference ranges accurate to source.',
+        'Use `referenceRange` only as `{ "min"?: number, "max"?: number }`.',
+        'For comparator ranges, map `<N` to `{ "max": N }` and `>N` to `{ "min": N }`.',
+        'If there is a measurement-specific comment, put it in optional `note`.',
+        'Keep values, units, and numeric range bounds accurate to source.',
         'If no analytes are present on this page, return an empty measurements array.',
         '',
         'Page text (layout-preserved):',
@@ -1633,7 +1640,9 @@ function buildMeasurementNormalizationPrompt({
         'Remove any candidate that is administrative text, page metadata, patient identity, addresses, phone/email, comments, interpretations, guideline citations, or narrative explanations.',
         'Drop fragmentary/incomplete labels (for example words cut from sentence fragments) unless you can confidently normalize them into a standard analyte.',
         'The final `name` must be in English. Keep `originalName` as source-language label when translation occurs.',
-        'Preserve numeric/string values, units, ranges, and flags exactly unless clearly malformed.',
+        'Use `referenceRange` only as `{ "min"?: number, "max"?: number }`; never emit `lower`, `upper`, or `text`.',
+        'For comparator ranges, map `<N` to `{ "max": N }` and `>N` to `{ "min": N }`.',
+        'Preserve numeric/string values, units, range bounds, flags, and optional `note` exactly unless clearly malformed.',
         'Return deduplicated measurements only.',
         '',
         'Extracted report text (for context):',
@@ -1646,11 +1655,14 @@ function buildMeasurementNormalizationPrompt({
 
 function buildGlossaryValidationPrompt({
     sourcePath,
-    existingCanonicalNames,
+    existingGlossaryEntries,
     unknownMeasurements,
 }: {
     sourcePath: string;
-    existingCanonicalNames: string[];
+    existingGlossaryEntries: Array<{
+        canonicalName: string;
+        aliases: string[];
+    }>;
     unknownMeasurements: Array<{ index: number; measurement: BloodworkMeasurement }>;
 }): string {
     const candidates = unknownMeasurements.map(item => ({
@@ -1660,7 +1672,7 @@ function buildGlossaryValidationPrompt({
         value: item.measurement.value,
         unit: item.measurement.unit,
         referenceRange: item.measurement.referenceRange,
-        notes: item.measurement.notes,
+        note: item.measurement.note ?? item.measurement.notes,
     }));
 
     return [
@@ -1677,8 +1689,8 @@ function buildGlossaryValidationPrompt({
         'For new_valid, set canonicalName in English and include optional English aliases.',
         'Never return non-English canonical names or aliases.',
         '',
-        'Existing canonical names:',
-        JSON.stringify(existingCanonicalNames, null, 2),
+        'Existing glossary entries (canonical names with aliases):',
+        JSON.stringify(existingGlossaryEntries, null, 2),
         '',
         'Candidates:',
         JSON.stringify(candidates, null, 2),
@@ -1702,10 +1714,15 @@ async function validateUnknownMeasurementsWithGlossaryModel({
         return new Map();
     }
 
-    const existingCanonicalNames = glossary.entries.map(entry => entry.canonicalName);
+    const existingGlossaryEntries = glossary.entries
+        .map(entry => ({
+            canonicalName: entry.canonicalName,
+            aliases: entry.aliases,
+        }))
+        .sort((left, right) => left.canonicalName.localeCompare(right.canonicalName));
     const prompt = buildGlossaryValidationPrompt({
         sourcePath,
-        existingCanonicalNames,
+        existingGlossaryEntries,
         unknownMeasurements,
     });
 
@@ -1718,6 +1735,7 @@ async function validateUnknownMeasurementsWithGlossaryModel({
             prompt,
             maxOutputTokens: GLOSSARY_VALIDATION_MAX_OUTPUT_TOKENS,
             contextLabel: `${sourcePath} (glossary validation)`,
+            textFallbackArrayKey: 'decisions',
         });
         result = response.object;
     } catch (error) {
@@ -1813,11 +1831,22 @@ function applyGlossaryDecision({
     decision: z.infer<typeof glossaryValidationDecisionSchema>;
     acceptedMeasurements: BloodworkMeasurement[];
 }): void {
-    if (decision.action === 'invalid') {
+    const normalizedAction = normalizeTextForMatch(decision.action).replace(/[^a-z0-9]+/g, '');
+    const action =
+        normalizedAction === 'alias' || normalizedAction === 'existingalias'
+            ? 'alias'
+            : normalizedAction === 'newvalid' ||
+                normalizedAction === 'new' ||
+                normalizedAction === 'newentry' ||
+                normalizedAction === 'validnew'
+                ? 'new_valid'
+                : 'invalid';
+
+    if (action === 'invalid') {
         return;
     }
 
-    if (decision.action === 'alias') {
+    if (action === 'alias') {
         const targetCanonicalName = decision.targetCanonicalName?.trim();
         if (!targetCanonicalName || !isEnglishGlossaryName(targetCanonicalName)) {
             return;
@@ -1977,16 +2006,6 @@ async function applyGlossaryValidationToMeasurements({
             for (const item of unknownChunk) {
                 let decision = decisions.get(item.index);
                 if (!decision) {
-                    const retryDecisionMap = await validateUnknownMeasurementsWithGlossaryModel({
-                        provider,
-                        modelIds: validatorModelIds,
-                        sourcePath,
-                        glossary,
-                        unknownMeasurements: [item],
-                    });
-                    decision = retryDecisionMap.get(item.index);
-                }
-                if (!decision) {
                     const fallback = createFallbackGlossaryDecision(item.measurement);
                     if (fallback) {
                         decision = {
@@ -2024,9 +2043,8 @@ function buildMeasurementKey(measurement: BloodworkMeasurement): string {
                 : rawValue.trim().toLowerCase();
     const rangePart = measurement.referenceRange
         ? [
-            measurement.referenceRange.lower?.toString() ?? '',
-            measurement.referenceRange.upper?.toString() ?? '',
-            measurement.referenceRange.text?.trim().toLowerCase() ?? '',
+            measurement.referenceRange.min?.toString() ?? '',
+            measurement.referenceRange.max?.toString() ?? '',
         ].join('|')
         : '';
 
@@ -2097,8 +2115,8 @@ function heuristicExtractMeasurements(pageTexts: string[]): BloodworkMeasurement
             const standardizedName = titleCase(rawName);
             const value = Number.parseFloat(match[2].replace(',', '.'));
             const unit = match[3]?.trim();
-            const lower = match[4] ? Number.parseFloat(match[4].replace(',', '.')) : undefined;
-            const upper = match[5] ? Number.parseFloat(match[5].replace(',', '.')) : undefined;
+            const min = match[4] ? Number.parseFloat(match[4].replace(',', '.')) : undefined;
+            const max = match[5] ? Number.parseFloat(match[5].replace(',', '.')) : undefined;
 
             const measurement: BloodworkMeasurement = {
                 name: standardizedName,
@@ -2106,10 +2124,10 @@ function heuristicExtractMeasurements(pageTexts: string[]): BloodworkMeasurement
                 value: Number.isFinite(value) ? value : match[2],
                 unit: unit || undefined,
                 referenceRange:
-                    lower !== undefined || upper !== undefined
+                    min !== undefined || max !== undefined
                         ? {
-                            lower: Number.isFinite(lower) ? lower : undefined,
-                            upper: Number.isFinite(upper) ? upper : undefined,
+                            min: Number.isFinite(min) ? min : undefined,
+                            max: Number.isFinite(max) ? max : undefined,
                         }
                         : undefined,
             };
@@ -2289,6 +2307,31 @@ function parseJsonFromText(text: string): unknown {
     throw new Error(`Could not parse JSON from model output: ${trimmed.slice(0, 300)}`);
 }
 
+async function withModelRequestTimeout<T>(
+    execute: (abortSignal: AbortSignal) => Promise<T>,
+): Promise<T> {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+            controller.abort();
+            reject(new Error(`Model request timed out after ${MODEL_REQUEST_TIMEOUT_MS}ms`));
+        }, MODEL_REQUEST_TIMEOUT_MS);
+    });
+
+    try {
+        return await Promise.race([
+            execute(controller.signal),
+            timeoutPromise,
+        ]);
+    } finally {
+        if (timer) {
+            clearTimeout(timer);
+        }
+    }
+}
+
 async function generateObjectWithModelFallback<Schema extends z.ZodTypeAny>({
     provider,
     modelIds,
@@ -2296,6 +2339,7 @@ async function generateObjectWithModelFallback<Schema extends z.ZodTypeAny>({
     prompt,
     maxOutputTokens,
     contextLabel,
+    textFallbackArrayKey,
 }: {
     provider: ReturnType<typeof createOpenRouter>;
     modelIds: string[];
@@ -2303,12 +2347,17 @@ async function generateObjectWithModelFallback<Schema extends z.ZodTypeAny>({
     prompt: string;
     maxOutputTokens: number;
     contextLabel: string;
+    textFallbackArrayKey?: string;
 }): Promise<{ object: z.infer<Schema>; modelId: string }> {
     let lastError: unknown = null;
+    const debug = process.env.VITALS_IMPORT_DEBUG === 'true';
 
     for (const modelId of modelIds) {
         try {
-            const result = await generateObject({
+            if (debug) {
+                console.info(`[debug] start object call: ${contextLabel} (${modelId})`);
+            }
+            const result = await withModelRequestTimeout(abortSignal => generateObject({
                 model: provider(modelId, {
                     plugins: [{ id: 'response-healing' }],
                 }),
@@ -2318,15 +2367,29 @@ async function generateObjectWithModelFallback<Schema extends z.ZodTypeAny>({
                 maxRetries: 2,
                 maxOutputTokens,
                 system: 'You are a precise medical lab data extraction engine.',
-            });
+                abortSignal,
+            }));
+            if (debug) {
+                console.info(`[debug] success object call: ${contextLabel} (${modelId})`);
+            }
 
             return {
                 object: result.object as z.infer<Schema>,
                 modelId,
             };
         } catch (error) {
+            if (debug) {
+                console.error(`[debug] failed object call: ${contextLabel} (${modelId})`, error);
+            }
+            if (String(error).includes('timed out')) {
+                lastError = error;
+                continue;
+            }
             try {
-                const textResult = await generateText({
+                if (debug) {
+                    console.info(`[debug] start text fallback: ${contextLabel} (${modelId})`);
+                }
+                const textResult = await withModelRequestTimeout(abortSignal => generateText({
                     model: provider(modelId),
                     prompt: [
                         prompt,
@@ -2338,13 +2401,27 @@ async function generateObjectWithModelFallback<Schema extends z.ZodTypeAny>({
                     maxRetries: 1,
                     maxOutputTokens,
                     system: 'You are a precise medical lab data extraction engine.',
-                });
-                const parsed = schema.parse(parseJsonFromText(textResult.text)) as z.infer<Schema>;
+                    abortSignal,
+                }));
+                if (debug) {
+                    console.info(`[debug] success text fallback: ${contextLabel} (${modelId})`);
+                }
+                const parsedJson = parseJsonFromText(textResult.text);
+                const normalizedParsedJson =
+                    Array.isArray(parsedJson) && textFallbackArrayKey
+                        ? {
+                            [textFallbackArrayKey]: parsedJson,
+                        }
+                        : parsedJson;
+                const parsed = schema.parse(normalizedParsedJson) as z.infer<Schema>;
                 return {
                     object: parsed,
                     modelId,
                 };
             } catch (textFallbackError) {
+                if (debug) {
+                    console.error(`[debug] failed text fallback: ${contextLabel} (${modelId})`, textFallbackError);
+                }
                 lastError = `${String(error)} | Text fallback failed: ${String(textFallbackError)}`;
             }
         }
@@ -2395,6 +2472,7 @@ async function extractMeasurementsFromPages({
                 prompt,
                 maxOutputTokens: MODEL_MAX_OUTPUT_TOKENS,
                 contextLabel: `${sourcePath} (measurements page ${pageIndex + 1})`,
+                textFallbackArrayKey: 'measurements',
             });
             extractedMeasurements.push(...result.object.measurements);
         } catch {
@@ -2437,6 +2515,7 @@ async function normalizeMeasurementsWithModel({
             prompt,
             maxOutputTokens: NORMALIZATION_MAX_OUTPUT_TOKENS,
             contextLabel: `${sourcePath} (normalization)`,
+            textFallbackArrayKey: 'measurements',
         });
         return filterLikelyMeasurements(result.object.measurements);
     } catch {
@@ -2534,7 +2613,7 @@ async function generateLabObject({
     if (measurements.length === 0) {
         measurements = [{
             name: 'Unparsed Result',
-            notes: 'Automatic extraction returned no structured measurements for this report.',
+            note: 'Automatic extraction returned no structured measurements for this report.',
         }];
     }
 

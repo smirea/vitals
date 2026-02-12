@@ -74,15 +74,59 @@ export const bloodworkMeasurementFlagSchema = z.enum([
     'unknown',
 ]);
 
+function parseBoundedReferenceText(text: string): { min?: number; max?: number } {
+    const trimmed = text.trim();
+    if (!trimmed) {
+        return {};
+    }
+
+    const pair = trimmed.match(/([<>]?\d+(?:[.,]\d+)?)\s*-\s*([<>]?\d+(?:[.,]\d+)?)/);
+    if (pair) {
+        const min = Number.parseFloat(pair[1]!.replace(/[<>]/g, '').replace(',', '.'));
+        const max = Number.parseFloat(pair[2]!.replace(/[<>]/g, '').replace(',', '.'));
+        return {
+            min: Number.isFinite(min) ? min : undefined,
+            max: Number.isFinite(max) ? max : undefined,
+        };
+    }
+
+    const comparator = trimmed.match(/([<>]=?)\s*(-?\d+(?:[.,]\d+)?)/);
+    if (comparator) {
+        const value = Number.parseFloat(comparator[2]!.replace(',', '.'));
+        if (!Number.isFinite(value)) {
+            return {};
+        }
+        if (comparator[1]!.includes('<')) {
+            return { max: value };
+        }
+        return { min: value };
+    }
+
+    return {};
+}
+
 export const bloodworkReferenceRangeSchema = z
     .object({
+        min: z.number().finite().optional(),
+        max: z.number().finite().optional(),
         lower: z.number().finite().optional(),
         upper: z.number().finite().optional(),
         text: z.string().trim().min(1).optional(),
     })
+    .transform(value => {
+        const min = value.min ?? value.lower;
+        const max = value.max ?? value.upper;
+        if (min !== undefined || max !== undefined) {
+            return { min, max };
+        }
+        if (!value.text) {
+            return {};
+        }
+        return parseBoundedReferenceText(value.text);
+    })
     .refine(
-        value => value.lower !== undefined || value.upper !== undefined || value.text !== undefined,
-        { message: 'referenceRange must contain at least one field' },
+        value => value.min !== undefined || value.max !== undefined,
+        { message: 'referenceRange must contain at least one bound' },
     );
 
 export const bloodworkMeasurementSchema = z.object({
@@ -93,6 +137,7 @@ export const bloodworkMeasurementSchema = z.object({
     unit: z.string().trim().min(1).optional(),
     referenceRange: bloodworkReferenceRangeSchema.optional(),
     flag: bloodworkMeasurementFlagSchema.optional(),
+    note: z.string().trim().min(1).optional(),
     notes: z.string().trim().min(1).optional(),
 });
 

@@ -12,12 +12,11 @@ type BloodworkMeasurement = {
     value?: number | string;
     unit?: string;
     referenceRange?: {
-        lower?: number;
-        upper?: number;
-        text?: string;
+        min?: number;
+        max?: number;
     };
     flag?: 'low' | 'high' | 'normal' | 'abnormal' | 'critical' | 'unknown';
-    notes?: string;
+    note?: string;
 };
 
 type BloodworkLab = {
@@ -46,7 +45,7 @@ type MeasurementCell = {
     numericValue: number | null;
     unit?: string;
     flag?: BloodworkMeasurement['flag'];
-    notes?: string;
+    note?: string;
 };
 
 type MeasurementRow = {
@@ -83,7 +82,7 @@ function formatCell(measurement: BloodworkMeasurement): MeasurementCell {
         numericValue: parseNumericValue(measurement.value),
         unit: unitText || undefined,
         flag: measurement.flag,
-        notes: measurement.notes?.trim() || undefined,
+        note: measurement.note?.trim() || undefined,
     };
 }
 

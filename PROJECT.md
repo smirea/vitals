@@ -10,6 +10,7 @@ Pick the next most important feature to work on, implement it fully and test it 
     - [x] use createScript.ts framework
     - [x] `scripts/bloodwork-import.ts` accepts a pdf as input, uses AI (gemini 3 flash via ai sdk + openrouter) to convert it to a standardized json template that includes date, location, lab name, import location (optional, flag), weight and the table of all standardized measurements. for each measurement capture value, ranges, flags, notes etc. store all the parsed data as `data/bloodwork_{date}_{lab}.json` pretty json 4 spaces
     - [x] account for the bloodwork being in different languages and vastly different formats output must be standardized and in engligh
+    - [ ] when processing the data, also standardize the units, I want all the values to be the same for the same measurements. if a unit needs conversion, store an "original" value on it for reference.
     - [x] all data must also be uploaded to s3 in `stefan-life/vitals/bloodwork_{date}_{lab}.json` bucket location
     - [x] all my existing labs are in `data/to-import`, use them for testing and to get a sense of various potential formats. create a standard `BloodworkLab` zod type and use that as the basis for the various tools and enforce the json be in that shape. a lot of the properties will have to be optional most likely
     - [x] once everything is working and tested, import all data from `data/to-import`
@@ -23,6 +24,7 @@ Pick the next most important feature to work on, implement it fully and test it 
     - [x] show a table of every single datapoint (names as rows, source as a column, from latest to oldest). allow filter
     - [x] allow selecting rows and columns (default to all columns) to see data on a chart, I want to see how the various vitals have trended over time. chart should show to the right of the table always visible if there are items selected
     - [x] in mobile portrait mode, only show the latest value and allow to switch the column to go to a different lab. checking items should show a chart under the table (chart always visible if values are selected so table takes up less space)
+    - [ ] on desktop UI should take over the entire space and show all nutrients at once
 - [x] use the aws cli to create a purpose built user for this project with dedicated permissions and store the credentials in .env.local
 - [x] create env with env-manager and create specific keys for everything requested (you can use env-manager to generate an openrouter key)
 - [x] bloodwork glossary enforcement: track canonical measurement names, aliases, and ranges with LLM-validated updates
