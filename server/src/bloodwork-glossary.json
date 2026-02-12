@@ -1,0 +1,2581 @@
+{
+    "version": 1,
+    "updatedAt": "2026-02-12T20:04:53.369Z",
+    "entries": [
+        {
+            "canonicalName": "(tibc)",
+            "aliases": [
+                "(tibc)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 111,
+                    "upper": 343
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:51.250Z",
+            "updatedAt": "2026-02-12T20:04:38.196Z"
+        },
+        {
+            "canonicalName": "Afternoon Cortisol",
+            "aliases": [
+                "Afternoon Cortisol"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 8,
+                    "upper": 25
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:59.912Z",
+            "updatedAt": "2026-02-12T20:04:42.825Z"
+        },
+        {
+            "canonicalName": "Albumin",
+            "aliases": [
+                "Albumin"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 3.5,
+                    "upper": 5.5,
+                    "unit": "g/dL"
+                },
+                {
+                    "lower": 4.1,
+                    "upper": 5.2,
+                    "unit": "g/dL"
+                },
+                {
+                    "lower": 3.6,
+                    "upper": 5.1
+                },
+                {
+                    "lower": 4,
+                    "upper": 5,
+                    "unit": "g/dL"
+                }
+            ],
+            "unitHints": [
+                "g/dL"
+            ],
+            "createdAt": "2026-02-12T20:02:40.568Z",
+            "updatedAt": "2026-02-12T20:04:39.403Z"
+        },
+        {
+            "canonicalName": "Albumin i. S. (SE)",
+            "aliases": [
+                "Albumin i. S. (SE)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 35,
+                    "upper": 52,
+                    "unit": "g/l"
+                }
+            ],
+            "unitHints": [
+                "g/l"
+            ],
+            "createdAt": "2026-02-12T20:03:09.308Z",
+            "updatedAt": "2026-02-12T20:04:50.936Z"
+        },
+        {
+            "canonicalName": "Albumin-korrigiertes Calcium (SE)",
+            "aliases": [
+                "Albumin-korrigiertes Calcium (SE)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 2.15,
+                    "upper": 2.65,
+                    "unit": "mmol/l"
+                }
+            ],
+            "unitHints": [
+                "mmol/l"
+            ],
+            "createdAt": "2026-02-12T20:03:07.939Z",
+            "updatedAt": "2026-02-12T20:04:50.934Z"
+        },
+        {
+            "canonicalName": "ALBUMIN/GLOBULIN RATIO",
+            "aliases": [
+                "ALBUMIN/GLOBULIN RATIO"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 1,
+                    "upper": 2.5
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:46.670Z",
+            "updatedAt": "2026-02-12T20:04:36.603Z"
+        },
+        {
+            "canonicalName": "Alkaline Phosphatase PHOSPHATASE",
+            "aliases": [
+                "ALKALINE PHOSPHATASE",
+                "Alkaline Phosphatase PHOSPHATASE"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 36,
+                    "upper": 130
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:46.809Z",
+            "updatedAt": "2026-02-12T20:04:36.603Z"
+        },
+        {
+            "canonicalName": "Alpha-Pregnanediol",
+            "aliases": [
+                "Alpha-Pregnanediol"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 23,
+                    "upper": 78
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:56.143Z",
+            "updatedAt": "2026-02-12T20:04:42.823Z"
+        },
+        {
+            "canonicalName": "Alpha-Pregnanediol (w/ Oral Pg)",
+            "aliases": [
+                "Alpha-Pregnanediol (w/ Oral Pg)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 37,
+                    "upper": 274
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:57.419Z",
+            "updatedAt": "2026-02-12T20:04:42.823Z"
+        },
+        {
+            "canonicalName": "Alpha-Pregnanediol / Beta-Pregnanediol Ratio",
+            "aliases": [
+                "Alpha-Pregnanediol / Beta-Pregnanediol Ratio"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0.5,
+                    "upper": 1.5,
+                    "unit": "Ratio"
+                }
+            ],
+            "unitHints": [
+                "Ratio"
+            ],
+            "createdAt": "2026-02-12T20:02:58.721Z",
+            "updatedAt": "2026-02-12T20:04:42.823Z"
+        },
+        {
+            "canonicalName": "ALT",
+            "aliases": [
+                "ALT"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 9,
+                    "upper": 46
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:46.970Z",
+            "updatedAt": "2026-02-12T20:04:36.603Z"
+        },
+        {
+            "canonicalName": "ALT (SGPT)",
+            "aliases": [
+                "ALT (SGPT)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0,
+                    "upper": 44,
+                    "unit": "IU/L"
+                }
+            ],
+            "unitHints": [
+                "IU/L"
+            ],
+            "createdAt": "2026-02-12T20:02:40.981Z",
+            "updatedAt": "2026-02-12T20:04:39.404Z"
+        },
+        {
+            "canonicalName": "ALT (SGPT) P5P",
+            "aliases": [
+                "ALT (SGPT) P5P"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0,
+                    "upper": 55,
+                    "unit": "IU/L"
+                }
+            ],
+            "unitHints": [
+                "IU/L"
+            ],
+            "createdAt": "2026-02-12T20:02:49.648Z",
+            "updatedAt": "2026-02-12T20:04:38.192Z"
+        },
+        {
+            "canonicalName": "Amylase (SI) (SE)",
+            "aliases": [
+                "Amylase (SI) (SE)"
+            ],
+            "knownRanges": [
+                {
+                    "text": "<1.67",
+                    "unit": "µkat/l"
+                }
+            ],
+            "unitHints": [
+                "µkat/l"
+            ],
+            "createdAt": "2026-02-12T20:03:08.797Z",
+            "updatedAt": "2026-02-12T20:04:50.935Z"
+        },
+        {
+            "canonicalName": "Androgen Markers Testosterone",
+            "aliases": [
+                "Androgen Markers Testosterone"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 10.7,
+                    "upper": 50.26
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:59.220Z",
+            "updatedAt": "2026-02-12T20:04:42.824Z"
+        },
+        {
+            "canonicalName": "Androsterone",
+            "aliases": [
+                "Androsterone"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 240,
+                    "upper": 575
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:58.235Z",
+            "updatedAt": "2026-02-12T20:04:42.824Z"
+        },
+        {
+            "canonicalName": "Apolipoprotein A-1",
+            "aliases": [
+                "Apolipoprotein A-1"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 101,
+                    "upper": 178,
+                    "unit": "mg/dL"
+                }
+            ],
+            "unitHints": [
+                "mg/dL"
+            ],
+            "createdAt": "2026-02-12T20:02:49.588Z",
+            "updatedAt": "2026-02-12T20:04:38.192Z"
+        },
+        {
+            "canonicalName": "APOLIPOPROTEIN A1",
+            "aliases": [
+                "APOLIPOPROTEIN A1"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 94,
+                    "upper": 176
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:47.225Z",
+            "updatedAt": "2026-02-12T20:04:36.604Z"
+        },
+        {
+            "canonicalName": "Apolipoprotein B (SE)",
+            "aliases": [
+                "Apolipoprotein B (SE)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0.66,
+                    "upper": 1.33,
+                    "unit": "g/l"
+                }
+            ],
+            "unitHints": [
+                "g/l"
+            ],
+            "createdAt": "2026-02-12T20:03:11.594Z",
+            "updatedAt": "2026-02-12T20:04:50.937Z"
+        },
+        {
+            "canonicalName": "AST",
+            "aliases": [
+                "AST"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 10,
+                    "upper": 40
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:46.894Z",
+            "updatedAt": "2026-02-12T20:04:36.603Z"
+        },
+        {
+            "canonicalName": "AST (SGOT)",
+            "aliases": [
+                "AST (SGOT)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0,
+                    "upper": 40,
+                    "unit": "IU/L"
+                }
+            ],
+            "unitHints": [
+                "IU/L"
+            ],
+            "createdAt": "2026-02-12T20:02:40.907Z",
+            "updatedAt": "2026-02-12T20:04:38.193Z"
+        },
+        {
+            "canonicalName": "AST (SGOT) P5P",
+            "aliases": [
+                "AST (SGOT) P5P"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0,
+                    "upper": 40,
+                    "unit": "IU/L"
+                }
+            ],
+            "unitHints": [
+                "IU/L"
+            ],
+            "createdAt": "2026-02-12T20:02:49.784Z",
+            "updatedAt": "2026-02-12T20:04:38.192Z"
+        },
+        {
+            "canonicalName": "Average DHEA-S",
+            "aliases": [
+                "Average DHEA-S"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 38,
+                    "upper": 507
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:56.942Z",
+            "updatedAt": "2026-02-12T20:04:42.823Z"
+        },
+        {
+            "canonicalName": "Baso",
+            "aliases": [
+                "Baso"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0,
+                    "upper": 0.2,
+                    "unit": "x10E3/uL"
+                }
+            ],
+            "unitHints": [
+                "x10E3/uL"
+            ],
+            "createdAt": "2026-02-12T20:02:40.112Z",
+            "updatedAt": "2026-02-12T20:04:32.370Z"
+        },
+        {
+            "canonicalName": "Baso (Absolute)",
+            "aliases": [
+                "Baso (Absolute)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0,
+                    "upper": 0.2,
+                    "unit": "x10E3/uL"
+                }
+            ],
+            "unitHints": [
+                "x10E3/uL"
+            ],
+            "createdAt": "2026-02-12T20:02:45.132Z",
+            "updatedAt": "2026-02-12T20:04:35.600Z"
+        },
+        {
+            "canonicalName": "Bedtime Cortisol",
+            "aliases": [
+                "Bedtime Cortisol"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 1,
+                    "upper": 10
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:03:00.064Z",
+            "updatedAt": "2026-02-12T20:04:42.825Z"
+        },
+        {
+            "canonicalName": "Beta-Pregnanediol",
+            "aliases": [
+                "Beta-Pregnanediol"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 97,
+                    "upper": 279
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:56.280Z",
+            "updatedAt": "2026-02-12T20:04:42.823Z"
+        },
+        {
+            "canonicalName": "Beta-Pregnanediol (w/ Oral Pg)",
+            "aliases": [
+                "Beta-Pregnanediol (w/ Oral Pg)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 131,
+                    "upper": 1892
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:56.344Z",
+            "updatedAt": "2026-02-12T20:04:42.823Z"
+        },
+        {
+            "canonicalName": "Bilirubin, Direct",
+            "aliases": [
+                "Bilirubin, Direct"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0,
+                    "upper": 0.4,
+                    "unit": "mg/dL"
+                }
+            ],
+            "unitHints": [
+                "mg/dL"
+            ],
+            "createdAt": "2026-02-12T20:02:44.306Z",
+            "updatedAt": "2026-02-12T20:04:38.193Z"
+        },
+        {
+            "canonicalName": "Bilirubin, gesamt (SE)",
+            "aliases": [
+                "Bilirubin, gesamt (SE)"
+            ],
+            "knownRanges": [
+                {
+                    "text": "<23.9",
+                    "unit": "µmol/l"
+                }
+            ],
+            "unitHints": [
+                "µmol/l"
+            ],
+            "createdAt": "2026-02-12T20:03:08.661Z",
+            "updatedAt": "2026-02-12T20:04:50.935Z"
+        },
+        {
+            "canonicalName": "BILIRUBIN, INDIRECT",
+            "aliases": [
+                "BILIRUBIN, INDIRECT"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0.2,
+                    "upper": 1.2
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:46.737Z",
+            "updatedAt": "2026-02-12T20:04:36.603Z"
+        },
+        {
+            "canonicalName": "Bilirubin, Total",
+            "aliases": [
+                "Bilirubin, Total"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0,
+                    "upper": 1.2,
+                    "unit": "mg/dL"
+                },
+                {
+                    "lower": 0.2,
+                    "upper": 1.2
+                }
+            ],
+            "unitHints": [
+                "mg/dL"
+            ],
+            "createdAt": "2026-02-12T20:02:40.769Z",
+            "updatedAt": "2026-02-12T20:04:38.192Z"
+        },
+        {
+            "canonicalName": "BUN",
+            "aliases": [
+                "BUN"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 6,
+                    "upper": 20,
+                    "unit": "mg/dL"
+                }
+            ],
+            "unitHints": [
+                "mg/dL"
+            ],
+            "createdAt": "2026-02-12T20:02:40.177Z",
+            "updatedAt": "2026-02-12T20:04:38.192Z"
+        },
+        {
+            "canonicalName": "BUN/Creatinine",
+            "aliases": [
+                "BUN/Creatinine"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 9,
+                    "upper": 20
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:42.728Z",
+            "updatedAt": "2026-02-12T20:04:38.192Z"
+        },
+        {
+            "canonicalName": "BUN/Creatinine Ratio",
+            "aliases": [
+                "BUN/Creatinine Ratio"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 9,
+                    "upper": 20
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:52.747Z",
+            "updatedAt": "2026-02-12T20:04:39.402Z"
+        },
+        {
+            "canonicalName": "C-Reactive Protein, 2",
+            "aliases": [
+                "C-Reactive Protein, 2"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0,
+                    "upper": 10,
+                    "unit": "mg/L"
+                }
+            ],
+            "unitHints": [
+                "mg/L"
+            ],
+            "createdAt": "2026-02-12T20:02:50.669Z",
+            "updatedAt": "2026-02-12T20:04:38.195Z"
+        },
+        {
+            "canonicalName": "C-reaktives Protein (ultrasensitiv) (SE)",
+            "aliases": [
+                "C-reaktives Protein (ultrasensitiv) (SE)"
+            ],
+            "knownRanges": [],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:03:09.869Z",
+            "updatedAt": "2026-02-12T20:04:50.936Z"
+        },
+        {
+            "canonicalName": "Cbc(h/h,rbc,ind,wbc,plt)",
+            "aliases": [
+                "Cbc(h/h,rbc,ind,wbc,plt)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 3.8,
+                    "upper": 10.8
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:38.844Z",
+            "updatedAt": "2026-02-12T20:04:31.319Z"
+        },
+        {
+            "canonicalName": "Cholesterol",
+            "aliases": [
+                "CHOLESTER",
+                "Cholesterol"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 100,
+                    "upper": 199,
+                    "unit": "mg/dL"
+                }
+            ],
+            "unitHints": [
+                "mg/dL"
+            ],
+            "createdAt": "2026-02-12T20:02:35.802Z",
+            "updatedAt": "2026-02-12T20:04:38.192Z"
+        },
+        {
+            "canonicalName": "Cholesterol, Total",
+            "aliases": [
+                "Cholesterol, Total"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 100,
+                    "upper": 199,
+                    "unit": "mg/dL"
+                }
+            ],
+            "unitHints": [
+                "mg/dL"
+            ],
+            "createdAt": "2026-02-12T20:02:44.364Z",
+            "updatedAt": "2026-02-12T20:04:35.206Z"
+        },
+        {
+            "canonicalName": "Cortisol - AM",
+            "aliases": [
+                "Cortisol - AM"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 6.2,
+                    "upper": 19.4
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:50.921Z",
+            "updatedAt": "2026-02-12T20:04:38.195Z"
+        },
+        {
+            "canonicalName": "CORTISOL Estriol",
+            "aliases": [
+                "CORTISOL Estriol"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 1.8,
+                    "upper": 3.8
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:56.705Z",
+            "updatedAt": "2026-02-12T20:04:42.822Z"
+        },
+        {
+            "canonicalName": "Cortisol Metabolites",
+            "aliases": [
+                "Cortisol Metabolites"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 1082,
+                    "upper": 1980
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:58.366Z",
+            "updatedAt": "2026-02-12T20:04:42.828Z"
+        },
+        {
+            "canonicalName": "Cortisol, A.m.",
+            "aliases": [
+                "Cortisol, A.m."
+            ],
+            "knownRanges": [],
+            "unitHints": [
+                "mcg/dL"
+            ],
+            "createdAt": "2026-02-12T20:03:05.141Z",
+            "updatedAt": "2026-02-12T20:04:47.528Z"
+        },
+        {
+            "canonicalName": "Cortisol/Cortione 11B-HSD II",
+            "aliases": [
+                "Cortisol/Cortione 11B-HSD II"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0.4,
+                    "upper": 1.2,
+                    "unit": "Ratio"
+                }
+            ],
+            "unitHints": [
+                "Ratio"
+            ],
+            "createdAt": "2026-02-12T20:03:01.398Z",
+            "updatedAt": "2026-02-12T20:04:42.828Z"
+        },
+        {
+            "canonicalName": "CREATININE",
+            "aliases": [
+                "CREATININE"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0.6,
+                    "upper": 1.35,
+                    "unit": "mg/dL"
+                },
+                {
+                    "lower": 0.76,
+                    "upper": 1.27,
+                    "unit": "mg/dL"
+                },
+                {
+                    "lower": 30,
+                    "upper": 300,
+                    "unit": "mg/dL"
+                }
+            ],
+            "unitHints": [
+                "mg/dL"
+            ],
+            "createdAt": "2026-02-12T20:02:35.444Z",
+            "updatedAt": "2026-02-12T20:04:45.292Z"
+        },
+        {
+            "canonicalName": "DHEA Sulfate (SE)",
+            "aliases": [
+                "DHEA Sulfate (SE)",
+                "DHEA-Sulfat (SE)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 160,
+                    "upper": 449,
+                    "unit": "µg/dl"
+                }
+            ],
+            "unitHints": [
+                "µg/dl"
+            ],
+            "createdAt": "2026-02-12T20:03:10.753Z",
+            "updatedAt": "2026-02-12T20:04:50.936Z"
+        },
+        {
+            "canonicalName": "EGFR",
+            "aliases": [
+                "EGFR"
+            ],
+            "knownRanges": [
+                {
+                    "text": ">59"
+                }
+            ],
+            "unitHints": [
+                "mL/min/1.73m2"
+            ],
+            "createdAt": "2026-02-12T20:02:35.705Z",
+            "updatedAt": "2026-02-12T20:04:47.261Z"
+        },
+        {
+            "canonicalName": "eGFR If",
+            "aliases": [
+                "eGFR If"
+            ],
+            "knownRanges": [
+                {
+                    "text": ">59"
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:40.248Z",
+            "updatedAt": "2026-02-12T20:04:32.370Z"
+        },
+        {
+            "canonicalName": "eGFR If Africn",
+            "aliases": [
+                "eGFR If Africn"
+            ],
+            "knownRanges": [
+                {
+                    "text": ">59"
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:40.376Z",
+            "updatedAt": "2026-02-12T20:04:32.370Z"
+        },
+        {
+            "canonicalName": "eGFR If Africn Am",
+            "aliases": [
+                "eGFR If Africn Am"
+            ],
+            "knownRanges": [
+                {
+                    "text": ">59"
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:42.661Z",
+            "updatedAt": "2026-02-12T20:04:34.545Z"
+        },
+        {
+            "canonicalName": "eGFR If NonAfricn",
+            "aliases": [
+                "eGFR If NonAfricn"
+            ],
+            "knownRanges": [
+                {
+                    "text": ">59"
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:42.579Z",
+            "updatedAt": "2026-02-12T20:04:34.545Z"
+        },
+        {
+            "canonicalName": "EGFR NON",
+            "aliases": [
+                "EGFR NON"
+            ],
+            "knownRanges": [],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:35.537Z",
+            "updatedAt": "2026-02-12T20:04:31.318Z"
+        },
+        {
+            "canonicalName": "Eos",
+            "aliases": [
+                "Eos"
+            ],
+            "knownRanges": [],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:39.898Z",
+            "updatedAt": "2026-02-12T20:04:35.599Z"
+        },
+        {
+            "canonicalName": "Eos (Absolute)",
+            "aliases": [
+                "Eos (Absolute)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0,
+                    "upper": 0.4,
+                    "unit": "x10E3/uL"
+                }
+            ],
+            "unitHints": [
+                "x10E3/uL"
+            ],
+            "createdAt": "2026-02-12T20:02:40.045Z",
+            "updatedAt": "2026-02-12T20:04:39.402Z"
+        },
+        {
+            "canonicalName": "Estimated Average Glucose (EB)",
+            "aliases": [
+                "abgeleitete mittlere Glucose (EB)",
+                "Estimated Average Glucose (EB)"
+            ],
+            "knownRanges": [],
+            "unitHints": [
+                "mmol/l"
+            ],
+            "createdAt": "2026-02-12T20:03:07.610Z",
+            "updatedAt": "2026-02-12T20:04:50.933Z"
+        },
+        {
+            "canonicalName": "Estradiol",
+            "aliases": [
+                "Estradiol"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0.5,
+                    "upper": 1.5
+                }
+            ],
+            "unitHints": [
+                "pg/mL"
+            ],
+            "createdAt": "2026-02-12T20:02:56.633Z",
+            "updatedAt": "2026-02-12T20:04:47.527Z"
+        },
+        {
+            "canonicalName": "Estradiol (E2)",
+            "aliases": [
+                "Estradiol (E2)"
+            ],
+            "knownRanges": [],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:57.684Z",
+            "updatedAt": "2026-02-12T20:04:42.823Z"
+        },
+        {
+            "canonicalName": "Estriol",
+            "aliases": [
+                "Estriol"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 1.8,
+                    "upper": 3.8
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:58.795Z",
+            "updatedAt": "2026-02-12T20:04:42.823Z"
+        },
+        {
+            "canonicalName": "Estriol (E3)",
+            "aliases": [
+                "Estriol (E3)"
+            ],
+            "knownRanges": [],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:57.749Z",
+            "updatedAt": "2026-02-12T20:04:42.823Z"
+        },
+        {
+            "canonicalName": "Estrogen and Progesterone Markers Alpha-Pregnanediol",
+            "aliases": [
+                "Estrogen and Progesterone Markers Alpha-Pregnanediol"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 23,
+                    "upper": 78
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:58.503Z",
+            "updatedAt": "2026-02-12T20:04:42.823Z"
+        },
+        {
+            "canonicalName": "Estrone",
+            "aliases": [
+                "Estrone"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 1.4,
+                    "upper": 4.5
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:56.477Z",
+            "updatedAt": "2026-02-12T20:04:42.822Z"
+        },
+        {
+            "canonicalName": "Estrone (E1)",
+            "aliases": [
+                "Estrone (E1)"
+            ],
+            "knownRanges": [],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:57.540Z",
+            "updatedAt": "2026-02-12T20:04:42.823Z"
+        },
+        {
+            "canonicalName": "Etiocholanolone",
+            "aliases": [
+                "Etiocholanolone"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 103,
+                    "upper": 451
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:58.081Z",
+            "updatedAt": "2026-02-12T20:04:42.824Z"
+        },
+        {
+            "canonicalName": "Evening Cortisol",
+            "aliases": [
+                "Evening Cortisol"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 5,
+                    "upper": 16
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:59.994Z",
+            "updatedAt": "2026-02-12T20:04:42.825Z"
+        },
+        {
+            "canonicalName": "Ferritin",
+            "aliases": [
+                "Ferritin"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 30,
+                    "upper": 400,
+                    "unit": "ng/mL"
+                },
+                {
+                    "lower": 38,
+                    "upper": 380
+                }
+            ],
+            "unitHints": [
+                "ng/mL"
+            ],
+            "createdAt": "2026-02-12T20:02:45.833Z",
+            "updatedAt": "2026-02-12T20:04:38.195Z"
+        },
+        {
+            "canonicalName": "Ferritin (SE)",
+            "aliases": [
+                "Ferritin (SE)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 30,
+                    "upper": 400,
+                    "unit": "ng/ml"
+                }
+            ],
+            "unitHints": [
+                "ng/ml"
+            ],
+            "createdAt": "2026-02-12T20:03:09.436Z",
+            "updatedAt": "2026-02-12T20:04:50.936Z"
+        },
+        {
+            "canonicalName": "FIBROSIS SCORE",
+            "aliases": [
+                "FIBROSIS SCORE"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0,
+                    "upper": 0.21
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:47.028Z",
+            "updatedAt": "2026-02-12T20:04:38.191Z"
+        },
+        {
+            "canonicalName": "Fibrosis Scoring",
+            "aliases": [
+                "Fibrosis Scoring"
+            ],
+            "knownRanges": [],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:49.939Z",
+            "updatedAt": "2026-02-12T20:04:38.192Z"
+        },
+        {
+            "canonicalName": "Fibrosis Stage",
+            "aliases": [
+                "Fibrosis Stage"
+            ],
+            "knownRanges": [],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:49.109Z",
+            "updatedAt": "2026-02-12T20:04:38.191Z"
+        },
+        {
+            "canonicalName": "Fibrosis Stage F0",
+            "aliases": [
+                "Fibrosis Stage F0"
+            ],
+            "knownRanges": [],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:48.050Z",
+            "updatedAt": "2026-02-12T20:04:36.607Z"
+        },
+        {
+            "canonicalName": "Folate (Folic Acid)",
+            "aliases": [
+                "Folate (Folic Acid)"
+            ],
+            "knownRanges": [
+                {
+                    "text": ">3.0",
+                    "unit": "ng/mL"
+                }
+            ],
+            "unitHints": [
+                "ng/mL"
+            ],
+            "createdAt": "2026-02-12T20:02:50.543Z",
+            "updatedAt": "2026-02-12T20:04:38.195Z"
+        },
+        {
+            "canonicalName": "Folate (restandardisiert) Gen.3 (SE)",
+            "aliases": [
+                "Folate (restandardisiert) Gen.3 (SE)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 3.89,
+                    "upper": 26.8,
+                    "unit": "ng/ml"
+                }
+            ],
+            "unitHints": [
+                "ng/ml"
+            ],
+            "createdAt": "2026-02-12T20:03:11.318Z",
+            "updatedAt": "2026-02-12T20:04:50.937Z"
+        },
+        {
+            "canonicalName": "Follicle Stimulating Hormone (FSH) (SE)",
+            "aliases": [
+                "Follicle Stimulating Hormone (FSH) (SE)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 1,
+                    "upper": 15,
+                    "unit": "IU/l"
+                }
+            ],
+            "unitHints": [
+                "IU/l"
+            ],
+            "createdAt": "2026-02-12T20:03:10.359Z",
+            "updatedAt": "2026-02-12T20:04:50.936Z"
+        },
+        {
+            "canonicalName": "Free DHEA",
+            "aliases": [
+                "Free DHEA"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 9.6,
+                    "upper": 30.2
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:57.013Z",
+            "updatedAt": "2026-02-12T20:04:42.823Z"
+        },
+        {
+            "canonicalName": "Free DHEA(2%)",
+            "aliases": [
+                "Free DHEA(2%)"
+            ],
+            "knownRanges": [],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:58.438Z",
+            "updatedAt": "2026-02-12T20:04:42.823Z"
+        },
+        {
+            "canonicalName": "Free Testosterone i. S. (SE)",
+            "aliases": [
+                "Free Testosterone i. S. (SE)",
+                "Freies Testosteron i. S. (SE)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 4.81,
+                    "upper": 22.42,
+                    "unit": "ng/l"
+                }
+            ],
+            "unitHints": [
+                "ng/l"
+            ],
+            "createdAt": "2026-02-12T20:03:10.624Z",
+            "updatedAt": "2026-02-12T20:04:50.936Z"
+        },
+        {
+            "canonicalName": "Free Testosterone Index (SE)",
+            "aliases": [
+                "Free Testosterone Index (SE)",
+                "Freies-Testosteron-Index (SE)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 35,
+                    "upper": 93
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:03:10.561Z",
+            "updatedAt": "2026-02-12T20:04:50.936Z"
+        },
+        {
+            "canonicalName": "Free Testosterone(Direct)",
+            "aliases": [
+                "Free Testosterone(Direct)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 8.7,
+                    "upper": 25.1,
+                    "unit": "pg/mL"
+                }
+            ],
+            "unitHints": [
+                "pg/mL"
+            ],
+            "createdAt": "2026-02-12T20:03:03.747Z",
+            "updatedAt": "2026-02-12T20:04:46.833Z"
+        },
+        {
+            "canonicalName": "FT3 (Freies Trijodthyronin) (SE)",
+            "aliases": [
+                "FT3 (Freies Trijodthyronin) (SE)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 3.07,
+                    "upper": 6.76,
+                    "unit": "pmol/l"
+                }
+            ],
+            "unitHints": [
+                "pmol/l"
+            ],
+            "createdAt": "2026-02-12T20:03:10.064Z",
+            "updatedAt": "2026-02-12T20:04:50.936Z"
+        },
+        {
+            "canonicalName": "FT4 (Freies Thyroxin) Gen.3 (SE)",
+            "aliases": [
+                "FT4 (Freies Thyroxin) Gen.3 (SE)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 11.97,
+                    "upper": 21.88,
+                    "unit": "pmol/l"
+                }
+            ],
+            "unitHints": [
+                "pmol/l"
+            ],
+            "createdAt": "2026-02-12T20:03:10.129Z",
+            "updatedAt": "2026-02-12T20:04:50.936Z"
+        },
+        {
+            "canonicalName": "GGT",
+            "aliases": [
+                "GGT"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 3,
+                    "upper": 90
+                },
+                {
+                    "lower": 0,
+                    "upper": 65,
+                    "unit": "IU/L"
+                }
+            ],
+            "unitHints": [
+                "IU/L"
+            ],
+            "createdAt": "2026-02-12T20:02:47.361Z",
+            "updatedAt": "2026-02-12T20:04:38.192Z"
+        },
+        {
+            "canonicalName": "GLOBULIN",
+            "aliases": [
+                "GLOBULIN"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 1.9,
+                    "upper": 3.7
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:46.538Z",
+            "updatedAt": "2026-02-12T20:04:36.603Z"
+        },
+        {
+            "canonicalName": "Globulin, Total",
+            "aliases": [
+                "Globulin, Total"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 1.5,
+                    "upper": 4.5,
+                    "unit": "g/dL"
+                }
+            ],
+            "unitHints": [
+                "g/dL"
+            ],
+            "createdAt": "2026-02-12T20:02:40.633Z",
+            "updatedAt": "2026-02-12T20:04:39.403Z"
+        },
+        {
+            "canonicalName": "Glucose",
+            "aliases": [
+                "Glucose"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 65,
+                    "upper": 99,
+                    "unit": "mg/dL"
+                },
+                {
+                    "lower": 70,
+                    "upper": 99,
+                    "unit": "mg/dL"
+                }
+            ],
+            "unitHints": [
+                "mg/dL"
+            ],
+            "createdAt": "2026-02-12T20:02:35.276Z",
+            "updatedAt": "2026-02-12T20:04:39.402Z"
+        },
+        {
+            "canonicalName": "Glucose SI (GLEX) (GLEX)",
+            "aliases": [
+                "Glucose SI (GLEX) (GLEX)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 3.3,
+                    "upper": 5.5,
+                    "unit": "mmol/l"
+                }
+            ],
+            "unitHints": [
+                "mmol/l"
+            ],
+            "createdAt": "2026-02-12T20:03:07.405Z",
+            "updatedAt": "2026-02-12T20:04:50.933Z"
+        },
+        {
+            "canonicalName": "Glucose, Serum",
+            "aliases": [
+                "Glucose, Serum"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 70,
+                    "upper": 99,
+                    "unit": "mg/dL"
+                }
+            ],
+            "unitHints": [
+                "mg/dL"
+            ],
+            "createdAt": "2026-02-12T20:02:49.869Z",
+            "updatedAt": "2026-02-12T20:04:38.192Z"
+        },
+        {
+            "canonicalName": "HbA1c (HPLC) (EB)",
+            "aliases": [
+                "HbA1c (HPLC) (EB)"
+            ],
+            "knownRanges": [
+                {
+                    "text": "<5.7"
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:03:07.469Z",
+            "updatedAt": "2026-02-12T20:04:50.933Z"
+        },
+        {
+            "canonicalName": "HBsAg Screen",
+            "aliases": [
+                "HBsAg Screen"
+            ],
+            "knownRanges": [],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:45.769Z",
+            "updatedAt": "2026-02-12T20:04:35.601Z"
+        },
+        {
+            "canonicalName": "HCV Ab",
+            "aliases": [
+                "HCV Ab"
+            ],
+            "knownRanges": [
+                {
+                    "text": "<0.1",
+                    "unit": "s/co ratio"
+                }
+            ],
+            "unitHints": [
+                "s/co ratio"
+            ],
+            "createdAt": "2026-02-12T20:02:45.467Z",
+            "updatedAt": "2026-02-12T20:04:35.600Z"
+        },
+        {
+            "canonicalName": "HDL",
+            "aliases": [
+                "HDL"
+            ],
+            "knownRanges": [
+                {
+                    "text": ">40",
+                    "unit": "mg/dL"
+                },
+                {
+                    "text": ">39",
+                    "unit": "mg/dL"
+                }
+            ],
+            "unitHints": [
+                "mg/dL"
+            ],
+            "createdAt": "2026-02-12T20:02:38.075Z",
+            "updatedAt": "2026-02-12T20:04:33.195Z"
+        },
+        {
+            "canonicalName": "HDL Cholesterol",
+            "aliases": [
+                "HDL Cholesterol"
+            ],
+            "knownRanges": [
+                {
+                    "text": ">39",
+                    "unit": "mg/dL"
+                }
+            ],
+            "unitHints": [
+                "mg/dL"
+            ],
+            "createdAt": "2026-02-12T20:02:43.009Z",
+            "updatedAt": "2026-02-12T20:04:38.193Z"
+        },
+        {
+            "canonicalName": "HDL-Cholesterin Gen. 4 (SE)",
+            "aliases": [
+                "HDL-Cholesterin Gen. 4 (SE)"
+            ],
+            "knownRanges": [],
+            "unitHints": [
+                "mmol/l"
+            ],
+            "createdAt": "2026-02-12T20:03:08.992Z",
+            "updatedAt": "2026-02-12T20:04:50.936Z"
+        },
+        {
+            "canonicalName": "Hematocrit",
+            "aliases": [
+                "Hematocrit"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 37.5,
+                    "upper": 51
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:39.822Z",
+            "updatedAt": "2026-02-12T20:04:39.400Z"
+        },
+        {
+            "canonicalName": "Hematocrit (EB)",
+            "aliases": [
+                "Hematocrit (EB)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0.39,
+                    "upper": 0.5,
+                    "unit": "l/l"
+                },
+                {
+                    "lower": 35.5,
+                    "upper": 50.5
+                }
+            ],
+            "unitHints": [
+                "l/l"
+            ],
+            "createdAt": "2026-02-12T20:03:06.099Z",
+            "updatedAt": "2026-02-12T20:04:50.937Z"
+        },
+        {
+            "canonicalName": "Hemoglobin",
+            "aliases": [
+                "Hemoglobin"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 13,
+                    "upper": 17.7,
+                    "unit": "g/dL"
+                },
+                {
+                    "lower": 4.8,
+                    "upper": 5.6
+                }
+            ],
+            "unitHints": [
+                "g/dL"
+            ],
+            "createdAt": "2026-02-12T20:02:39.663Z",
+            "updatedAt": "2026-02-12T20:04:38.192Z"
+        },
+        {
+            "canonicalName": "Hemoglobin (EB)",
+            "aliases": [
+                "Hemoglobin (EB)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 8.5,
+                    "upper": 10.7,
+                    "unit": "mmol/l"
+                }
+            ],
+            "unitHints": [
+                "mmol/l"
+            ],
+            "createdAt": "2026-02-12T20:03:06.040Z",
+            "updatedAt": "2026-02-12T20:04:50.931Z"
+        },
+        {
+            "canonicalName": "Hemoglobin A1c",
+            "aliases": [
+                "Hemoglobin A1c"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 4.8,
+                    "upper": 5.6
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:43.864Z",
+            "updatedAt": "2026-02-12T20:04:38.193Z"
+        },
+        {
+            "canonicalName": "Hemoglobin A1c W/calc Mpg",
+            "aliases": [
+                "Hemoglobin A1c W/calc Mpg"
+            ],
+            "knownRanges": [
+                {
+                    "text": "HEMOGLOBI 5.0 % of total Hgb <5.7 TBR"
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:38.914Z",
+            "updatedAt": "2026-02-12T20:04:31.319Z"
+        },
+        {
+            "canonicalName": "Hep B Core Ab, Tot",
+            "aliases": [
+                "Hep B Core Ab, Tot"
+            ],
+            "knownRanges": [],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:45.625Z",
+            "updatedAt": "2026-02-12T20:04:35.600Z"
+        },
+        {
+            "canonicalName": "HOMA-IR (GLEX)",
+            "aliases": [
+                "HOMA-IR (GLEX)"
+            ],
+            "knownRanges": [],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:03:09.732Z",
+            "updatedAt": "2026-02-12T20:04:50.936Z"
+        },
+        {
+            "canonicalName": "HPA - Axis Markers Waking Cortisol",
+            "aliases": [
+                "HPA - Axis Markers Waking Cortisol"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 7,
+                    "upper": 31
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:59.744Z",
+            "updatedAt": "2026-02-12T20:04:42.825Z"
+        },
+        {
+            "canonicalName": "IgG i.S. (SE)",
+            "aliases": [
+                "IgG i.S. (SE)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 7,
+                    "upper": 16,
+                    "unit": "g/l"
+                }
+            ],
+            "unitHints": [
+                "g/l"
+            ],
+            "createdAt": "2026-02-12T20:03:11.535Z",
+            "updatedAt": "2026-02-12T20:04:50.937Z"
+        },
+        {
+            "canonicalName": "Insulin i. S. (SE)",
+            "aliases": [
+                "Insulin i. S. (SE)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 2.6,
+                    "upper": 24.9,
+                    "unit": "mU/l"
+                }
+            ],
+            "unitHints": [
+                "mU/l"
+            ],
+            "createdAt": "2026-02-12T20:03:09.804Z",
+            "updatedAt": "2026-02-12T20:04:50.936Z"
+        },
+        {
+            "canonicalName": "Iron",
+            "aliases": [
+                "Iron"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 38,
+                    "upper": 169
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:45.327Z",
+            "updatedAt": "2026-02-12T20:04:38.193Z"
+        },
+        {
+            "canonicalName": "Iron Saturation",
+            "aliases": [
+                "Iron Saturation"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 15,
+                    "upper": 55
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:45.394Z",
+            "updatedAt": "2026-02-12T20:04:38.193Z"
+        },
+        {
+            "canonicalName": "LDH (SE)",
+            "aliases": [
+                "LDH (SE)"
+            ],
+            "knownRanges": [
+                {
+                    "text": "<4.20",
+                    "unit": "µkat/l"
+                }
+            ],
+            "unitHints": [
+                "µkat/l"
+            ],
+            "createdAt": "2026-02-12T20:03:08.726Z",
+            "updatedAt": "2026-02-12T20:04:50.935Z"
+        },
+        {
+            "canonicalName": "LDL",
+            "aliases": [
+                "LDL"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0,
+                    "upper": 99,
+                    "unit": "mg/dL"
+                }
+            ],
+            "unitHints": [
+                "mg/dL"
+            ],
+            "createdAt": "2026-02-12T20:02:41.042Z",
+            "updatedAt": "2026-02-12T20:04:33.195Z"
+        },
+        {
+            "canonicalName": "LDL CHOL",
+            "aliases": [
+                "LDL CHOL"
+            ],
+            "knownRanges": [
+                {
+                    "text": "<100",
+                    "unit": "mg/dL"
+                }
+            ],
+            "unitHints": [
+                "mg/dL"
+            ],
+            "createdAt": "2026-02-12T20:02:38.159Z",
+            "updatedAt": "2026-02-12T20:04:31.318Z"
+        },
+        {
+            "canonicalName": "LDL Chol Calc",
+            "aliases": [
+                "LDL Chol Calc"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0,
+                    "upper": 99,
+                    "unit": "mg/dL"
+                }
+            ],
+            "unitHints": [
+                "mg/dL"
+            ],
+            "createdAt": "2026-02-12T20:02:43.800Z",
+            "updatedAt": "2026-02-12T20:04:38.193Z"
+        },
+        {
+            "canonicalName": "LDL Chol Calc (NIH)",
+            "aliases": [
+                "LDL Chol Calc (NIH)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0,
+                    "upper": 99,
+                    "unit": "mg/dL"
+                }
+            ],
+            "unitHints": [
+                "mg/dL"
+            ],
+            "createdAt": "2026-02-12T20:02:54.243Z",
+            "updatedAt": "2026-02-12T20:04:39.406Z"
+        },
+        {
+            "canonicalName": "LDL Cholesterol",
+            "aliases": [
+                "LDL Cholesterol"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0,
+                    "upper": 99,
+                    "unit": "mg/dL"
+                }
+            ],
+            "unitHints": [
+                "mg/dL"
+            ],
+            "createdAt": "2026-02-12T20:02:43.128Z",
+            "updatedAt": "2026-02-12T20:04:33.918Z"
+        },
+        {
+            "canonicalName": "LDL-Cholesterin Gen. 3 (SE)",
+            "aliases": [
+                "LDL-Cholesterin Gen. 3 (SE)"
+            ],
+            "knownRanges": [],
+            "unitHints": [
+                "mmol/l"
+            ],
+            "createdAt": "2026-02-12T20:03:09.183Z",
+            "updatedAt": "2026-02-12T20:04:50.936Z"
+        },
+        {
+            "canonicalName": "Lipase (SE)",
+            "aliases": [
+                "Lipase (SE)"
+            ],
+            "knownRanges": [
+                {
+                    "text": "<1.0",
+                    "unit": "µkat/l"
+                }
+            ],
+            "unitHints": [
+                "µkat/l"
+            ],
+            "createdAt": "2026-02-12T20:03:08.866Z",
+            "updatedAt": "2026-02-12T20:04:50.935Z"
+        },
+        {
+            "canonicalName": "Luteinizing Hormone (LH) (SE)",
+            "aliases": [
+                "Luteinizing Hormone (LH) (SE)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 1,
+                    "upper": 12,
+                    "unit": "IU/l"
+                }
+            ],
+            "unitHints": [
+                "IU/l"
+            ],
+            "createdAt": "2026-02-12T20:03:10.260Z",
+            "updatedAt": "2026-02-12T20:04:50.936Z"
+        },
+        {
+            "canonicalName": "Magnesium",
+            "aliases": [
+                "Magnesium"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 1.6,
+                    "upper": 2.3,
+                    "unit": "mg/dL"
+                },
+                {
+                    "lower": 1.5,
+                    "upper": 2.5,
+                    "unit": "mg/dL"
+                }
+            ],
+            "unitHints": [
+                "mg/dL"
+            ],
+            "createdAt": "2026-02-12T20:02:50.727Z",
+            "updatedAt": "2026-02-12T20:04:47.528Z"
+        },
+        {
+            "canonicalName": "Magnesium in Erythrocytes (EB)",
+            "aliases": [
+                "Magnesium in Erythrocytes (EB)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 1.65,
+                    "upper": 2.65,
+                    "unit": "mmol/l"
+                }
+            ],
+            "unitHints": [
+                "mmol/l"
+            ],
+            "createdAt": "2026-02-12T20:03:11.389Z",
+            "updatedAt": "2026-02-12T20:04:50.937Z"
+        },
+        {
+            "canonicalName": "Mid-morning Cortisol",
+            "aliases": [
+                "Mid-morning Cortisol"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 15,
+                    "upper": 50
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:59.832Z",
+            "updatedAt": "2026-02-12T20:04:42.825Z"
+        },
+        {
+            "canonicalName": "NASH Grade",
+            "aliases": [
+                "NASH Grade"
+            ],
+            "knownRanges": [],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:49.461Z",
+            "updatedAt": "2026-02-12T20:04:38.191Z"
+        },
+        {
+            "canonicalName": "NASH Score",
+            "aliases": [
+                "NASH Score"
+            ],
+            "knownRanges": [],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:49.391Z",
+            "updatedAt": "2026-02-12T20:04:38.191Z"
+        },
+        {
+            "canonicalName": "NASH Scoring",
+            "aliases": [
+                "NASH Scoring"
+            ],
+            "knownRanges": [],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:50.084Z",
+            "updatedAt": "2026-02-12T20:04:38.192Z"
+        },
+        {
+            "canonicalName": "NON HDL",
+            "aliases": [
+                "NON HDL"
+            ],
+            "knownRanges": [
+                {
+                    "text": "<130",
+                    "unit": "mg/dL (calc)"
+                }
+            ],
+            "unitHints": [
+                "mg/dL (calc)"
+            ],
+            "createdAt": "2026-02-12T20:02:38.314Z",
+            "updatedAt": "2026-02-12T20:04:31.318Z"
+        },
+        {
+            "canonicalName": "Non-HDL-Cholesterin (SE)",
+            "aliases": [
+                "Non-HDL-Cholesterin (SE)"
+            ],
+            "knownRanges": [],
+            "unitHints": [
+                "mmol/l"
+            ],
+            "createdAt": "2026-02-12T20:03:09.051Z",
+            "updatedAt": "2026-02-12T20:04:50.936Z"
+        },
+        {
+            "canonicalName": "Ol/hdl",
+            "aliases": [
+                "Ol/hdl"
+            ],
+            "knownRanges": [
+                {
+                    "text": "LDL CHOL, 173 High mg/dL <100 TBR"
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:38.773Z",
+            "updatedAt": "2026-02-12T20:04:31.319Z"
+        },
+        {
+            "canonicalName": "Omega-3-Index (EPA und DHA) (EB)",
+            "aliases": [
+                "Omega-3-Index (EPA und DHA) (EB)"
+            ],
+            "knownRanges": [
+                {
+                    "text": "% ges. FS>8.0"
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:03:11.665Z",
+            "updatedAt": "2026-02-12T20:04:50.938Z"
+        },
+        {
+            "canonicalName": "PLATELET",
+            "aliases": [
+                "PLATELET"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 140,
+                    "upper": 400
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:38.630Z",
+            "updatedAt": "2026-02-12T20:04:31.319Z"
+        },
+        {
+            "canonicalName": "Prolactin",
+            "aliases": [
+                "Prolactin"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 4,
+                    "upper": 15.2,
+                    "unit": "ng/mL"
+                }
+            ],
+            "unitHints": [
+                "ng/mL"
+            ],
+            "createdAt": "2026-02-12T20:03:03.809Z",
+            "updatedAt": "2026-02-12T20:04:47.527Z"
+        },
+        {
+            "canonicalName": "Prolactin Gen. 2 (SE)",
+            "aliases": [
+                "Prolactin Gen. 2 (SE)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 4.6,
+                    "upper": 21.4,
+                    "unit": "µg/l"
+                }
+            ],
+            "unitHints": [
+                "µg/l"
+            ],
+            "createdAt": "2026-02-12T20:03:10.435Z",
+            "updatedAt": "2026-02-12T20:04:50.936Z"
+        },
+        {
+            "canonicalName": "Protein, Total",
+            "aliases": [
+                "Protein, Total"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 6,
+                    "upper": 8.5,
+                    "unit": "g/dL"
+                },
+                {
+                    "lower": 6.1,
+                    "upper": 8.1
+                }
+            ],
+            "unitHints": [
+                "g/dL"
+            ],
+            "createdAt": "2026-02-12T20:02:40.507Z",
+            "updatedAt": "2026-02-12T20:04:38.193Z"
+        },
+        {
+            "canonicalName": "RBC",
+            "aliases": [
+                "RBC"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 4.2,
+                    "upper": 5.8
+                },
+                {
+                    "lower": 4.14,
+                    "upper": 5.8,
+                    "unit": "x10E6/uL"
+                }
+            ],
+            "unitHints": [
+                "/HPF",
+                "x10E6/uL"
+            ],
+            "createdAt": "2026-02-12T20:02:38.463Z",
+            "updatedAt": "2026-02-12T20:04:47.261Z"
+        },
+        {
+            "canonicalName": "Sex Hormone Binding Globulin",
+            "aliases": [
+                "Sex Hormone Binding Globulin"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 10,
+                    "upper": 50,
+                    "unit": "nmol/L"
+                }
+            ],
+            "unitHints": [
+                "nmol/L"
+            ],
+            "createdAt": "2026-02-12T20:03:04.709Z",
+            "updatedAt": "2026-02-12T20:04:47.527Z"
+        },
+        {
+            "canonicalName": "Sex Hormone Binding Globulin (SE)",
+            "aliases": [
+                "Sex Hormone Binding Globulin (SE)",
+                "Sexualhormonbindendes Globulin (SE)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 18.3,
+                    "upper": 54.1,
+                    "unit": "nmol/l"
+                }
+            ],
+            "unitHints": [
+                "nmol/l"
+            ],
+            "createdAt": "2026-02-12T20:03:10.837Z",
+            "updatedAt": "2026-02-12T20:04:50.936Z"
+        },
+        {
+            "canonicalName": "Steatosis Grade",
+            "aliases": [
+                "Steatosis Grade"
+            ],
+            "knownRanges": [],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:49.326Z",
+            "updatedAt": "2026-02-12T20:04:38.191Z"
+        },
+        {
+            "canonicalName": "Steatosis Grading",
+            "aliases": [
+                "Steatosis Grading"
+            ],
+            "knownRanges": [],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:50.008Z",
+            "updatedAt": "2026-02-12T20:04:38.192Z"
+        },
+        {
+            "canonicalName": "Steatosis Score",
+            "aliases": [
+                "Steatosis Score"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0,
+                    "upper": 0.3
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:49.166Z",
+            "updatedAt": "2026-02-12T20:04:38.191Z"
+        },
+        {
+            "canonicalName": "Testosterone",
+            "aliases": [
+                "Testosterone"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 10.7,
+                    "upper": 50.26
+                },
+                {
+                    "lower": 264,
+                    "upper": 916,
+                    "unit": "ng/dL"
+                }
+            ],
+            "unitHints": [
+                "ng/dL"
+            ],
+            "createdAt": "2026-02-12T20:02:56.847Z",
+            "updatedAt": "2026-02-12T20:04:46.833Z"
+        },
+        {
+            "canonicalName": "Testosterone Metabolites",
+            "aliases": [
+                "Testosterone Metabolites"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 47.6,
+                    "upper": 159.6
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:57.877Z",
+            "updatedAt": "2026-02-12T20:04:42.824Z"
+        },
+        {
+            "canonicalName": "Testosterone, Free",
+            "aliases": [
+                "Testosterone, Free"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 46,
+                    "upper": 224,
+                    "unit": "pg/mL"
+                }
+            ],
+            "unitHints": [
+                "pg/mL"
+            ],
+            "createdAt": "2026-02-12T20:03:04.989Z",
+            "updatedAt": "2026-02-12T20:04:47.527Z"
+        },
+        {
+            "canonicalName": "Testosterone, Free And Bioavailable",
+            "aliases": [
+                "Testosterone, Free And Bioavailable"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 46,
+                    "upper": 224,
+                    "unit": "pg/mL"
+                }
+            ],
+            "unitHints": [
+                "pg/mL"
+            ],
+            "createdAt": "2026-02-12T20:03:04.832Z",
+            "updatedAt": "2026-02-12T20:04:47.527Z"
+        },
+        {
+            "canonicalName": "Testosterone, Total, Ms",
+            "aliases": [
+                "Testosterone, Total, Ms"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 250,
+                    "upper": 1100,
+                    "unit": "ng/dL"
+                }
+            ],
+            "unitHints": [
+                "ng/dL"
+            ],
+            "createdAt": "2026-02-12T20:03:04.770Z",
+            "updatedAt": "2026-02-12T20:04:47.527Z"
+        },
+        {
+            "canonicalName": "Testosterone,bioavailable",
+            "aliases": [
+                "Testosterone,bioavailable"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 110,
+                    "upper": 575,
+                    "unit": "ng/dL"
+                }
+            ],
+            "unitHints": [
+                "ng/dL"
+            ],
+            "createdAt": "2026-02-12T20:03:05.072Z",
+            "updatedAt": "2026-02-12T20:04:47.528Z"
+        },
+        {
+            "canonicalName": "Testosterone/Metabolite Ratio",
+            "aliases": [
+                "Testosterone/Metabolite Ratio"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0.5,
+                    "upper": 1.5,
+                    "unit": "Ratio"
+                }
+            ],
+            "unitHints": [
+                "Ratio"
+            ],
+            "createdAt": "2026-02-12T20:02:59.350Z",
+            "updatedAt": "2026-02-12T20:04:42.824Z"
+        },
+        {
+            "canonicalName": "TOTAL BILIRUBIN",
+            "aliases": [
+                "TOTAL BILIRUBIN"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0.2,
+                    "upper": 1.2
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:47.291Z",
+            "updatedAt": "2026-02-12T20:04:36.604Z"
+        },
+        {
+            "canonicalName": "Transferrin (SE)",
+            "aliases": [
+                "Transferrin (SE)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 25.2,
+                    "upper": 45.4,
+                    "unit": "µmol/l"
+                }
+            ],
+            "unitHints": [
+                "µmol/l"
+            ],
+            "createdAt": "2026-02-12T20:03:09.517Z",
+            "updatedAt": "2026-02-12T20:04:50.936Z"
+        },
+        {
+            "canonicalName": "Transferrin Saturation (SE)",
+            "aliases": [
+                "Transferrin Saturation (SE)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 16,
+                    "upper": 45
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:03:09.578Z",
+            "updatedAt": "2026-02-12T20:04:50.936Z"
+        },
+        {
+            "canonicalName": "Triglyceride (SI) (SE)",
+            "aliases": [
+                "Triglyceride (SI) (SE)"
+            ],
+            "knownRanges": [
+                {
+                    "text": "<1.71",
+                    "unit": "mmol/l"
+                }
+            ],
+            "unitHints": [
+                "mmol/l"
+            ],
+            "createdAt": "2026-02-12T20:03:09.245Z",
+            "updatedAt": "2026-02-12T20:04:50.936Z"
+        },
+        {
+            "canonicalName": "TSH",
+            "aliases": [
+                "TSH"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0.45,
+                    "upper": 4.5
+                },
+                {
+                    "lower": 0.4,
+                    "upper": 4.5
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:41.628Z",
+            "updatedAt": "2026-02-12T20:04:38.194Z"
+        },
+        {
+            "canonicalName": "TSH (basal) (SE)",
+            "aliases": [
+                "TSH (basal) (SE)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 0.4,
+                    "upper": 4
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:03:09.940Z",
+            "updatedAt": "2026-02-12T20:04:50.936Z"
+        },
+        {
+            "canonicalName": "UIBC",
+            "aliases": [
+                "UIBC"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 111,
+                    "upper": 343
+                }
+            ],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:45.260Z",
+            "updatedAt": "2026-02-12T20:04:38.193Z"
+        },
+        {
+            "canonicalName": "Upper Respiratory Culture",
+            "aliases": [
+                "Upper Respiratory Culture"
+            ],
+            "knownRanges": [],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:04:00.190Z",
+            "updatedAt": "2026-02-12T20:04:33.462Z"
+        },
+        {
+            "canonicalName": "Vitamin B12",
+            "aliases": [
+                "Vitamin B12"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 232,
+                    "upper": 1245,
+                    "unit": "pg/mL"
+                }
+            ],
+            "unitHints": [
+                "pg/mL"
+            ],
+            "createdAt": "2026-02-12T20:02:50.861Z",
+            "updatedAt": "2026-02-12T20:04:38.195Z"
+        },
+        {
+            "canonicalName": "Vitamin B12 (Cobalamin) (Gen. 2) (SE)",
+            "aliases": [
+                "Vitamin B12 (Cobalamin) (Gen. 2) (SE)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 191,
+                    "upper": 663,
+                    "unit": "pg/ml"
+                }
+            ],
+            "unitHints": [
+                "pg/ml"
+            ],
+            "createdAt": "2026-02-12T20:03:10.902Z",
+            "updatedAt": "2026-02-12T20:04:50.936Z"
+        },
+        {
+            "canonicalName": "Vitamin B2 (Riboflavin) (EB)",
+            "aliases": [
+                "Vitamin B2 (Riboflavin) (EB)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 137,
+                    "upper": 370,
+                    "unit": "ng/ml"
+                }
+            ],
+            "unitHints": [
+                "ng/ml"
+            ],
+            "createdAt": "2026-02-12T20:03:10.970Z",
+            "updatedAt": "2026-02-12T20:04:50.936Z"
+        },
+        {
+            "canonicalName": "Vitamin D Status",
+            "aliases": [
+                "Vitamin D Status"
+            ],
+            "knownRanges": [],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:03:04.298Z",
+            "updatedAt": "2026-02-12T20:04:47.261Z"
+        },
+        {
+            "canonicalName": "Vitamin D3 (25-OH) III (ECLIA) (SE)",
+            "aliases": [
+                "Vitamin D3 (25-OH) III (ECLIA) (SE)"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 20,
+                    "upper": 70,
+                    "unit": "ng/ml"
+                },
+                {
+                    "lower": 20,
+                    "upper": 50,
+                    "unit": "ng/ml"
+                }
+            ],
+            "unitHints": [
+                "ng/ml"
+            ],
+            "createdAt": "2026-02-12T20:03:11.153Z",
+            "updatedAt": "2026-02-12T20:04:50.937Z"
+        },
+        {
+            "canonicalName": "VLDL Cholesterol",
+            "aliases": [
+                "VLDL Cholesterol"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 5,
+                    "upper": 40,
+                    "unit": "mg/dL"
+                }
+            ],
+            "unitHints": [
+                "mg/dL"
+            ],
+            "createdAt": "2026-02-12T20:02:43.070Z",
+            "updatedAt": "2026-02-12T20:04:38.193Z"
+        },
+        {
+            "canonicalName": "VLDL Cholesterol Cal",
+            "aliases": [
+                "VLDL Cholesterol Cal"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 5,
+                    "upper": 40,
+                    "unit": "mg/dL"
+                }
+            ],
+            "unitHints": [
+                "mg/dL"
+            ],
+            "createdAt": "2026-02-12T20:02:54.177Z",
+            "updatedAt": "2026-02-12T20:04:39.406Z"
+        },
+        {
+            "canonicalName": "WBC",
+            "aliases": [
+                "WBC"
+            ],
+            "knownRanges": [
+                {
+                    "lower": 3.8,
+                    "upper": 10.8
+                },
+                {
+                    "lower": 3.4,
+                    "upper": 10.8,
+                    "unit": "x10E3/uL"
+                }
+            ],
+            "unitHints": [
+                "/HPF",
+                "x10E3/uL"
+            ],
+            "createdAt": "2026-02-12T20:02:38.381Z",
+            "updatedAt": "2026-02-12T20:04:47.261Z"
+        },
+        {
+            "canonicalName": "WBC Esterase",
+            "aliases": [
+                "WBC Esterase"
+            ],
+            "knownRanges": [],
+            "unitHints": [],
+            "createdAt": "2026-02-12T20:02:53.518Z",
+            "updatedAt": "2026-02-12T20:04:39.404Z"
+        }
+    ]
+}

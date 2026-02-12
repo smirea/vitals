@@ -22,14 +22,18 @@ import { createScript } from './createScript.ts';
 const DEFAULT_S3_BUCKET = 'stefan-life';
 const DEFAULT_S3_PREFIX = 'vitals';
 const DEFAULT_MODEL_IDS = ['google/gemini-3-flash-preview'];
+const DEFAULT_GLOSSARY_VALIDATOR_MODEL_IDS = ['google/gemini-3-flash-preview'];
 const DEFAULT_TO_IMPORT_DIRECTORY = path.resolve(process.cwd(), 'data/to-import');
 const DEFAULT_OUTPUT_DIRECTORY = path.resolve(process.cwd(), 'data');
+const DEFAULT_GLOSSARY_PATH = path.resolve(process.cwd(), 'server/src/bloodwork-glossary.json');
 const EXTRACTED_TEXT_LIMIT = 45_000;
 const MODEL_MAX_OUTPUT_TOKENS = 1_400;
 const METADATA_MAX_OUTPUT_TOKENS = 280;
 const NORMALIZATION_MAX_OUTPUT_TOKENS = 6_000;
+const GLOSSARY_VALIDATION_MAX_OUTPUT_TOKENS = 1_600;
 const MAX_MEASUREMENTS_PER_PAGE = 120;
 const MAX_NORMALIZATION_CANDIDATES = 320;
+const MAX_GLOSSARY_DECISIONS = 64;
 
 type CliOptions = {
     importAll: boolean;
@@ -149,6 +153,89 @@ const GERMAN_NAME_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string }> 
     { pattern: /\bHba1c \(ifcc\/neue Std\.\)\b/gi, replacement: 'HbA1c (IFCC)' },
 ];
 
+const MEASUREMENT_NAME_TRANSLATION_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string }> = [
+    { pattern: /\bgesamt\b/gi, replacement: 'Total' },
+    { pattern: /\bkorrigiertes?\b/gi, replacement: 'Corrected' },
+    { pattern: /\bcholesterin\b/gi, replacement: 'Cholesterol' },
+    { pattern: /\breaktives?\b/gi, replacement: 'Reactive' },
+    { pattern: /\bultrasensitiv(?:e|es|em|en)?\b/gi, replacement: 'High Sensitivity' },
+    { pattern: /\bfreies?\b/gi, replacement: 'Free' },
+    { pattern: /\btrijodthyronin\b/gi, replacement: 'Triiodothyronine' },
+    { pattern: /\bthyroxin\b/gi, replacement: 'Thyroxine' },
+    { pattern: /\bund\b/gi, replacement: 'and' },
+    { pattern: /\brestandardisiert(?:e|es|em|en)?\b/gi, replacement: 'Restandardized' },
+    { pattern: /\bsulfat\b/gi, replacement: 'Sulfate' },
+    { pattern: /\bbasal\b/gi, replacement: 'Basal' },
+    { pattern: /\bi\.\s*s\./gi, replacement: 'Serum' },
+    { pattern: /\bi\.s\./gi, replacement: 'Serum' },
+];
+
+const GLOSSARY_TRAILING_QUALIFIER_KEYS = new Set([
+    'se',
+    'eb',
+    'si',
+    'glex',
+    'hplc',
+    'ifcc',
+    'eclia',
+    'serum',
+    'plasma',
+    'wholeblood',
+    'gen2',
+    'gen3',
+    'gen4',
+    'ii',
+    'iii',
+    'iv',
+    'v',
+]);
+
+const GLOSSARY_CANONICAL_NAME_RULES: Array<{ pattern: RegExp; canonicalName: string }> = [
+    { pattern: /\balbumin corrected calcium\b/i, canonicalName: 'Albumin-Corrected Calcium' },
+    { pattern: /\balbumin globulin ratio\b/i, canonicalName: 'Albumin/Globulin Ratio' },
+    { pattern: /\balanine aminotransferase|^alt(?: sgpt)?(?: p5p)?$/i, canonicalName: 'ALT (SGPT)' },
+    { pattern: /\baspartate aminotransferase|^ast(?: sgot)?(?: p5p)?$/i, canonicalName: 'AST (SGOT)' },
+    { pattern: /\bbilirubin total|^total bilirubin$|bilirubin gesamt/i, canonicalName: 'Bilirubin, Total' },
+    { pattern: /\bbilirubin direct\b/i, canonicalName: 'Bilirubin, Direct' },
+    { pattern: /\bbilirubin indirect\b/i, canonicalName: 'Bilirubin, Indirect' },
+    { pattern: /\bc reactive protein|^crp$/i, canonicalName: 'C-Reactive Protein' },
+    { pattern: /\bestimated average glucose\b/i, canonicalName: 'Estimated Average Glucose' },
+    { pattern: /\bfree testosterone index\b/i, canonicalName: 'Free Testosterone Index' },
+    { pattern: /\bfree testosterone\b/i, canonicalName: 'Free Testosterone' },
+    { pattern: /\bft3\b/i, canonicalName: 'Free T3' },
+    { pattern: /\bft4\b/i, canonicalName: 'Free T4' },
+    { pattern: /\bhba1c|hemoglobin a1c\b/i, canonicalName: 'Hemoglobin A1c' },
+    { pattern: /\bhdl cholesterol|^hdl chol(?:esterol)?$/i, canonicalName: 'HDL Cholesterol' },
+    { pattern: /\bnon hdl cholesterol|^non hdl$/i, canonicalName: 'Non-HDL Cholesterol' },
+    { pattern: /\bldl cholesterol|^ldl chol(?:esterol)?$|^ldl$/i, canonicalName: 'LDL Cholesterol' },
+    { pattern: /\btriglyceride\b/i, canonicalName: 'Triglycerides' },
+    { pattern: /\bhoma ir\b/i, canonicalName: 'HOMA-IR' },
+    { pattern: /\bsex hormone binding globulin\b/i, canonicalName: 'Sex Hormone Binding Globulin' },
+    { pattern: /\bdhea sulfate|^dhea s$/i, canonicalName: 'DHEA-S' },
+    { pattern: /\btransferrin saturation\b/i, canonicalName: 'Transferrin Saturation' },
+    { pattern: /\bluteinizing hormone\b/i, canonicalName: 'Luteinizing Hormone' },
+    { pattern: /\bfollicle stimulating hormone\b/i, canonicalName: 'Follicle Stimulating Hormone' },
+    { pattern: /\bvitamin d3 25 oh|vitamin d 25 oh\b/i, canonicalName: 'Vitamin D, 25-OH' },
+    { pattern: /\bvitamin b12\b/i, canonicalName: 'Vitamin B12' },
+    { pattern: /\bvitamin b2\b/i, canonicalName: 'Vitamin B2' },
+    { pattern: /\bmagnesium in erythrocytes\b/i, canonicalName: 'Magnesium, RBC' },
+    { pattern: /\bapolipoprotein a 1|^apolipoprotein a1$/i, canonicalName: 'Apolipoprotein A1' },
+    { pattern: /\bapolipoprotein b\b/i, canonicalName: 'Apolipoprotein B' },
+    { pattern: /\bprolactin\b/i, canonicalName: 'Prolactin' },
+    { pattern: /\btestosterone total ms\b/i, canonicalName: 'Testosterone, Total' },
+    { pattern: /\btestosterone free and bioavailable\b/i, canonicalName: 'Testosterone, Free and Bioavailable' },
+    { pattern: /\btestosterone bioavailable\b/i, canonicalName: 'Testosterone, Bioavailable' },
+    { pattern: /\bfibrosis scoring|^fibrosis score$/i, canonicalName: 'Fibrosis Score' },
+    { pattern: /\bfibrosis stage(?: f\d+)?$/i, canonicalName: 'Fibrosis Stage' },
+    { pattern: /\bsteatosis grading|^steatosis grade$/i, canonicalName: 'Steatosis Grade' },
+    { pattern: /\bsteatosis score$/i, canonicalName: 'Steatosis Score' },
+    { pattern: /\bnash scoring|^nash score$/i, canonicalName: 'NASH Score' },
+    { pattern: /\bnash grade$/i, canonicalName: 'NASH Grade' },
+    { pattern: /^egfr(?: if(?: nonafricn| africn(?: am)?)?)?$/i, canonicalName: 'eGFR' },
+    { pattern: /^tibc$/i, canonicalName: 'TIBC' },
+    { pattern: /^platelet$/i, canonicalName: 'Platelets' },
+];
+
 const QUALITATIVE_RESULT_PATTERN =
     /\b(?:negative|positive|detected|not detected|nonreactive|reactive|indeterminate|trace|abnormal|normal)\b/i;
 const VALUE_TOKEN_PATTERN =
@@ -158,7 +245,46 @@ const RANGE_TOKEN_PATTERN =
 const UNIT_TOKEN_PATTERN =
     /\b(?:mg\/d?l|g\/d?l|ng\/m?l|pg\/m?l|iu\/l|m?u\/l|u\/l|mmol\/l|mmol\/mol|µ?mol\/l|x10e\d+\/u?l|f?mol\/l|fl|pg|ratio|%|nmol\/l|pmol\/l|s\/co\s*ratio|gpt\/l|tpt\/l|\/µ?l|µ?kat\/l|ng\/dl|ml\/m)\b/i;
 const LIKELY_ANALYTE_NAME_PATTERN =
-    /\b(?:wbc|rbc|hemoglobin|hematocrit|platelet|neutrophil|lymph|monocyte|eos|baso|glucose|hba1c|creatinine|bun|egfr|bilirubin|albumin|globulin|protein|ast|alt|ggt|alkaline phosphatase|ldh|amylase|lipase|cholesterol|cholester|triglyceride|ldl|hdl|ferritin|iron|uibc|tibc|transferrin|insulin|tsh|ft3|ft4|lh|fsh|estradiol|prolactin|testosterone|dhea|vitamin|folate|magnesium|homa|apolipoprotein|fibrosis|steatosis|nash|cortisol|pregnanediol|estrone|estriol|androsterone|etiocholanolone|igg|omega|epa|dha|crp|hcv|hep b|hbsag)\b/i;
+    /\b(?:wbc|rbc|hemoglobin|hematocrit|platelet|neutrophil|lymph|monocyte|eos|baso|glucose|hba1c|creatinine|bun|egfr|bilirubin|albumin|globulin|protein|ast|alt|ggt|alkaline phosphatase|ldh|amylase|lipase|cholesterol|cholester|triglyceride|ldl|hdl|ferritin|iron|uibc|tibc|transferrin|insulin|tsh|ft3|ft4|lh|fsh|estradiol|prolactin|testosterone|dhea|vitamin|folate|magnesium|homa|apolipoprotein|fibrosis|steatosis|nash|cortisol|pregnanediol|estrone|estriol|androsterone|etiocholanolone|igg|omega|epa|dha|crp|hcv|hep b|hbsag|culture|streptococcus)\b/i;
+const NON_ENGLISH_NAME_PATTERN = /[äöüßéèàáìíòóùúñç]/i;
+const NON_ENGLISH_GLOSSARY_TOKENS = [
+    'leukozyten',
+    'erythrozyten',
+    'haemoglobin',
+    'hämoglobin',
+    'haematokrit',
+    'hämatokrit',
+    'thrombozyten',
+    'lymphozyten',
+    'monozyten',
+    'eosinophile',
+    'basophile',
+    'glukose',
+    'harnsaeure',
+    'harnsäure',
+    'gesamteiweiss',
+    'gesamteiweiß',
+    'transferrinsaettigung',
+    'transferrinsättigung',
+    'luteinisierendes',
+    'follikelstim',
+    'folsaeure',
+    'folsäure',
+    'korrigiertes',
+    'gesamt',
+    'cholesterin',
+    'reaktives',
+    'ultrasensitiv',
+    'freies',
+    'trijodthyronin',
+    'thyroxin',
+    'restandardisiert',
+    'sulfat',
+    'und',
+    'hormon',
+];
+const GLOSSARY_FALLBACK_REJECT_PATTERN =
+    /\b(?:page|result|desired|desirable|reference|range|guideline|comment|note|customer|service|therapy|study|specificity|sensitivity|mirea|patient|account|code|source|marker|axis|cbc)\b/i;
 
 const bloodworkMetadataSchema = z.object({
     date: z.string().trim().min(1).transform(normalizeIsoDate),
@@ -177,6 +303,44 @@ const measurementBatchSchema = z.object({
 const measurementNormalizationSchema = z.object({
     measurements: z.array(bloodworkMeasurementSchema).max(MAX_NORMALIZATION_CANDIDATES),
 });
+
+const glossaryRangeSchema = z.object({
+    lower: z.number().finite().optional(),
+    upper: z.number().finite().optional(),
+    text: z.string().trim().min(1).optional(),
+    unit: z.string().trim().min(1).optional(),
+});
+
+const bloodworkGlossaryEntrySchema = z.object({
+    canonicalName: z.string().trim().min(1),
+    aliases: z.array(z.string().trim().min(1)).default([]),
+    knownRanges: z.array(glossaryRangeSchema).default([]),
+    unitHints: z.array(z.string().trim().min(1)).default([]),
+    createdAt: z.string().trim().min(1),
+    updatedAt: z.string().trim().min(1),
+});
+
+const bloodworkGlossarySchema = z.object({
+    version: z.literal(1),
+    updatedAt: z.string().trim().min(1),
+    entries: z.array(bloodworkGlossaryEntrySchema),
+});
+
+const glossaryValidationDecisionSchema = z.object({
+    index: z.number().int().nonnegative(),
+    action: z.enum(['alias', 'new_valid', 'invalid']),
+    targetCanonicalName: z.string().trim().min(1).optional(),
+    canonicalName: z.string().trim().min(1).optional(),
+    aliases: z.array(z.string().trim().min(1)).max(6).optional(),
+    reason: z.string().trim().min(1).optional(),
+});
+
+const glossaryValidationBatchSchema = z.object({
+    decisions: z.array(glossaryValidationDecisionSchema).max(MAX_GLOSSARY_DECISIONS),
+});
+
+type BloodworkGlossary = z.infer<typeof bloodworkGlossarySchema>;
+type BloodworkGlossaryEntry = z.infer<typeof bloodworkGlossaryEntrySchema>;
 
 const HELP_TEXT = [
     'Usage:',
@@ -473,6 +637,435 @@ function normalizeTextForMatch(value: string): string {
         .toLowerCase()
         .replace(/\s+/g, ' ')
         .trim();
+}
+
+function isTrailingGlossaryQualifierToken(value: string): boolean {
+    const normalized = value
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '');
+    if (!normalized) {
+        return false;
+    }
+    if (GLOSSARY_TRAILING_QUALIFIER_KEYS.has(normalized)) {
+        return true;
+    }
+    if (/^gen\d+$/.test(normalized)) {
+        return true;
+    }
+    if (/^[ivx]{2,4}$/.test(normalized)) {
+        return true;
+    }
+    return false;
+}
+
+function stripTrailingGlossaryQualifierParentheses(name: string): string {
+    let next = name.trim();
+    while (true) {
+        const match = next.match(/\(([^()]+)\)\s*$/);
+        if (!match) {
+            return next;
+        }
+        const token = match[1]?.trim();
+        if (!token || !isTrailingGlossaryQualifierToken(token)) {
+            return next;
+        }
+        next = next.slice(0, match.index).trim();
+    }
+}
+
+function normalizeMeasurementNameForGlossary(name: string): string {
+    let next = name
+        .replace(/\u00a0/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!next) {
+        return '';
+    }
+
+    for (const replacement of GERMAN_NAME_REPLACEMENTS) {
+        next = next.replace(replacement.pattern, replacement.replacement);
+    }
+    for (const replacement of MEASUREMENT_NAME_TRANSLATION_REPLACEMENTS) {
+        next = next.replace(replacement.pattern, replacement.replacement);
+    }
+
+    next = next
+        .replace(/\b(?:Androgen|Estrogen and Progesterone|HPA\s*-\s*Axis)\s+Markers?\b/gi, ' ')
+        .replace(/\bGen\.?\s*\d+\b/gi, ' ')
+        .replace(/\b(?:II|III|IV|V)\b(?=\s*(?:\(|$))/g, ' ')
+        .replace(/\(([^()]+)\)\s*\(\1\)/gi, '($1)')
+        .replace(/\s+/g, ' ')
+        .replace(/\s*-\s*/g, '-')
+        .replace(/\s*\/\s*/g, '/')
+        .replace(/[,:;]+$/g, '')
+        .trim();
+
+    next = stripTrailingGlossaryQualifierParentheses(next);
+
+    next = next
+        .replace(/\(\s*\)/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const normalizedKey = normalizeGlossaryNameKey(next);
+    if (!normalizedKey) {
+        return '';
+    }
+    if (/^cbc(?:\b| )/.test(normalizedKey)) {
+        return '';
+    }
+    if (normalizedKey === 'cortisol estriol') {
+        return '';
+    }
+
+    for (const rule of GLOSSARY_CANONICAL_NAME_RULES) {
+        if (rule.pattern.test(normalizedKey)) {
+            return rule.canonicalName;
+        }
+    }
+
+    return next;
+}
+
+function normalizeMeasurementForGlossary(measurement: BloodworkMeasurement): BloodworkMeasurement | null {
+    const sourceName = measurement.name.replace(/\s+/g, ' ').trim();
+    const canonicalName = normalizeMeasurementNameForGlossary(sourceName);
+    if (!canonicalName || !isEnglishGlossaryName(canonicalName)) {
+        return null;
+    }
+
+    const sourceOriginalName = measurement.originalName?.replace(/\s+/g, ' ').trim() || sourceName;
+    const nextOriginalName =
+        sourceOriginalName &&
+        normalizeGlossaryNameKey(sourceOriginalName) !== normalizeGlossaryNameKey(canonicalName)
+            ? sourceOriginalName
+            : undefined;
+
+    return {
+        ...measurement,
+        name: canonicalName,
+        originalName: nextOriginalName,
+    };
+}
+
+function nowIsoTimestamp(): string {
+    return new Date().toISOString();
+}
+
+function isEnglishGlossaryName(value: string): boolean {
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return false;
+    }
+    if (NON_ENGLISH_NAME_PATTERN.test(trimmed)) {
+        return false;
+    }
+    if (!/^[A-Za-z0-9 ,./()+'%-]+$/.test(trimmed)) {
+        return false;
+    }
+    if (!/[A-Za-z]/.test(trimmed)) {
+        return false;
+    }
+    const normalized = normalizeTextForMatch(trimmed);
+    for (const token of NON_ENGLISH_GLOSSARY_TOKENS) {
+        if (normalized.includes(token)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function isHighConfidenceGlossaryFallbackName(name: string): boolean {
+    const trimmed = normalizeMeasurementNameForGlossary(name);
+    if (!isEnglishGlossaryName(trimmed)) {
+        return false;
+    }
+    if (trimmed.length > 55) {
+        return false;
+    }
+    if (GLOSSARY_FALLBACK_REJECT_PATTERN.test(trimmed)) {
+        return false;
+    }
+    if (/\b(?:mg\/d?l|iu\/l|mmol\/l|ng\/m?l|pg\/m?l|µ?mol\/l|x10e\d+\/u?l)\b/i.test(trimmed)) {
+        return false;
+    }
+
+    const normalized = normalizeTextForMatch(trimmed);
+    if (!LIKELY_ANALYTE_NAME_PATTERN.test(normalized)) {
+        return false;
+    }
+    if (/(?:\b\d{2,}\b)|(?:\b0\d\b)/.test(trimmed) && !/\b(?:b12|b6|d3|ft3|ft4|a1c|e2|omega-3)\b/i.test(trimmed)) {
+        return false;
+    }
+    if (normalized.split(' ').length > 8) {
+        return false;
+    }
+    return true;
+}
+
+function createEmptyBloodworkGlossary(): BloodworkGlossary {
+    return {
+        version: 1,
+        updatedAt: nowIsoTimestamp(),
+        entries: [],
+    };
+}
+
+function normalizeGlossaryNameKey(name: string): string {
+    return normalizeTextForMatch(name).replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function sortUniqueStrings(values: string[]): string[] {
+    return Array.from(new Set(values.map(item => item.trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right));
+}
+
+function buildGlossaryRangeFingerprint(range: z.infer<typeof glossaryRangeSchema>): string {
+    return [
+        range.lower?.toString() ?? '',
+        range.upper?.toString() ?? '',
+        normalizeTextForMatch(range.text ?? ''),
+        normalizeTextForMatch(range.unit ?? ''),
+    ].join('|');
+}
+
+function normalizeGlossaryEntry(entry: BloodworkGlossaryEntry): BloodworkGlossaryEntry | null {
+    const canonicalName = normalizeMeasurementNameForGlossary(entry.canonicalName.trim());
+    if (!canonicalName || !isEnglishGlossaryName(canonicalName)) {
+        return null;
+    }
+    const canonicalKey = normalizeGlossaryNameKey(canonicalName);
+    const aliases = sortUniqueStrings(
+        entry.aliases
+            .map(alias => normalizeMeasurementNameForGlossary(alias))
+            .filter(alias => isEnglishGlossaryName(alias))
+            .filter(alias => normalizeGlossaryNameKey(alias) !== canonicalKey),
+    );
+    const unitHints = sortUniqueStrings(entry.unitHints);
+    const rangesByKey = new Map<string, z.infer<typeof glossaryRangeSchema>>();
+
+    for (const range of entry.knownRanges) {
+        const normalizedRange: z.infer<typeof glossaryRangeSchema> = {
+            lower: range.lower,
+            upper: range.upper,
+            text: range.text?.trim() || undefined,
+            unit: range.unit?.trim() || undefined,
+        };
+        const hasAnyValue =
+            normalizedRange.lower !== undefined ||
+            normalizedRange.upper !== undefined ||
+            normalizedRange.text !== undefined ||
+            normalizedRange.unit !== undefined;
+        if (!hasAnyValue) {
+            continue;
+        }
+        rangesByKey.set(buildGlossaryRangeFingerprint(normalizedRange), normalizedRange);
+    }
+
+    return {
+        canonicalName,
+        aliases,
+        knownRanges: Array.from(rangesByKey.values()),
+        unitHints,
+        createdAt: entry.createdAt || nowIsoTimestamp(),
+        updatedAt: entry.updatedAt || nowIsoTimestamp(),
+    };
+}
+
+function mergeGlossaryEntries(target: BloodworkGlossaryEntry, source: BloodworkGlossaryEntry): void {
+    for (const alias of source.aliases) {
+        upsertAliasIntoGlossaryEntry(target, alias);
+    }
+
+    for (const unitHint of source.unitHints) {
+        const normalizedHint = unitHint.trim();
+        if (!normalizedHint) {
+            continue;
+        }
+        if (!target.unitHints.some(existing => normalizeTextForMatch(existing) === normalizeTextForMatch(normalizedHint))) {
+            target.unitHints = sortUniqueStrings([...target.unitHints, normalizedHint]);
+        }
+    }
+
+    const rangesByKey = new Map<string, z.infer<typeof glossaryRangeSchema>>();
+    for (const range of target.knownRanges) {
+        rangesByKey.set(buildGlossaryRangeFingerprint(range), range);
+    }
+    for (const range of source.knownRanges) {
+        rangesByKey.set(buildGlossaryRangeFingerprint(range), range);
+    }
+    target.knownRanges = Array.from(rangesByKey.values());
+    target.createdAt = target.createdAt < source.createdAt ? target.createdAt : source.createdAt;
+    target.updatedAt = target.updatedAt > source.updatedAt ? target.updatedAt : source.updatedAt;
+}
+
+function normalizeGlossaryState(glossary: BloodworkGlossary): BloodworkGlossary {
+    const now = nowIsoTimestamp();
+    const mergedByCanonicalKey = new Map<string, BloodworkGlossaryEntry>();
+
+    for (const entry of glossary.entries) {
+        const normalized = normalizeGlossaryEntry(entry);
+        if (!normalized) {
+            continue;
+        }
+        const key = normalizeGlossaryNameKey(normalized.canonicalName);
+        if (!key) {
+            continue;
+        }
+        const existing = mergedByCanonicalKey.get(key);
+        if (existing) {
+            mergeGlossaryEntries(existing, normalized);
+            continue;
+        }
+        mergedByCanonicalKey.set(key, normalized);
+    }
+
+    const normalizedEntries = Array.from(mergedByCanonicalKey.values())
+        .sort((left, right) => left.canonicalName.localeCompare(right.canonicalName));
+
+    return {
+        version: 1,
+        updatedAt: glossary.updatedAt || now,
+        entries: normalizedEntries,
+    };
+}
+
+function loadBloodworkGlossary(glossaryPath: string): BloodworkGlossary {
+    if (!fs.existsSync(glossaryPath)) {
+        return createEmptyBloodworkGlossary();
+    }
+
+    let raw: unknown;
+    try {
+        raw = JSON.parse(fs.readFileSync(glossaryPath, 'utf8'));
+    } catch {
+        return createEmptyBloodworkGlossary();
+    }
+
+    try {
+        const parsed = bloodworkGlossarySchema.parse(raw);
+        return normalizeGlossaryState(parsed);
+    } catch {
+        return createEmptyBloodworkGlossary();
+    }
+}
+
+function saveBloodworkGlossary(glossaryPath: string, glossary: BloodworkGlossary): void {
+    const normalizedGlossary = normalizeGlossaryState({
+        ...glossary,
+        updatedAt: nowIsoTimestamp(),
+    });
+    fs.mkdirSync(path.dirname(glossaryPath), { recursive: true });
+    fs.writeFileSync(glossaryPath, `${JSON.stringify(normalizedGlossary, null, 4)}\n`, 'utf8');
+}
+
+function resolveGlossaryValidatorModelIds(primaryModelIds: string[]): string[] {
+    const envModels = process.env.VITALS_GLOSSARY_VALIDATOR_MODEL_IDS
+        ?.split(',')
+        .map(modelId => modelId.trim())
+        .filter(Boolean);
+    if (envModels && envModels.length > 0) {
+        return envModels;
+    }
+
+    if (DEFAULT_GLOSSARY_VALIDATOR_MODEL_IDS.length > 0) {
+        return DEFAULT_GLOSSARY_VALIDATOR_MODEL_IDS;
+    }
+
+    return primaryModelIds;
+}
+
+function buildGlossaryLookup(glossary: BloodworkGlossary): Map<string, BloodworkGlossaryEntry> {
+    const lookup = new Map<string, BloodworkGlossaryEntry>();
+    for (const entry of glossary.entries) {
+        const keys = [entry.canonicalName, ...entry.aliases];
+        for (const key of keys) {
+            lookup.set(normalizeGlossaryNameKey(key), entry);
+        }
+    }
+    return lookup;
+}
+
+function upsertAliasIntoGlossaryEntry(entry: BloodworkGlossaryEntry, alias: string): void {
+    const trimmedAlias = normalizeMeasurementNameForGlossary(alias);
+    if (!trimmedAlias || !isEnglishGlossaryName(trimmedAlias)) {
+        return;
+    }
+    if (normalizeGlossaryNameKey(trimmedAlias) === normalizeGlossaryNameKey(entry.canonicalName)) {
+        return;
+    }
+    if (!entry.aliases.some(existing => normalizeGlossaryNameKey(existing) === normalizeGlossaryNameKey(trimmedAlias))) {
+        entry.aliases = sortUniqueStrings([...entry.aliases, trimmedAlias]);
+    }
+}
+
+function upsertUnitHintIntoGlossaryEntry(entry: BloodworkGlossaryEntry, unit: string | undefined): void {
+    if (!unit) {
+        return;
+    }
+    const trimmedUnit = unit.trim();
+    if (!trimmedUnit) {
+        return;
+    }
+    if (!entry.unitHints.some(existing => normalizeTextForMatch(existing) === normalizeTextForMatch(trimmedUnit))) {
+        entry.unitHints = sortUniqueStrings([...entry.unitHints, trimmedUnit]);
+    }
+}
+
+function upsertRangeIntoGlossaryEntry(entry: BloodworkGlossaryEntry, measurement: BloodworkMeasurement): void {
+    if (!measurement.referenceRange) {
+        return;
+    }
+    const nextRange: z.infer<typeof glossaryRangeSchema> = {
+        lower: measurement.referenceRange.lower,
+        upper: measurement.referenceRange.upper,
+        text: measurement.referenceRange.text?.trim() || undefined,
+        unit: measurement.unit?.trim() || undefined,
+    };
+    const hasRangeValue =
+        nextRange.lower !== undefined ||
+        nextRange.upper !== undefined ||
+        nextRange.text !== undefined ||
+        nextRange.unit !== undefined;
+    if (!hasRangeValue) {
+        return;
+    }
+    const fingerprint = buildGlossaryRangeFingerprint(nextRange);
+    const existingFingerprints = new Set(entry.knownRanges.map(range => buildGlossaryRangeFingerprint(range)));
+    if (!existingFingerprints.has(fingerprint)) {
+        entry.knownRanges = [...entry.knownRanges, nextRange];
+    }
+}
+
+function touchGlossaryEntry(entry: BloodworkGlossaryEntry): void {
+    entry.updatedAt = nowIsoTimestamp();
+}
+
+function createGlossaryEntryFromMeasurement({
+    canonicalName,
+    measurement,
+}: {
+    canonicalName: string;
+    measurement: BloodworkMeasurement;
+}): BloodworkGlossaryEntry {
+    const timestamp = nowIsoTimestamp();
+    const entry: BloodworkGlossaryEntry = {
+        canonicalName,
+        aliases: [],
+        knownRanges: [],
+        unitHints: [],
+        createdAt: timestamp,
+        updatedAt: timestamp,
+    };
+    upsertAliasIntoGlossaryEntry(entry, canonicalName);
+    if (measurement.name) {
+        upsertAliasIntoGlossaryEntry(entry, measurement.name);
+    }
+    if (measurement.originalName) {
+        upsertAliasIntoGlossaryEntry(entry, measurement.originalName);
+    }
+    upsertUnitHintIntoGlossaryEntry(entry, measurement.unit);
+    upsertRangeIntoGlossaryEntry(entry, measurement);
+    return entry;
 }
 
 function cleanMeasurementCandidate(measurement: BloodworkMeasurement): BloodworkMeasurement {
@@ -1031,6 +1624,375 @@ function buildMeasurementNormalizationPrompt({
     ].join('\n');
 }
 
+function buildGlossaryValidationPrompt({
+    sourcePath,
+    existingCanonicalNames,
+    unknownMeasurements,
+}: {
+    sourcePath: string;
+    existingCanonicalNames: string[];
+    unknownMeasurements: Array<{ index: number; measurement: BloodworkMeasurement }>;
+}): string {
+    const candidates = unknownMeasurements.map(item => ({
+        index: item.index,
+        name: item.measurement.name,
+        originalName: item.measurement.originalName,
+        value: item.measurement.value,
+        unit: item.measurement.unit,
+        referenceRange: item.measurement.referenceRange,
+        notes: item.measurement.notes,
+    }));
+
+    return [
+        `Source file: ${sourcePath}`,
+        '',
+        'You are the second-pass bloodwork glossary validator.',
+        'Classify each candidate as one of: alias, new_valid, invalid.',
+        'alias: candidate refers to an existing canonical analyte in the provided glossary names.',
+        'new_valid: candidate is a real analyte but not yet in glossary.',
+        'invalid: candidate is parsing noise, narrative text, metadata, or uncertain.',
+        'Strict rule: canonicalName and aliases must be English-only terms using ASCII letters/digits/punctuation.',
+        'If the candidate is non-English or uncertain, choose invalid.',
+        'For alias, set targetCanonicalName exactly to one of the existing canonical names.',
+        'For new_valid, set canonicalName in English and include optional English aliases.',
+        'Never return non-English canonical names or aliases.',
+        '',
+        'Existing canonical names:',
+        JSON.stringify(existingCanonicalNames, null, 2),
+        '',
+        'Candidates:',
+        JSON.stringify(candidates, null, 2),
+    ].join('\n');
+}
+
+async function validateUnknownMeasurementsWithGlossaryModel({
+    provider,
+    modelIds,
+    sourcePath,
+    glossary,
+    unknownMeasurements,
+}: {
+    provider: ReturnType<typeof createOpenRouter>;
+    modelIds: string[];
+    sourcePath: string;
+    glossary: BloodworkGlossary;
+    unknownMeasurements: Array<{ index: number; measurement: BloodworkMeasurement }>;
+}): Promise<Map<number, z.infer<typeof glossaryValidationDecisionSchema>>> {
+    if (unknownMeasurements.length === 0) {
+        return new Map();
+    }
+
+    const existingCanonicalNames = glossary.entries.map(entry => entry.canonicalName);
+    const prompt = buildGlossaryValidationPrompt({
+        sourcePath,
+        existingCanonicalNames,
+        unknownMeasurements,
+    });
+
+    let result: z.infer<typeof glossaryValidationBatchSchema>;
+    try {
+        const response = await generateObjectWithModelFallback({
+            provider,
+            modelIds,
+            schema: glossaryValidationBatchSchema,
+            prompt,
+            maxOutputTokens: GLOSSARY_VALIDATION_MAX_OUTPUT_TOKENS,
+            contextLabel: `${sourcePath} (glossary validation)`,
+        });
+        result = response.object;
+    } catch (error) {
+        if (process.env.VITALS_IMPORT_DEBUG === 'true') {
+            console.error(`[debug] glossary validation failed for ${sourcePath}:`, error);
+        }
+        return new Map();
+    }
+
+    const decisions = new Map<number, z.infer<typeof glossaryValidationDecisionSchema>>();
+    for (const decision of result.decisions) {
+        if (!unknownMeasurements.some(item => item.index === decision.index)) {
+            continue;
+        }
+        decisions.set(decision.index, decision);
+    }
+    if (decisions.size === 0 && process.env.VITALS_IMPORT_DEBUG === 'true') {
+        console.error(`[debug] glossary validation returned no decisions for ${sourcePath}`);
+    }
+    return decisions;
+}
+
+function findGlossaryEntryByName({
+    glossary,
+    lookup,
+    name,
+}: {
+    glossary: BloodworkGlossary;
+    lookup: Map<string, BloodworkGlossaryEntry>;
+    name: string;
+}): BloodworkGlossaryEntry | null {
+    const key = normalizeGlossaryNameKey(name);
+    if (!key) {
+        return null;
+    }
+    const existing = lookup.get(key);
+    if (existing) {
+        return existing;
+    }
+
+    const found = glossary.entries.find(entry => normalizeGlossaryNameKey(entry.canonicalName) === key);
+    if (!found) {
+        return null;
+    }
+    lookup.set(key, found);
+    return found;
+}
+
+function appendGlossaryEntry({
+    glossary,
+    lookup,
+    entry,
+}: {
+    glossary: BloodworkGlossary;
+    lookup: Map<string, BloodworkGlossaryEntry>;
+    entry: BloodworkGlossaryEntry;
+}): void {
+    glossary.entries.push(entry);
+    const keys = [entry.canonicalName, ...entry.aliases];
+    for (const key of keys) {
+        lookup.set(normalizeGlossaryNameKey(key), entry);
+    }
+}
+
+function createFallbackGlossaryDecision(
+    measurement: BloodworkMeasurement,
+): z.infer<typeof glossaryValidationDecisionSchema> | null {
+    const canonicalName = normalizeMeasurementNameForGlossary(measurement.name);
+    if (!canonicalName || !isHighConfidenceGlossaryFallbackName(canonicalName)) {
+        return null;
+    }
+    return {
+        index: 0,
+        action: 'new_valid',
+        canonicalName,
+        aliases: measurement.originalName && isEnglishGlossaryName(measurement.originalName)
+            ? [measurement.originalName.trim()]
+            : [],
+        reason: 'fallback-new-valid',
+    };
+}
+
+function applyGlossaryDecision({
+    glossary,
+    lookup,
+    measurement,
+    decision,
+    acceptedMeasurements,
+}: {
+    glossary: BloodworkGlossary;
+    lookup: Map<string, BloodworkGlossaryEntry>;
+    measurement: BloodworkMeasurement;
+    decision: z.infer<typeof glossaryValidationDecisionSchema>;
+    acceptedMeasurements: BloodworkMeasurement[];
+}): void {
+    if (decision.action === 'invalid') {
+        return;
+    }
+
+    if (decision.action === 'alias') {
+        const targetCanonicalName = decision.targetCanonicalName?.trim();
+        if (!targetCanonicalName || !isEnglishGlossaryName(targetCanonicalName)) {
+            return;
+        }
+        const existingEntry = findGlossaryEntryByName({
+            glossary,
+            lookup,
+            name: targetCanonicalName,
+        });
+        if (!existingEntry) {
+            return;
+        }
+
+        const aliasedMeasurement: BloodworkMeasurement = {
+            ...measurement,
+            name: existingEntry.canonicalName,
+        };
+        upsertAliasIntoGlossaryEntry(existingEntry, aliasedMeasurement.name);
+        if (aliasedMeasurement.originalName) {
+            upsertAliasIntoGlossaryEntry(existingEntry, aliasedMeasurement.originalName);
+        }
+        if (decision.aliases) {
+            for (const alias of decision.aliases) {
+                upsertAliasIntoGlossaryEntry(existingEntry, alias);
+            }
+        }
+        upsertUnitHintIntoGlossaryEntry(existingEntry, aliasedMeasurement.unit);
+        upsertRangeIntoGlossaryEntry(existingEntry, aliasedMeasurement);
+        touchGlossaryEntry(existingEntry);
+        acceptedMeasurements.push(aliasedMeasurement);
+        return;
+    }
+
+    const canonicalName = decision.canonicalName?.trim();
+    if (!canonicalName || !isEnglishGlossaryName(canonicalName)) {
+        return;
+    }
+
+    const existingEntry = findGlossaryEntryByName({
+        glossary,
+        lookup,
+        name: canonicalName,
+    });
+    const measurementWithCanonicalName: BloodworkMeasurement = {
+        ...measurement,
+        name: canonicalName,
+    };
+
+    if (existingEntry) {
+        upsertAliasIntoGlossaryEntry(existingEntry, canonicalName);
+        if (measurementWithCanonicalName.originalName) {
+            upsertAliasIntoGlossaryEntry(existingEntry, measurementWithCanonicalName.originalName);
+        }
+        if (decision.aliases) {
+            for (const alias of decision.aliases) {
+                upsertAliasIntoGlossaryEntry(existingEntry, alias);
+            }
+        }
+        upsertUnitHintIntoGlossaryEntry(existingEntry, measurementWithCanonicalName.unit);
+        upsertRangeIntoGlossaryEntry(existingEntry, measurementWithCanonicalName);
+        touchGlossaryEntry(existingEntry);
+    } else {
+        const entry = createGlossaryEntryFromMeasurement({
+            canonicalName,
+            measurement: measurementWithCanonicalName,
+        });
+        if (decision.aliases) {
+            for (const alias of decision.aliases) {
+                upsertAliasIntoGlossaryEntry(entry, alias);
+            }
+        }
+        appendGlossaryEntry({
+            glossary,
+            lookup,
+            entry,
+        });
+    }
+    acceptedMeasurements.push(measurementWithCanonicalName);
+}
+
+async function applyGlossaryValidationToMeasurements({
+    provider,
+    glossary,
+    sourcePath,
+    primaryModelIds,
+    measurements,
+}: {
+    provider: ReturnType<typeof createOpenRouter>;
+    glossary: BloodworkGlossary;
+    sourcePath: string;
+    primaryModelIds: string[];
+    measurements: BloodworkMeasurement[];
+}): Promise<BloodworkMeasurement[]> {
+    if (measurements.length === 0) {
+        return measurements;
+    }
+
+    const lookup = buildGlossaryLookup(glossary);
+    const accepted: BloodworkMeasurement[] = [];
+    const unknown: Array<{ index: number; measurement: BloodworkMeasurement }> = [];
+
+    for (const measurement of measurements) {
+        if (!isEnglishGlossaryName(measurement.name)) {
+            continue;
+        }
+
+        const knownEntryFromName = findGlossaryEntryByName({
+            glossary,
+            lookup,
+            name: measurement.name,
+        });
+        const knownEntryFromOriginal =
+            measurement.originalName && isEnglishGlossaryName(measurement.originalName)
+                ? findGlossaryEntryByName({
+                    glossary,
+                    lookup,
+                    name: measurement.originalName,
+                })
+                : null;
+        const knownEntry = knownEntryFromName ?? knownEntryFromOriginal;
+
+        if (knownEntry) {
+            const normalizedMeasurement = {
+                ...measurement,
+                name: knownEntry.canonicalName,
+            };
+            upsertAliasIntoGlossaryEntry(knownEntry, normalizedMeasurement.name);
+            if (normalizedMeasurement.originalName) {
+                upsertAliasIntoGlossaryEntry(knownEntry, normalizedMeasurement.originalName);
+            }
+            upsertUnitHintIntoGlossaryEntry(knownEntry, normalizedMeasurement.unit);
+            upsertRangeIntoGlossaryEntry(knownEntry, normalizedMeasurement);
+            touchGlossaryEntry(knownEntry);
+            accepted.push(normalizedMeasurement);
+            continue;
+        }
+
+        unknown.push({
+            index: unknown.length,
+            measurement,
+        });
+    }
+
+    if (unknown.length > 0) {
+        const validatorModelIds = resolveGlossaryValidatorModelIds(primaryModelIds);
+        for (let offset = 0; offset < unknown.length; offset += MAX_GLOSSARY_DECISIONS) {
+            const unknownChunk = unknown.slice(offset, offset + MAX_GLOSSARY_DECISIONS);
+            const decisions = await validateUnknownMeasurementsWithGlossaryModel({
+                provider,
+                modelIds: validatorModelIds,
+                sourcePath,
+                glossary,
+                unknownMeasurements: unknownChunk,
+            });
+
+            for (const item of unknownChunk) {
+                let decision = decisions.get(item.index);
+                if (!decision) {
+                    const retryDecisionMap = await validateUnknownMeasurementsWithGlossaryModel({
+                        provider,
+                        modelIds: validatorModelIds,
+                        sourcePath,
+                        glossary,
+                        unknownMeasurements: [item],
+                    });
+                    decision = retryDecisionMap.get(item.index);
+                }
+                if (!decision) {
+                    const fallback = createFallbackGlossaryDecision(item.measurement);
+                    if (fallback) {
+                        decision = {
+                            ...fallback,
+                            index: item.index,
+                        };
+                    }
+                }
+                if (!decision) {
+                    continue;
+                }
+
+                applyGlossaryDecision({
+                    glossary,
+                    lookup,
+                    measurement: item.measurement,
+                    decision,
+                    acceptedMeasurements: accepted,
+                });
+            }
+        }
+    }
+
+    glossary.updatedAt = nowIsoTimestamp();
+    return mergeUniqueMeasurements(accepted);
+}
+
 function buildMeasurementKey(measurement: BloodworkMeasurement): string {
     const rawValue = measurement.value;
     const valuePart =
@@ -1467,12 +2429,14 @@ async function generateLabObject({
     pdfPath,
     extractedText,
     pageTexts,
+    glossary,
 }: {
     openRouterApiKey: string;
     modelIds: string[];
     pdfPath: string;
     extractedText: string;
     pageTexts: string[];
+    glossary: BloodworkGlossary;
 }): Promise<{ lab: BloodworkLab; modelId: string }> {
     const provider = createOpenRouter({ apiKey: openRouterApiKey });
     let metadataModelId: string | null = null;
@@ -1537,6 +2501,15 @@ async function generateLabObject({
             ...narrativeFallback,
         ]);
     }
+
+    measurements = await applyGlossaryValidationToMeasurements({
+        provider,
+        glossary,
+        sourcePath: pdfPath,
+        primaryModelIds: modelIds,
+        measurements,
+    });
+
     if (measurements.length === 0) {
         measurements = [{
             name: 'Unparsed Result',
@@ -1621,6 +2594,8 @@ async function importSingleFile({
     s3Client,
     s3Bucket,
     s3Prefix,
+    glossary,
+    glossaryPath,
 }: {
     pdfPath: string;
     openRouterApiKey: string;
@@ -1628,6 +2603,8 @@ async function importSingleFile({
     s3Client: S3Client | null;
     s3Bucket: string;
     s3Prefix: string;
+    glossary: BloodworkGlossary;
+    glossaryPath: string;
 }): Promise<ImportResult> {
     const pdfBytes = new Uint8Array(await Bun.file(pdfPath).arrayBuffer());
     assertPdfSignature(pdfBytes, pdfPath);
@@ -1639,6 +2616,7 @@ async function importSingleFile({
         pdfPath,
         extractedText: extracted.fullText,
         pageTexts: extracted.pageTexts,
+        glossary,
     });
 
     fs.mkdirSync(DEFAULT_OUTPUT_DIRECTORY, { recursive: true });
@@ -1657,6 +2635,8 @@ async function importSingleFile({
         fileName: outputFileName,
         jsonPayload,
     });
+
+    saveBloodworkGlossary(glossaryPath, glossary);
 
     return { outputPath, s3Key, modelId };
 }
@@ -1699,6 +2679,8 @@ async function runBloodworkImporter(argv: string[] = process.argv.slice(2)): Pro
     const openRouterApiKey = requireEnv('OPENROUTER_API_KEY');
     const modelIds = resolveModelIds(options.modelIds);
     const files = resolveInputFiles(options);
+    const glossaryPath = process.env.VITALS_BLOODWORK_GLOSSARY_PATH?.trim() || DEFAULT_GLOSSARY_PATH;
+    const glossary = loadBloodworkGlossary(glossaryPath);
     const { s3Client, s3Bucket, s3Prefix } = createS3ClientIfNeeded({
         skipUpload: options.skipUpload,
     });
@@ -1724,6 +2706,8 @@ async function runBloodworkImporter(argv: string[] = process.argv.slice(2)): Pro
                 s3Client,
                 s3Bucket,
                 s3Prefix,
+                glossary,
+                glossaryPath,
             });
 
             successCount += 1;
@@ -1756,6 +2740,7 @@ export {
     assertPdfSignature,
     normalizeModelOutput,
     filterLikelyMeasurements,
+    isEnglishGlossaryName,
     resolveModelIds,
     runBloodworkImporter,
 };

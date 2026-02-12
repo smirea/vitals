@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
     assertPdfSignature,
     filterLikelyMeasurements,
+    isEnglishGlossaryName,
     parseCliOptions,
     resolveModelIds,
 } from './bloodwork-import.ts';
@@ -81,5 +82,14 @@ describe('filterLikelyMeasurements', () => {
             'Hep B Core Ab, Tot',
         ]);
         expect(filtered[0]?.originalName).toBe('Leukozyten (EB)');
+    });
+});
+
+describe('isEnglishGlossaryName', () => {
+    test('accepts english analyte terms and rejects non-english names', () => {
+        expect(isEnglishGlossaryName('Hemoglobin A1c')).toBe(true);
+        expect(isEnglishGlossaryName('Upper Respiratory Culture')).toBe(true);
+        expect(isEnglishGlossaryName('Hämatokrit')).toBe(false);
+        expect(isEnglishGlossaryName('Leukozyten')).toBe(false);
     });
 });
