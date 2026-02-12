@@ -7,11 +7,11 @@ Pick the next most important feature to work on, implement it fully and test it 
 # Features:
 
 - [ ] blodwork importer: converts unstructured varied bloodwork pdfs into standardized json and uploads to s3
-    - [ ] use createScript.ts framework
-    - [ ] `scripts/bloodwork-import.ts` accepts a pdf as input, uses AI (gemini 3 flash via ai sdk + openrouter) to convert it to a standardized json template that includes date, location, lab name, import location (optional, flag), weight and the table of all standardized measurements. for each measurement capture value, ranges, flags, notes etc. store all the parsed data as `data/bloodwork_{date}_{lab}.json` pretty json 4 spaces
-    - [ ] account for the bloodwork being in different languages and vastly different formats output must be standardized and in engligh
-    - [ ] all data must also be uploaded to s3 in `stefan-life/vitals/bloodwork_{date}_{lab}.json` bucket location
-    - [ ] all my existing labs are in `data/to-import`, use them for testing and to get a sense of various potential formats. create a standard `BloodworkLab` zod type and use that as the basis for the various tools and enforce the json be in that shape. a lot of the properties will have to be optional most likely
+    - [x] use createScript.ts framework
+    - [x] `scripts/bloodwork-import.ts` accepts a pdf as input, uses AI (gemini 3 flash via ai sdk + openrouter) to convert it to a standardized json template that includes date, location, lab name, import location (optional, flag), weight and the table of all standardized measurements. for each measurement capture value, ranges, flags, notes etc. store all the parsed data as `data/bloodwork_{date}_{lab}.json` pretty json 4 spaces
+    - [x] account for the bloodwork being in different languages and vastly different formats output must be standardized and in engligh
+    - [x] all data must also be uploaded to s3 in `stefan-life/vitals/bloodwork_{date}_{lab}.json` bucket location
+    - [x] all my existing labs are in `data/to-import`, use them for testing and to get a sense of various potential formats. create a standard `BloodworkLab` zod type and use that as the basis for the various tools and enforce the json be in that shape. a lot of the properties will have to be optional most likely
     - [ ] once everything is working and tested, import all data from `data/to-import`
 - [ ] data sync: downloads data from s3
     - [ ] create a script to download data from the bucket via `scripts/download-data.ts`
@@ -27,3 +27,5 @@ Pick the next most important feature to work on, implement it fully and test it 
 - [ ] create env with env-manager and create specific keys for everything requested (you can use env-manager to generate an openrouter key)
 
 # Notes:
+- `data/to-import/2024-06-20_Lab_Results.pdf` is not a valid PDF (signature mismatch), so it cannot currently be imported until the source file is fixed/replaced.
+- Importer runtime requires `OPENROUTER_API_KEY` and AWS env vars (`AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`) unless running with `--skip-upload`.

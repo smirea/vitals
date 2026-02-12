@@ -5,10 +5,15 @@ import { tanstackRouter } from '@tanstack/router-plugin/vite';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import tailwindcss from '@tailwindcss/vite';
 
+const clientPort = Number(process.env.CLIENT_PORT);
+if (!Number.isFinite(clientPort)) {
+    throw new Error('process.env.CLIENT_PORT must be a number');
+}
+
 // https://vite.dev/config/
 export default defineConfig({
     server: {
-        port: process.env.CLIENT_PORT,
+        port: clientPort,
         strictPort: true,
         proxy: {
             '/api': {

@@ -1,7 +1,7 @@
 {
     // pulled from bun init
     "compilerOptions": {
-        "lib": ["ESNext"],
+        "lib": ["ESNext", "DOM", "DOM.Iterable"],
         "target": "ESNext",
         "module": "Preserve",
         "moduleDetection": "force",
