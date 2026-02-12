@@ -1,0 +1,7 @@
+{
+    "name": "client",
+    "private": true,
+    "scripts": {
+        "dev": "rm -rf node_modules/.vite; bunx --bun vite -- --port $CLIENT_PORT"
+    }
+}

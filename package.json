@@ -1,0 +1,34 @@
+{
+    "name": "vitals",
+    "private": true,
+    "scripts": {
+        "lint": "oxlint --fix",
+        "test": "bun test",
+        "server:dev": "bun run --elide-lines 0 --no-clear-screen --install fallback --env-file .env --env-file .env.local --filter server dev",
+        "client:dev": "bun run --elide-lines 0 --no-clear-screen --install fallback --env-file .env --env-file .env.local --filter client dev",
+        "dev": "concurrently --restart-tries=-1 --restart-after=1000 --names 'server ,client ,' --c 'green,cyan' 'bun run server:dev' 'bun run client:dev'"
+    },
+    "dependencies": {
+        "@ant-design/icons": "^6.1.0",
+        "@emotion/react": "^11.14.0",
+        "@emotion/styled": "^11.14.1",
+        "@phosphor-icons/react": "^2.1.10",
+        "@tailwindcss/vite": "^4.1.18",
+        "@tanstack/router-plugin": "^1.159.5",
+        "@types/bun": "^1.3.9",
+        "@typescript/native-preview": "^7.0.0-dev.20260212.1",
+        "@vitejs/plugin-react": "^5.1.4",
+        "antd": "^6.3.0",
+        "concurrently": "^9.2.1",
+        "kill-port-process": "^3.2.1",
+        "lefthook": "^2.1.1",
+        "lodash": "^4.17.23",
+        "oxlint": "^1.47.0",
+        "react": "^19.2.4",
+        "react-dom": "^19.2.4",
+        "tailwindcss": "^4.1.18",
+        "typescript": "^5.9.3",
+        "vite": "^7.3.1",
+        "vite-tsconfig-paths": "^6.1.1"
+    }
+}
