@@ -74,35 +74,41 @@ export const bloodworkMeasurementFlagSchema = z.enum([
     'unknown',
 ]);
 
-function parseBoundedReferenceText(text: string): { min?: number; max?: number } {
+function parseRangeNumber(raw: string): number | undefined {
+    const parsed = Number.parseFloat(raw.replace(/[<>]/g, '').replace(',', '.').trim());
+    return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+export function parseReferenceRangeBoundsFromText(text: string): { min?: number; max?: number } | undefined {
     const trimmed = text.trim();
     if (!trimmed) {
-        return {};
+        return undefined;
     }
 
-    const pair = trimmed.match(/([<>]?\d+(?:[.,]\d+)?)\s*-\s*([<>]?\d+(?:[.,]\d+)?)/);
+    const pair = trimmed.match(/([<>]?\s*-?\d+(?:[.,]\d+)?)\s*(?:-|–|—|to)\s*([<>]?\s*-?\d+(?:[.,]\d+)?)/i);
     if (pair) {
-        const min = Number.parseFloat(pair[1]!.replace(/[<>]/g, '').replace(',', '.'));
-        const max = Number.parseFloat(pair[2]!.replace(/[<>]/g, '').replace(',', '.'));
-        return {
-            min: Number.isFinite(min) ? min : undefined,
-            max: Number.isFinite(max) ? max : undefined,
-        };
+        const min = parseRangeNumber(pair[1]!);
+        const max = parseRangeNumber(pair[2]!);
+        if (min === undefined && max === undefined) {
+            return undefined;
+        }
+        return { min, max };
     }
 
     const comparator = trimmed.match(/([<>]=?)\s*(-?\d+(?:[.,]\d+)?)/);
-    if (comparator) {
-        const value = Number.parseFloat(comparator[2]!.replace(',', '.'));
-        if (!Number.isFinite(value)) {
-            return {};
-        }
-        if (comparator[1]!.includes('<')) {
-            return { max: value };
-        }
-        return { min: value };
+    if (!comparator) {
+        return undefined;
     }
 
-    return {};
+    const value = parseRangeNumber(comparator[2]!);
+    if (value === undefined) {
+        return undefined;
+    }
+
+    if (comparator[1]!.includes('<')) {
+        return { max: value };
+    }
+    return { min: value };
 }
 
 export const bloodworkReferenceRangeSchema = z
@@ -122,7 +128,7 @@ export const bloodworkReferenceRangeSchema = z
         if (!value.text) {
             return {};
         }
-        return parseBoundedReferenceText(value.text);
+        return parseReferenceRangeBoundsFromText(value.text) ?? {};
     })
     .refine(
         value => value.min !== undefined || value.max !== undefined,

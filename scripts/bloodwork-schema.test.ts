@@ -6,6 +6,7 @@ import {
     buildBloodworkFileName,
     buildBloodworkS3Key,
     normalizeIsoDate,
+    parseReferenceRangeBoundsFromText,
 } from './bloodwork-schema.ts';
 
 describe('normalizeIsoDate', () => {
@@ -47,6 +48,20 @@ describe('bloodworkReferenceRangeSchema', () => {
             min: 3.5,
             max: 5.5,
         });
+    });
+});
+
+describe('parseReferenceRangeBoundsFromText', () => {
+    test('parses common bounded formats', () => {
+        expect(parseReferenceRangeBoundsFromText('2.5 - 4.9')).toEqual({ min: 2.5, max: 4.9 });
+        expect(parseReferenceRangeBoundsFromText('2,5–4,9')).toEqual({ min: 2.5, max: 4.9 });
+        expect(parseReferenceRangeBoundsFromText('<= 120')).toEqual({ max: 120 });
+        expect(parseReferenceRangeBoundsFromText('>= -3.2')).toEqual({ min: -3.2 });
+    });
+
+    test('returns undefined for unsupported text', () => {
+        expect(parseReferenceRangeBoundsFromText('see comment')).toBeUndefined();
+        expect(parseReferenceRangeBoundsFromText('')).toBeUndefined();
     });
 });
 

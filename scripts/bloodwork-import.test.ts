@@ -4,6 +4,7 @@ import {
     assertPdfSignature,
     filterLikelyMeasurements,
     isEnglishGlossaryName,
+    normalizeGlossaryDecisionAction,
     parseCliOptions,
     resolveModelIds,
 } from './bloodwork-import.ts';
@@ -35,8 +36,28 @@ describe('resolveModelIds', () => {
         expect(resolveModelIds(['custom/model'])).toEqual(['custom/model']);
     });
 
+    test('normalizes and deduplicates model ids', () => {
+        expect(resolveModelIds([' custom/model ', 'custom/model', 'other/model'])).toEqual([
+            'custom/model',
+            'other/model',
+        ]);
+    });
+
     test('defaults to gemini 3 flash preview when cli models are absent', () => {
         expect(resolveModelIds([])).toEqual(['google/gemini-3-flash-preview']);
+    });
+});
+
+describe('normalizeGlossaryDecisionAction', () => {
+    test('maps common alias and new-valid variants', () => {
+        expect(normalizeGlossaryDecisionAction('alias')).toBe('alias');
+        expect(normalizeGlossaryDecisionAction('existing_alias')).toBe('alias');
+        expect(normalizeGlossaryDecisionAction('new_valid')).toBe('new_valid');
+        expect(normalizeGlossaryDecisionAction('new-entry')).toBe('new_valid');
+    });
+
+    test('treats unknown actions as invalid', () => {
+        expect(normalizeGlossaryDecisionAction('uncertain')).toBe('invalid');
     });
 });
 

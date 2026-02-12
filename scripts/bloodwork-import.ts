@@ -13,6 +13,7 @@ import {
     bloodworkMeasurementSchema,
     buildBloodworkFileName,
     normalizeIsoDate,
+    parseReferenceRangeBoundsFromText,
     slugifyForPath,
     type BloodworkMeasurement,
     type BloodworkLab,
@@ -361,6 +362,26 @@ const glossaryValidationBatchSchema = z.object({
 
 type BloodworkGlossary = z.infer<typeof bloodworkGlossarySchema>;
 type BloodworkGlossaryEntry = z.infer<typeof bloodworkGlossaryEntrySchema>;
+type GlossaryDecisionAction = 'alias' | 'new_valid' | 'invalid';
+
+const GLOSSARY_ALIAS_ACTION_KEYS = new Set([
+    'alias',
+    'existingalias',
+    'aliasexisting',
+    'maptoalias',
+    'maptoexisting',
+    'usealias',
+]);
+
+const GLOSSARY_NEW_VALID_ACTION_KEYS = new Set([
+    'newvalid',
+    'validnew',
+    'new',
+    'newentry',
+    'newvalidentry',
+    'newcanonical',
+    'addnew',
+]);
 
 const HELP_TEXT = [
     'Usage:',
@@ -447,11 +468,19 @@ function requireEnv(name: string): string {
     return value;
 }
 
+function normalizeModelIds(modelIds: string[], context: string): string[] {
+    const normalized = Array.from(new Set(modelIds.map(modelId => modelId.trim()).filter(Boolean)));
+    if (normalized.length === 0) {
+        throw new Error(`No model ids configured for ${context}`);
+    }
+    return normalized;
+}
+
 function resolveModelIds(cliModelIds: string[]): string[] {
     if (cliModelIds.length > 0) {
-        return cliModelIds;
+        return normalizeModelIds(cliModelIds, 'bloodwork extraction');
     }
-    return DEFAULT_MODEL_IDS;
+    return normalizeModelIds(DEFAULT_MODEL_IDS, 'bloodwork extraction');
 }
 
 function resolveInputFiles(options: CliOptions): string[] {
@@ -980,14 +1009,14 @@ function resolveGlossaryValidatorModelIds(primaryModelIds: string[]): string[] {
         .map(modelId => modelId.trim())
         .filter(Boolean);
     if (envModels && envModels.length > 0) {
-        return envModels;
+        return normalizeModelIds(envModels, 'glossary validation');
     }
 
-    if (DEFAULT_GLOSSARY_VALIDATOR_MODEL_IDS.length > 0) {
-        return DEFAULT_GLOSSARY_VALIDATOR_MODEL_IDS;
+    if (primaryModelIds.length > 0) {
+        return normalizeModelIds(primaryModelIds, 'glossary validation');
     }
 
-    return primaryModelIds;
+    return normalizeModelIds(DEFAULT_GLOSSARY_VALIDATOR_MODEL_IDS, 'glossary validation');
 }
 
 function buildGlossaryLookup(glossary: BloodworkGlossary): Map<string, BloodworkGlossaryEntry> {
@@ -1053,6 +1082,27 @@ function touchGlossaryEntry(entry: BloodworkGlossaryEntry): void {
     entry.updatedAt = nowIsoTimestamp();
 }
 
+function updateGlossaryEntryWithMeasurement({
+    entry,
+    measurement,
+    extraAliases = [],
+}: {
+    entry: BloodworkGlossaryEntry;
+    measurement: BloodworkMeasurement;
+    extraAliases?: string[];
+}): void {
+    upsertAliasIntoGlossaryEntry(entry, measurement.name);
+    if (measurement.originalName) {
+        upsertAliasIntoGlossaryEntry(entry, measurement.originalName);
+    }
+    for (const alias of extraAliases) {
+        upsertAliasIntoGlossaryEntry(entry, alias);
+    }
+    upsertUnitHintIntoGlossaryEntry(entry, measurement.unit);
+    upsertRangeIntoGlossaryEntry(entry, measurement);
+    touchGlossaryEntry(entry);
+}
+
 function createGlossaryEntryFromMeasurement({
     canonicalName,
     measurement,
@@ -1069,15 +1119,13 @@ function createGlossaryEntryFromMeasurement({
         createdAt: timestamp,
         updatedAt: timestamp,
     };
-    upsertAliasIntoGlossaryEntry(entry, canonicalName);
-    if (measurement.name) {
-        upsertAliasIntoGlossaryEntry(entry, measurement.name);
-    }
-    if (measurement.originalName) {
-        upsertAliasIntoGlossaryEntry(entry, measurement.originalName);
-    }
-    upsertUnitHintIntoGlossaryEntry(entry, measurement.unit);
-    upsertRangeIntoGlossaryEntry(entry, measurement);
+    updateGlossaryEntryWithMeasurement({
+        entry,
+        measurement: {
+            ...measurement,
+            name: canonicalName,
+        },
+    });
     return entry;
 }
 
@@ -1347,35 +1395,7 @@ function parseNumericValueToken(raw: string): number | string {
 }
 
 function parseReferenceRangeFromText(text: string): BloodworkMeasurement['referenceRange'] | undefined {
-    const trimmed = text.trim();
-    if (!trimmed) {
-        return undefined;
-    }
-    const pair = trimmed.match(/([<>]?\d+(?:[.,]\d+)?)\s*-\s*([<>]?\d+(?:[.,]\d+)?)/);
-    if (pair) {
-        const min = Number.parseFloat(pair[1]!.replace(/[<>]/g, '').replace(',', '.'));
-        const max = Number.parseFloat(pair[2]!.replace(/[<>]/g, '').replace(',', '.'));
-        return {
-            min: Number.isFinite(min) ? min : undefined,
-            max: Number.isFinite(max) ? max : undefined,
-        };
-    }
-
-    const comparator = trimmed.match(/([<>]=?)\s*(-?\d+(?:[.,]\d+)?)/);
-    if (!comparator) {
-        return undefined;
-    }
-
-    const bound = Number.parseFloat(comparator[2]!.replace(',', '.'));
-    if (!Number.isFinite(bound)) {
-        return undefined;
-    }
-
-    if (comparator[1]!.includes('<')) {
-        return { max: bound };
-    }
-
-    return { min: bound };
+    return parseReferenceRangeBoundsFromText(text);
 }
 
 function parseMeasurementFromTableLine(line: string): BloodworkMeasurement | null {
@@ -1818,6 +1838,17 @@ function createFallbackGlossaryDecision(
     };
 }
 
+function normalizeGlossaryDecisionAction(action: string): GlossaryDecisionAction {
+    const normalizedAction = normalizeTextForMatch(action).replace(/[^a-z0-9]+/g, '');
+    if (GLOSSARY_ALIAS_ACTION_KEYS.has(normalizedAction)) {
+        return 'alias';
+    }
+    if (GLOSSARY_NEW_VALID_ACTION_KEYS.has(normalizedAction)) {
+        return 'new_valid';
+    }
+    return 'invalid';
+}
+
 function applyGlossaryDecision({
     glossary,
     lookup,
@@ -1831,16 +1862,7 @@ function applyGlossaryDecision({
     decision: z.infer<typeof glossaryValidationDecisionSchema>;
     acceptedMeasurements: BloodworkMeasurement[];
 }): void {
-    const normalizedAction = normalizeTextForMatch(decision.action).replace(/[^a-z0-9]+/g, '');
-    const action =
-        normalizedAction === 'alias' || normalizedAction === 'existingalias'
-            ? 'alias'
-            : normalizedAction === 'newvalid' ||
-                normalizedAction === 'new' ||
-                normalizedAction === 'newentry' ||
-                normalizedAction === 'validnew'
-                ? 'new_valid'
-                : 'invalid';
+    const action = normalizeGlossaryDecisionAction(decision.action);
 
     if (action === 'invalid') {
         return;
@@ -1864,18 +1886,11 @@ function applyGlossaryDecision({
             ...measurement,
             name: existingEntry.canonicalName,
         };
-        upsertAliasIntoGlossaryEntry(existingEntry, aliasedMeasurement.name);
-        if (aliasedMeasurement.originalName) {
-            upsertAliasIntoGlossaryEntry(existingEntry, aliasedMeasurement.originalName);
-        }
-        if (decision.aliases) {
-            for (const alias of decision.aliases) {
-                upsertAliasIntoGlossaryEntry(existingEntry, alias);
-            }
-        }
-        upsertUnitHintIntoGlossaryEntry(existingEntry, aliasedMeasurement.unit);
-        upsertRangeIntoGlossaryEntry(existingEntry, aliasedMeasurement);
-        touchGlossaryEntry(existingEntry);
+        updateGlossaryEntryWithMeasurement({
+            entry: existingEntry,
+            measurement: aliasedMeasurement,
+            extraAliases: decision.aliases,
+        });
         acceptedMeasurements.push(aliasedMeasurement);
         return;
     }
@@ -1896,18 +1911,11 @@ function applyGlossaryDecision({
     };
 
     if (existingEntry) {
-        upsertAliasIntoGlossaryEntry(existingEntry, canonicalName);
-        if (measurementWithCanonicalName.originalName) {
-            upsertAliasIntoGlossaryEntry(existingEntry, measurementWithCanonicalName.originalName);
-        }
-        if (decision.aliases) {
-            for (const alias of decision.aliases) {
-                upsertAliasIntoGlossaryEntry(existingEntry, alias);
-            }
-        }
-        upsertUnitHintIntoGlossaryEntry(existingEntry, measurementWithCanonicalName.unit);
-        upsertRangeIntoGlossaryEntry(existingEntry, measurementWithCanonicalName);
-        touchGlossaryEntry(existingEntry);
+        updateGlossaryEntryWithMeasurement({
+            entry: existingEntry,
+            measurement: measurementWithCanonicalName,
+            extraAliases: decision.aliases,
+        });
     } else {
         const entry = createGlossaryEntryFromMeasurement({
             canonicalName,
@@ -1974,13 +1982,10 @@ async function applyGlossaryValidationToMeasurements({
                 ...normalizedMeasurement,
                 name: knownEntry.canonicalName,
             };
-            upsertAliasIntoGlossaryEntry(knownEntry, resolvedMeasurement.name);
-            if (resolvedMeasurement.originalName) {
-                upsertAliasIntoGlossaryEntry(knownEntry, resolvedMeasurement.originalName);
-            }
-            upsertUnitHintIntoGlossaryEntry(knownEntry, resolvedMeasurement.unit);
-            upsertRangeIntoGlossaryEntry(knownEntry, resolvedMeasurement);
-            touchGlossaryEntry(knownEntry);
+            updateGlossaryEntryWithMeasurement({
+                entry: knownEntry,
+                measurement: resolvedMeasurement,
+            });
             accepted.push(resolvedMeasurement);
             continue;
         }
@@ -2841,6 +2846,7 @@ export {
     normalizeModelOutput,
     filterLikelyMeasurements,
     isEnglishGlossaryName,
+    normalizeGlossaryDecisionAction,
     resolveModelIds,
     runBloodworkImporter,
 };
