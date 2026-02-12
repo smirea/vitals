@@ -5,6 +5,7 @@
         "lint": "oxlint --fix",
         "test": "bun test",
         "bloodwork:import": "bun run --env-file .env --env-file .env.local scripts/bloodwork-import.ts",
+        "data:sync": "bun run --env-file .env --env-file .env.local scripts/download-data.ts",
         "server:dev": "bun run --elide-lines 0 --no-clear-screen --install fallback --env-file .env --env-file .env.local --filter server dev",
         "client:dev": "bun run --elide-lines 0 --no-clear-screen --install fallback --env-file .env --env-file .env.local --filter client dev",
         "dev": "concurrently --restart-tries=-1 --restart-after=1000 --names 'server ,client ,' --c 'green,cyan' 'bun run server:dev' 'bun run client:dev'"

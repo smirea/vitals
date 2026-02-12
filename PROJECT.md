@@ -6,28 +6,28 @@ Pick the next most important feature to work on, implement it fully and test it 
 
 # Features:
 
-- [ ] blodwork importer: converts unstructured varied bloodwork pdfs into standardized json and uploads to s3
+- [x] blodwork importer: converts unstructured varied bloodwork pdfs into standardized json and uploads to s3
     - [x] use createScript.ts framework
     - [x] `scripts/bloodwork-import.ts` accepts a pdf as input, uses AI (gemini 3 flash via ai sdk + openrouter) to convert it to a standardized json template that includes date, location, lab name, import location (optional, flag), weight and the table of all standardized measurements. for each measurement capture value, ranges, flags, notes etc. store all the parsed data as `data/bloodwork_{date}_{lab}.json` pretty json 4 spaces
     - [x] account for the bloodwork being in different languages and vastly different formats output must be standardized and in engligh
     - [x] all data must also be uploaded to s3 in `stefan-life/vitals/bloodwork_{date}_{lab}.json` bucket location
     - [x] all my existing labs are in `data/to-import`, use them for testing and to get a sense of various potential formats. create a standard `BloodworkLab` zod type and use that as the basis for the various tools and enforce the json be in that shape. a lot of the properties will have to be optional most likely
-    - [ ] once everything is working and tested, import all data from `data/to-import`
-- [ ] data sync: downloads data from s3
-    - [ ] create a script to download data from the bucket via `scripts/download-data.ts`
-    - [ ] script only downloads what has changed
-    - [ ] when the server starts it would automatically call this script
-- [ ] historical dashboard: client application to analyze the data
-    - [ ] optimized for web, but also usable on mobile
-    - [ ] use ant-design components
-    - [ ] show a table of every single datapoint (names as rows, source as a column, from latest to oldest). allow filter
-    - [ ] allow selecting rows and columns (default to all columns) to see data on a chart, I want to see how the various vitals have trended over time. chart should show to the right of the table always visible if there are items selected
-    - [ ] in mobile portrait mode, only show the latest value and allow to switch the column to go to a different lab. checking items should show a chart under the table (chart always visible if values are selected so table takes up less space)
+    - [x] once everything is working and tested, import all data from `data/to-import`
+- [x] data sync: downloads data from s3
+    - [x] create a script to download data from the bucket via `scripts/download-data.ts`
+    - [x] script only downloads what has changed
+    - [x] when the server starts it would automatically call this script
+- [x] historical dashboard: client application to analyze the data
+    - [x] optimized for web, but also usable on mobile
+    - [x] use ant-design components
+    - [x] show a table of every single datapoint (names as rows, source as a column, from latest to oldest). allow filter
+    - [x] allow selecting rows and columns (default to all columns) to see data on a chart, I want to see how the various vitals have trended over time. chart should show to the right of the table always visible if there are items selected
+    - [x] in mobile portrait mode, only show the latest value and allow to switch the column to go to a different lab. checking items should show a chart under the table (chart always visible if values are selected so table takes up less space)
 - [x] use the aws cli to create a purpose built user for this project with dedicated permissions and store the credentials in .env.local
 - [x] create env with env-manager and create specific keys for everything requested (you can use env-manager to generate an openrouter key)
 
 # Notes:
-- `data/to-import/2024-06-20_Lab_Results.pdf` is not a valid PDF (signature mismatch), so it cannot currently be imported until the source file is fixed/replaced.
+- Importer defaults to `google/gemini-3-flash-preview` and validates output through the shared `BloodworkLab` schema.
 - Importer runtime requires `OPENROUTER_API_KEY` and AWS env vars (`AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`) unless running with `--skip-upload`.
 - Dedicated IAM user `vitals-project-user` has been created with scoped access to `s3://stefan-life/vitals/*` and credentials are stored in `.env.local`.
-- Current OpenRouter key has a strict credit/token cap, which currently blocks full PDF extraction imports (`can only afford 318 output tokens`). Creating a higher-limit key via `env-manager new-key OPENROUTER_API_KEY` also needs a valid `OPENROUTER_MANAGEMENT_KEY`.
+- `scripts/download-data.ts` uses a local sync state file (`data/.s3-sync-state.json`) to only download changed S3 objects.

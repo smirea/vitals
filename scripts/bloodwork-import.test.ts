@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 
 import {
     assertPdfSignature,
@@ -29,19 +29,12 @@ describe('parseCliOptions', () => {
 });
 
 describe('resolveModelIds', () => {
-    const originalModelValue = process.env.OPENROUTER_MODEL;
-
-    beforeEach(() => {
-        process.env.OPENROUTER_MODEL = originalModelValue;
-    });
-
     test('uses cli model ids first', () => {
         expect(resolveModelIds(['custom/model'])).toEqual(['custom/model']);
     });
 
-    test('uses environment model ids when cli models are absent', () => {
-        process.env.OPENROUTER_MODEL = 'google/gemini-3-flash, google/gemini-2.5-flash';
-        expect(resolveModelIds([])).toEqual(['google/gemini-3-flash', 'google/gemini-2.5-flash']);
+    test('defaults to gemini 3 flash preview when cli models are absent', () => {
+        expect(resolveModelIds([])).toEqual(['google/gemini-3-flash-preview']);
     });
 });
 
