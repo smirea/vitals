@@ -191,8 +191,10 @@ const GLOSSARY_TRAILING_QUALIFIER_KEYS = new Set([
 ]);
 
 const GLOSSARY_CANONICAL_NAME_RULES: Array<{ pattern: RegExp; canonicalName: string }> = [
+    { pattern: /^albumin(?: serum)?$/i, canonicalName: 'Albumin' },
     { pattern: /\balbumin corrected calcium\b/i, canonicalName: 'Albumin-Corrected Calcium' },
     { pattern: /\balbumin globulin ratio\b/i, canonicalName: 'Albumin/Globulin Ratio' },
+    { pattern: /^alkaline phosphatase(?: phosphatase)?$/i, canonicalName: 'Alkaline Phosphatase' },
     { pattern: /\balanine aminotransferase|^alt(?: sgpt)?(?: p5p)?$/i, canonicalName: 'ALT (SGPT)' },
     { pattern: /\baspartate aminotransferase|^ast(?: sgot)?(?: p5p)?$/i, canonicalName: 'AST (SGOT)' },
     { pattern: /\bbilirubin total|^total bilirubin$|bilirubin gesamt/i, canonicalName: 'Bilirubin, Total' },
@@ -200,14 +202,15 @@ const GLOSSARY_CANONICAL_NAME_RULES: Array<{ pattern: RegExp; canonicalName: str
     { pattern: /\bbilirubin indirect\b/i, canonicalName: 'Bilirubin, Indirect' },
     { pattern: /\bc reactive protein|^crp$/i, canonicalName: 'C-Reactive Protein' },
     { pattern: /\bestimated average glucose\b/i, canonicalName: 'Estimated Average Glucose' },
+    { pattern: /^glucose(?: si)?$/i, canonicalName: 'Glucose' },
     { pattern: /\bfree testosterone index\b/i, canonicalName: 'Free Testosterone Index' },
     { pattern: /\bfree testosterone\b/i, canonicalName: 'Free Testosterone' },
     { pattern: /\bft3\b/i, canonicalName: 'Free T3' },
     { pattern: /\bft4\b/i, canonicalName: 'Free T4' },
     { pattern: /\bhba1c|hemoglobin a1c\b/i, canonicalName: 'Hemoglobin A1c' },
-    { pattern: /\bhdl cholesterol|^hdl chol(?:esterol)?$/i, canonicalName: 'HDL Cholesterol' },
-    { pattern: /\bnon hdl cholesterol|^non hdl$/i, canonicalName: 'Non-HDL Cholesterol' },
-    { pattern: /\bldl cholesterol|^ldl chol(?:esterol)?$|^ldl$/i, canonicalName: 'LDL Cholesterol' },
+    { pattern: /^(?:non hdl cholesterol|non hdl)$/i, canonicalName: 'Non-HDL Cholesterol' },
+    { pattern: /^(?:hdl cholesterol|hdl chol(?:esterol)?)$/i, canonicalName: 'HDL Cholesterol' },
+    { pattern: /^(?:ldl cholesterol|ldl chol(?:esterol)?|ldl)$/i, canonicalName: 'LDL Cholesterol' },
     { pattern: /\btriglyceride\b/i, canonicalName: 'Triglycerides' },
     { pattern: /\bhoma ir\b/i, canonicalName: 'HOMA-IR' },
     { pattern: /\bsex hormone binding globulin\b/i, canonicalName: 'Sex Hormone Binding Globulin' },
@@ -215,9 +218,24 @@ const GLOSSARY_CANONICAL_NAME_RULES: Array<{ pattern: RegExp; canonicalName: str
     { pattern: /\btransferrin saturation\b/i, canonicalName: 'Transferrin Saturation' },
     { pattern: /\bluteinizing hormone\b/i, canonicalName: 'Luteinizing Hormone' },
     { pattern: /\bfollicle stimulating hormone\b/i, canonicalName: 'Follicle Stimulating Hormone' },
+    { pattern: /^insulin(?: serum)?$/i, canonicalName: 'Insulin' },
+    { pattern: /^igg(?: serum)?$/i, canonicalName: 'IgG' },
+    { pattern: /^tsh(?: basal)?$/i, canonicalName: 'TSH' },
+    { pattern: /^globulin$/i, canonicalName: 'Globulin' },
+    { pattern: /^creatinine$/i, canonicalName: 'Creatinine' },
+    { pattern: /^egfr non$/i, canonicalName: 'eGFR' },
+    { pattern: /^cortisol(?: a m| am)$/i, canonicalName: 'Cortisol, AM' },
+    { pattern: /^cortisol corti?one 11b hsd(?: ii)?$/i, canonicalName: 'Cortisol/Cortisone 11B-HSD' },
+    { pattern: /^(?:ol|chol) hdl$/i, canonicalName: 'Cholesterol/HDL Ratio' },
+    { pattern: /^hdl$/i, canonicalName: 'HDL Cholesterol' },
+    { pattern: /^ldl chol calc(?: nih)?$/i, canonicalName: 'LDL Cholesterol' },
+    { pattern: /^vldl cholesterol cal$/i, canonicalName: 'VLDL Cholesterol' },
+    { pattern: /^free dhea(?: 2)?$/i, canonicalName: 'Free DHEA' },
+    { pattern: /^glucose serum$/i, canonicalName: 'Glucose' },
     { pattern: /\bvitamin d3 25 oh|vitamin d 25 oh\b/i, canonicalName: 'Vitamin D, 25-OH' },
     { pattern: /\bvitamin b12\b/i, canonicalName: 'Vitamin B12' },
     { pattern: /\bvitamin b2\b/i, canonicalName: 'Vitamin B2' },
+    { pattern: /\bvitamin b6\b/i, canonicalName: 'Vitamin B6' },
     { pattern: /\bmagnesium in erythrocytes\b/i, canonicalName: 'Magnesium, RBC' },
     { pattern: /\bapolipoprotein a 1|^apolipoprotein a1$/i, canonicalName: 'Apolipoprotein A1' },
     { pattern: /\bapolipoprotein b\b/i, canonicalName: 'Apolipoprotein B' },
@@ -282,6 +300,8 @@ const NON_ENGLISH_GLOSSARY_TOKENS = [
     'sulfat',
     'und',
     'hormon',
+    'bestimmt als',
+    'flavinadenindinucleotid',
 ];
 const GLOSSARY_FALLBACK_REJECT_PATTERN =
     /\b(?:page|result|desired|desirable|reference|range|guideline|comment|note|customer|service|therapy|study|specificity|sensitivity|mirea|patient|account|code|source|marker|axis|cbc)\b/i;
@@ -1900,44 +1920,45 @@ async function applyGlossaryValidationToMeasurements({
     const unknown: Array<{ index: number; measurement: BloodworkMeasurement }> = [];
 
     for (const measurement of measurements) {
-        if (!isEnglishGlossaryName(measurement.name)) {
+        const normalizedMeasurement = normalizeMeasurementForGlossary(measurement);
+        if (!normalizedMeasurement) {
             continue;
         }
 
         const knownEntryFromName = findGlossaryEntryByName({
             glossary,
             lookup,
-            name: measurement.name,
+            name: normalizedMeasurement.name,
         });
         const knownEntryFromOriginal =
-            measurement.originalName && isEnglishGlossaryName(measurement.originalName)
+            normalizedMeasurement.originalName && isEnglishGlossaryName(normalizedMeasurement.originalName)
                 ? findGlossaryEntryByName({
                     glossary,
                     lookup,
-                    name: measurement.originalName,
+                    name: normalizedMeasurement.originalName,
                 })
                 : null;
         const knownEntry = knownEntryFromName ?? knownEntryFromOriginal;
 
         if (knownEntry) {
-            const normalizedMeasurement = {
-                ...measurement,
+            const resolvedMeasurement = {
+                ...normalizedMeasurement,
                 name: knownEntry.canonicalName,
             };
-            upsertAliasIntoGlossaryEntry(knownEntry, normalizedMeasurement.name);
-            if (normalizedMeasurement.originalName) {
-                upsertAliasIntoGlossaryEntry(knownEntry, normalizedMeasurement.originalName);
+            upsertAliasIntoGlossaryEntry(knownEntry, resolvedMeasurement.name);
+            if (resolvedMeasurement.originalName) {
+                upsertAliasIntoGlossaryEntry(knownEntry, resolvedMeasurement.originalName);
             }
-            upsertUnitHintIntoGlossaryEntry(knownEntry, normalizedMeasurement.unit);
-            upsertRangeIntoGlossaryEntry(knownEntry, normalizedMeasurement);
+            upsertUnitHintIntoGlossaryEntry(knownEntry, resolvedMeasurement.unit);
+            upsertRangeIntoGlossaryEntry(knownEntry, resolvedMeasurement);
             touchGlossaryEntry(knownEntry);
-            accepted.push(normalizedMeasurement);
+            accepted.push(resolvedMeasurement);
             continue;
         }
 
         unknown.push({
             index: unknown.length,
-            measurement,
+            measurement: normalizedMeasurement,
         });
     }
 
