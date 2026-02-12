@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { spawnSync } from 'child_process';
 import path from 'path';
 
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
@@ -24,11 +25,11 @@ const DEFAULT_MODEL_IDS = ['google/gemini-3-flash-preview'];
 const DEFAULT_TO_IMPORT_DIRECTORY = path.resolve(process.cwd(), 'data/to-import');
 const DEFAULT_OUTPUT_DIRECTORY = path.resolve(process.cwd(), 'data');
 const EXTRACTED_TEXT_LIMIT = 45_000;
-const MODEL_MAX_OUTPUT_TOKENS = 350;
+const MODEL_MAX_OUTPUT_TOKENS = 1_400;
 const METADATA_MAX_OUTPUT_TOKENS = 280;
-const MEASUREMENT_BATCH_SIZE = 6;
-const MAX_MEASUREMENT_PASSES_PER_PAGE = 8;
-const EXCLUDED_MEASUREMENT_NAMES_LIMIT = 30;
+const NORMALIZATION_MAX_OUTPUT_TOKENS = 6_000;
+const MAX_MEASUREMENTS_PER_PAGE = 120;
+const MAX_NORMALIZATION_CANDIDATES = 320;
 
 type CliOptions = {
     importAll: boolean;
@@ -49,6 +50,116 @@ type ExtractedPdfText = {
     pageTexts: string[];
 };
 
+const NON_MEASUREMENT_NAME_EXACT = new Set([
+    'page',
+    'seite',
+    'result',
+    'results',
+    'resultat',
+    'tests ordered',
+    'desired range',
+    'interpretation',
+    'dob',
+    'dob:',
+    'height',
+    'height:',
+    'weight',
+    'weight:',
+    'received on',
+    'received on:',
+    'date/time',
+    'date/time collected',
+    'date/time reported',
+    'reference interval',
+    'reference-/zielbereich',
+    'wertelage',
+    'tests',
+    'analyse',
+    'code',
+    'note',
+    'for',
+    'lower',
+    'total',
+    'ny,',
+]);
+
+const NON_MEASUREMENT_NAME_PATTERNS: RegExp[] = [
+    /\b(?:patient|geburtsdatum|geschlecht|barcode|auftrag|fallnummer|tagesnummer|ext\.?nr)\b/i,
+    /\b(?:address|account|physician|specimen|control number|npi|lab report|labcorp raritan)\b/i,
+    /\b(?:tel|fax|phone|e-?mail|www\.|http|@|street|avenue|berlin|new york|zionskirchstr|aroser allee)\b/i,
+    /\b(?:collected|reported|entered|date entered|date\/time)\b/i,
+    /\b(?:durch die dakks|akkreditiert|leitlinie|diagnostik|therapie|dyslipid|legende|quelle)\b/i,
+    /\b(?:for inquiries|overall report status|final|negative not infected)\b/i,
+    /\b(?:comment|comments|canceled|cancelled|immature cells|hematology comments)\b/i,
+    /\b(?:zielwert|risiko|wahrscheinlichkeit|schlaganfallen|myokardinfarkten)\b/i,
+    /\b(?:zielbereich|befund freigegeben)\b/i,
+    /\b(?:miami|federal law|document in error|customer service|comparative hepatol|gastroenterology|circulation|bmc)\b/i,
+    /\b(?:guideline|guidelines|source|according|consider retesting|see note|see comments)\b/i,
+    /\b(?:sensitivity|specificity|study of|patients where|is above|had a sensitivity|had a specificity)\b/i,
+    /\b(?:desirable range|homa-?ir von)\b/i,
+    /\(mz\d+[a-z]?\)/i,
+    /^(?:for|consider|according|source|reference|note|monday|tuesday|wednesday|thursday|friday)\b/i,
+];
+
+const NON_MEASUREMENT_UNIT_EXACT = new Set([
+    'von',
+    'a',
+    'ext',
+    'seite',
+]);
+
+const NON_MEASUREMENT_VALUE_EXACT = new Set([
+    'canceled',
+    'cancelled',
+    'pending',
+    'n/a',
+    'na',
+    'see note',
+    'not reported',
+    'not available',
+]);
+
+const GERMAN_NAME_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string }> = [
+    { pattern: /\bLeukozyten\b/gi, replacement: 'Leukocytes' },
+    { pattern: /\bErythrozyten\b/gi, replacement: 'Erythrocytes' },
+    { pattern: /\bHämoglobin\b/gi, replacement: 'Hemoglobin' },
+    { pattern: /\bHamatokrit\b/gi, replacement: 'Hematocrit' },
+    { pattern: /\bHämatokrit\b/gi, replacement: 'Hematocrit' },
+    { pattern: /\bThrombozyten\b/gi, replacement: 'Platelets' },
+    { pattern: /\bNeutrophile Granulozyten\b/gi, replacement: 'Neutrophils' },
+    { pattern: /\bLymphozyten\b/gi, replacement: 'Lymphocytes' },
+    { pattern: /\bMonozyten\b/gi, replacement: 'Monocytes' },
+    { pattern: /\bEosinophile\b/gi, replacement: 'Eosinophils' },
+    { pattern: /\bBasophile\b/gi, replacement: 'Basophils' },
+    { pattern: /\bGlukose\b/gi, replacement: 'Glucose' },
+    { pattern: /\bNatrium\b/gi, replacement: 'Sodium' },
+    { pattern: /\bKalium\b/gi, replacement: 'Potassium' },
+    { pattern: /\bHarnsäure\b/gi, replacement: 'Uric Acid' },
+    { pattern: /\bGesamteiweiß\b/gi, replacement: 'Total Protein' },
+    { pattern: /\bTransferrinsättigung\b/gi, replacement: 'Transferrin Saturation' },
+    { pattern: /\bLuteinisierendes Hormon\b/gi, replacement: 'Luteinizing Hormone' },
+    { pattern: /\bFollikelstim\. Hormon\b/gi, replacement: 'Follicle Stimulating Hormone' },
+    { pattern: /\bÖstradiol\b/gi, replacement: 'Estradiol' },
+    { pattern: /\bFolsäure\b/gi, replacement: 'Folate' },
+    { pattern: /\bFreies Testosteron\b/gi, replacement: 'Free Testosterone' },
+    { pattern: /\bFreies-Testosteron-Index\b/gi, replacement: 'Free Testosterone Index' },
+    { pattern: /\bSexualhormonbindendes Globulin\b/gi, replacement: 'Sex Hormone Binding Globulin' },
+    { pattern: /\bDHEA-Sulfat\b/gi, replacement: 'DHEA Sulfate' },
+    { pattern: /\babgeleitete mittlere Glucose\b/gi, replacement: 'Estimated Average Glucose' },
+    { pattern: /\bHba1c \(ifcc\/neue Std\.\)\b/gi, replacement: 'HbA1c (IFCC)' },
+];
+
+const QUALITATIVE_RESULT_PATTERN =
+    /\b(?:negative|positive|detected|not detected|nonreactive|reactive|indeterminate|trace|abnormal|normal)\b/i;
+const VALUE_TOKEN_PATTERN =
+    /(?:^|[^\w])(?:[<>]=?|=)?\d+(?:[.,]\d+)?(?:\s*-\s*[<>]?\d+(?:[.,]\d+)?)?(?:%|[A-Za-z/]+)?|(?:^|\s)(?:negative|positive|detected|not detected|nonreactive|reactive|indeterminate|abnormal|normal)(?:\s|$)/i;
+const RANGE_TOKEN_PATTERN =
+    /[<>]?\d+(?:[.,]\d+)?\s*-\s*[<>]?\d+(?:[.,]\d+)?|(?:^|\s)[<>]\s*\d+(?:[.,]\d+)?/i;
+const UNIT_TOKEN_PATTERN =
+    /\b(?:mg\/d?l|g\/d?l|ng\/m?l|pg\/m?l|iu\/l|m?u\/l|u\/l|mmol\/l|mmol\/mol|µ?mol\/l|x10e\d+\/u?l|f?mol\/l|fl|pg|ratio|%|nmol\/l|pmol\/l|s\/co\s*ratio|gpt\/l|tpt\/l|\/µ?l|µ?kat\/l|ng\/dl|ml\/m)\b/i;
+const LIKELY_ANALYTE_NAME_PATTERN =
+    /\b(?:wbc|rbc|hemoglobin|hematocrit|platelet|neutrophil|lymph|monocyte|eos|baso|glucose|hba1c|creatinine|bun|egfr|bilirubin|albumin|globulin|protein|ast|alt|ggt|alkaline phosphatase|ldh|amylase|lipase|cholesterol|cholester|triglyceride|ldl|hdl|ferritin|iron|uibc|tibc|transferrin|insulin|tsh|ft3|ft4|lh|fsh|estradiol|prolactin|testosterone|dhea|vitamin|folate|magnesium|homa|apolipoprotein|fibrosis|steatosis|nash|cortisol|pregnanediol|estrone|estriol|androsterone|etiocholanolone|igg|omega|epa|dha|crp|hcv|hep b|hbsag)\b/i;
+
 const bloodworkMetadataSchema = z.object({
     date: z.string().trim().min(1).transform(normalizeIsoDate),
     labName: z.string().trim().min(1),
@@ -60,7 +171,11 @@ const bloodworkMetadataSchema = z.object({
 });
 
 const measurementBatchSchema = z.object({
-    measurements: z.array(bloodworkMeasurementSchema).max(MEASUREMENT_BATCH_SIZE),
+    measurements: z.array(bloodworkMeasurementSchema).max(MAX_MEASUREMENTS_PER_PAGE),
+});
+
+const measurementNormalizationSchema = z.object({
+    measurements: z.array(bloodworkMeasurementSchema).max(MAX_NORMALIZATION_CANDIDATES),
 });
 
 const HELP_TEXT = [
@@ -198,14 +313,57 @@ function assertPdfSignature(bytes: Uint8Array, filePath: string): void {
     }
 }
 
-async function extractPdfText(bytes: Uint8Array): Promise<ExtractedPdfText> {
+function splitExtractedTextIntoPages(text: string): string[] {
+    return text
+        .split('\f')
+        .map(page => page.replace(/\r/g, '').trim())
+        .filter(Boolean);
+}
+
+function commandExists(binary: string): boolean {
+    const result = spawnSync('which', [binary], {
+        stdio: 'ignore',
+    });
+    return result.status === 0;
+}
+
+function extractPdfTextWithPdftotext(pdfPath: string): ExtractedPdfText | null {
+    if (!commandExists('pdftotext')) {
+        return null;
+    }
+
+    const command = spawnSync(
+        'pdftotext',
+        ['-layout', '-enc', 'UTF-8', pdfPath, '-'],
+        {
+            encoding: 'utf8',
+            maxBuffer: 20 * 1024 * 1024,
+        },
+    );
+
+    if (command.status !== 0) {
+        return null;
+    }
+
+    const pageTexts = splitExtractedTextIntoPages(command.stdout || '');
+    if (pageTexts.length === 0) {
+        return null;
+    }
+
+    return {
+        fullText: pageTexts.join('\n\n'),
+        pageTexts,
+    };
+}
+
+async function extractPdfTextWithPdfjs(bytes: Uint8Array): Promise<ExtractedPdfText> {
     const document = await getDocument({ data: bytes }).promise;
     const pageTexts: string[] = [];
 
     for (let pageIndex = 1; pageIndex <= document.numPages; pageIndex++) {
         const page = await document.getPage(pageIndex);
         const textContent = await page.getTextContent();
-        const lines: Array<{ y: number; tokens: string[] }> = [];
+        const lines = new Map<number, Array<{ x: number; token: string }>>();
 
         for (const item of textContent.items) {
             if (!('str' in item)) continue;
@@ -213,30 +371,42 @@ async function extractPdfText(bytes: Uint8Array): Promise<ExtractedPdfText> {
             if (!token) continue;
 
             const transform = 'transform' in item && Array.isArray(item.transform) ? item.transform : null;
+            const x = transform ? Number(transform[4]) : Number.NaN;
             const y = transform ? Number(transform[5]) : Number.NaN;
-            const previousLine = lines.at(-1);
-            if (!previousLine || !Number.isFinite(y) || Math.abs(previousLine.y - y) > 2) {
-                lines.push({ y, tokens: [token] });
-            } else {
-                previousLine.tokens.push(token);
-            }
+            if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+
+            const existingY = Array.from(lines.keys()).find(lineY => Math.abs(lineY - y) <= 1.8);
+            const lineY = existingY ?? y;
+            const line = lines.get(lineY) ?? [];
+            line.push({ x, token });
+            lines.set(lineY, line);
         }
 
-        const pageBody = lines
-            .map(line => line.tokens.join(' ').replace(/\s+/g, ' ').trim())
+        const pageBody = Array.from(lines.entries())
+            .sort((left, right) => right[0] - left[0])
+            .map(([, tokens]) => tokens.sort((left, right) => left.x - right.x).map(item => item.token).join(' '))
+            .map(line => line.replace(/\s+/g, ' ').trim())
             .filter(Boolean)
             .join('\n')
             .trim();
 
         if (pageBody) {
-            pageTexts.push(`Page ${pageIndex}\n${pageBody}`);
+            pageTexts.push(pageBody);
         }
     }
 
     return {
-        fullText: pageTexts.join('\n'),
+        fullText: pageTexts.join('\n\n'),
         pageTexts,
     };
+}
+
+async function extractPdfText(pdfPath: string, bytes: Uint8Array): Promise<ExtractedPdfText> {
+    const extractedWithPdftotext = extractPdfTextWithPdftotext(pdfPath);
+    if (extractedWithPdftotext) {
+        return extractedWithPdftotext;
+    }
+    return extractPdfTextWithPdfjs(bytes);
 }
 
 function cleanUnknown(value: unknown): unknown {
@@ -296,28 +466,568 @@ function buildMetadataPrompt(sourcePath: string, extractedText: string): string 
     ].join('\n');
 }
 
-function buildMeasurementPrompt({
+function normalizeTextForMatch(value: string): string {
+    return value
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function cleanMeasurementCandidate(measurement: BloodworkMeasurement): BloodworkMeasurement {
+    const name = measurement.name.replace(/\s+/g, ' ').trim();
+    const originalName = measurement.originalName?.replace(/\s+/g, ' ').trim() || undefined;
+    let unit = measurement.unit?.replace(/\s+/g, ' ').trim() || undefined;
+    const notes = measurement.notes?.replace(/\s+/g, ' ').trim() || undefined;
+    const category = measurement.category?.replace(/\s+/g, ' ').trim() || undefined;
+    let normalizedName = name;
+    let flag = measurement.flag;
+
+    const indicator = normalizedName.match(/\s([+-])$/);
+    if (indicator) {
+        normalizedName = normalizedName.slice(0, -2).trim();
+        if (!flag) {
+            flag = indicator[1] === '+' ? 'high' : 'low';
+        }
+    }
+    normalizedName = normalizedName.replace(/[,:;]+$/g, '').replace(/\s+/g, ' ').trim();
+
+    if (unit && /^(high|low|abnormal|normal|critical)$/i.test(unit)) {
+        if (!flag) {
+            const normalizedUnit = normalizeTextForMatch(unit);
+            if (
+                normalizedUnit === 'high' ||
+                normalizedUnit === 'abnormal' ||
+                normalizedUnit === 'critical'
+            ) {
+                flag = normalizedUnit === 'high' ? 'high' : 'abnormal';
+            } else if (normalizedUnit === 'low') {
+                flag = 'low';
+            } else if (normalizedUnit === 'normal') {
+                flag = 'normal';
+            }
+        }
+        unit = undefined;
+    }
+
+    return {
+        ...measurement,
+        name: normalizedName,
+        originalName,
+        unit,
+        notes,
+        category,
+        flag,
+    };
+}
+
+function hasUsableMeasurementValue(measurement: BloodworkMeasurement): boolean {
+    const value = measurement.value;
+    if (value === undefined || value === null) {
+        return false;
+    }
+    if (typeof value === 'number') {
+        return Number.isFinite(value);
+    }
+    const normalized = normalizeTextForMatch(value);
+    if (!normalized) {
+        return false;
+    }
+    return !NON_MEASUREMENT_VALUE_EXACT.has(normalized);
+}
+
+function isLikelyMeasurementCandidate(measurement: BloodworkMeasurement): boolean {
+    const normalizedName = normalizeTextForMatch(measurement.name);
+    if (!normalizedName) {
+        return false;
+    }
+    if (NON_MEASUREMENT_NAME_EXACT.has(normalizedName)) {
+        return false;
+    }
+    if (normalizedName.endsWith(':')) {
+        return false;
+    }
+    if (!/[a-z]/i.test(normalizedName)) {
+        return false;
+    }
+    if (/^\d+(?:[.,]\d+)?$/.test(normalizedName)) {
+        return false;
+    }
+    if (NON_MEASUREMENT_NAME_PATTERNS.some(pattern => pattern.test(normalizedName))) {
+        return false;
+    }
+    if (/^(?:for|is|be|this|that|these|those|and|with|without|under|over)\b/i.test(normalizedName)) {
+        return false;
+    }
+    if (normalizedName.split(' ').length > 10) {
+        return false;
+    }
+    if (/[.;]/.test(measurement.name) && !measurement.unit) {
+        return false;
+    }
+    if (
+        /^[a-z]+,\s*[a-z]+(?:\s+[a-z])?$/.test(normalizedName) &&
+        !measurement.unit &&
+        !measurement.referenceRange
+    ) {
+        return false;
+    }
+    if (
+        /^[a-z]+(?:,\s*)?[a-z]+$/.test(normalizedName) &&
+        !LIKELY_ANALYTE_NAME_PATTERN.test(normalizedName)
+    ) {
+        return false;
+    }
+    if (
+        normalizedName.includes(',') &&
+        !measurement.unit &&
+        !measurement.referenceRange &&
+        typeof measurement.value === 'number' &&
+        measurement.value >= 1 &&
+        measurement.value <= 31
+    ) {
+        return false;
+    }
+
+    const unit = measurement.unit ? normalizeTextForMatch(measurement.unit) : '';
+    if (unit && NON_MEASUREMENT_UNIT_EXACT.has(unit)) {
+        return false;
+    }
+    if (unit && NON_MEASUREMENT_NAME_PATTERNS.some(pattern => pattern.test(unit))) {
+        return false;
+    }
+    const hasReferenceRange = Boolean(measurement.referenceRange);
+    const hasValidUnit = Boolean(measurement.unit && UNIT_TOKEN_PATTERN.test(measurement.unit));
+    const hasQualitativeValue =
+        typeof measurement.value === 'string' && QUALITATIVE_RESULT_PATTERN.test(measurement.value);
+    const nameLooksAnalyte = LIKELY_ANALYTE_NAME_PATTERN.test(normalizedName);
+    const hasStructuredEvidence = hasValidUnit || hasReferenceRange || hasQualitativeValue;
+    if (!nameLooksAnalyte && !hasStructuredEvidence) {
+        return false;
+    }
+    if (
+        !nameLooksAnalyte &&
+        typeof measurement.value === 'number' &&
+        !hasValidUnit &&
+        !hasReferenceRange
+    ) {
+        return false;
+    }
+
+    return hasUsableMeasurementValue(measurement);
+}
+
+function applyGermanNameFallback(measurement: BloodworkMeasurement): BloodworkMeasurement {
+    let nextName = measurement.name;
+    for (const replacement of GERMAN_NAME_REPLACEMENTS) {
+        nextName = nextName.replace(replacement.pattern, replacement.replacement);
+    }
+    nextName = nextName
+        .replace(/\bHemoglobi\b/gi, 'Hemoglobin')
+        .replace(/\bCholester\b/gi, 'Cholesterol')
+        .replace(/\bAlkaline\b/gi, 'Alkaline Phosphatase')
+        .replace(/\bCarbon Dioxide,\b/gi, 'Carbon Dioxide');
+    nextName = nextName.replace(/\s+/g, ' ').trim();
+    if (nextName === measurement.name) {
+        return measurement;
+    }
+    return {
+        ...measurement,
+        originalName: measurement.originalName || measurement.name,
+        name: nextName,
+    };
+}
+
+function filterLikelyMeasurements(measurements: BloodworkMeasurement[]): BloodworkMeasurement[] {
+    return mergeUniqueMeasurements(
+        measurements
+            .map(cleanMeasurementCandidate)
+            .filter(isLikelyMeasurementCandidate)
+            .map(applyGermanNameFallback),
+    );
+}
+
+function extractTableLikeLines(pageText: string): string[] {
+    const rawLines = pageText
+        .split('\n')
+        .map(line => line.replace(/\t/g, ' ').replace(/\u00a0/g, ' '))
+        .map(line => line.replace(/\s+$/g, ''));
+
+    const selected = new Set<string>();
+
+    for (let index = 0; index < rawLines.length; index++) {
+        const rawLine = rawLines[index]?.trim();
+        if (!rawLine || rawLine.length > 220) {
+            continue;
+        }
+
+        const normalizedWholeLine = normalizeTextForMatch(rawLine);
+        if (!normalizedWholeLine) {
+            continue;
+        }
+        if (NON_MEASUREMENT_NAME_EXACT.has(normalizedWholeLine)) {
+            continue;
+        }
+        if (NON_MEASUREMENT_NAME_PATTERNS.some(pattern => pattern.test(normalizedWholeLine))) {
+            continue;
+        }
+
+        const parts = rawLine
+            .split(/\s{2,}/)
+            .map(part => part.trim())
+            .filter(Boolean);
+        if (parts.length < 2) {
+            continue;
+        }
+
+        const namePart = parts[0]!;
+        if (namePart.length < 2 || namePart.length > 100) {
+            continue;
+        }
+        if (NON_MEASUREMENT_NAME_PATTERNS.some(pattern => pattern.test(namePart))) {
+            continue;
+        }
+
+        const tail = parts.slice(1).join(' ');
+        const hasValue = VALUE_TOKEN_PATTERN.test(tail);
+        if (!hasValue) {
+            continue;
+        }
+
+        const hasUnitOrRangeOrQualitative =
+            UNIT_TOKEN_PATTERN.test(tail) ||
+            RANGE_TOKEN_PATTERN.test(tail) ||
+            QUALITATIVE_RESULT_PATTERN.test(tail);
+
+        if (!hasUnitOrRangeOrQualitative && !LIKELY_ANALYTE_NAME_PATTERN.test(namePart)) {
+            continue;
+        }
+
+        let mergedName = namePart;
+        if (index > 0) {
+            const previousRawLine = rawLines[index - 1]?.trim() || '';
+            if (
+                previousRawLine &&
+                previousRawLine.length < 60 &&
+                previousRawLine.split(/\s{2,}/).length === 1 &&
+                !/\d/.test(previousRawLine) &&
+                !NON_MEASUREMENT_NAME_PATTERNS.some(pattern => pattern.test(previousRawLine))
+            ) {
+                mergedName = `${previousRawLine} ${namePart}`.replace(/\s+/g, ' ');
+            }
+        }
+
+        selected.add([mergedName, ...parts.slice(1)].join(' | '));
+    }
+
+    return Array.from(selected);
+}
+
+function parseNumericValueToken(raw: string): number | string {
+    const trimmed = raw.trim();
+    if (!trimmed) {
+        return trimmed;
+    }
+    if (/^[<>]/.test(trimmed)) {
+        return trimmed;
+    }
+    const parsed = Number.parseFloat(trimmed.replace(',', '.'));
+    if (Number.isFinite(parsed)) {
+        return parsed;
+    }
+    return trimmed;
+}
+
+function parseReferenceRangeFromText(text: string): BloodworkMeasurement['referenceRange'] | undefined {
+    const trimmed = text.trim();
+    if (!trimmed) {
+        return undefined;
+    }
+    const pair = trimmed.match(/([<>]?\d+(?:[.,]\d+)?)\s*-\s*([<>]?\d+(?:[.,]\d+)?)/);
+    if (pair) {
+        const lower = Number.parseFloat(pair[1]!.replace(/[<>]/g, '').replace(',', '.'));
+        const upper = Number.parseFloat(pair[2]!.replace(/[<>]/g, '').replace(',', '.'));
+        return {
+            lower: Number.isFinite(lower) ? lower : undefined,
+            upper: Number.isFinite(upper) ? upper : undefined,
+        };
+    }
+    if (/[<>]\s*\d/.test(trimmed)) {
+        return {
+            text: trimmed,
+        };
+    }
+    return undefined;
+}
+
+function parseMeasurementFromTableLine(line: string): BloodworkMeasurement | null {
+    const parts = line
+        .split('|')
+        .map(part => part.trim())
+        .filter(Boolean);
+    if (parts.length < 2) {
+        return null;
+    }
+
+    const name = parts[0]!;
+    const otherParts = parts.slice(1);
+    let value: BloodworkMeasurement['value'];
+    let unit: string | undefined;
+    let referenceRange: BloodworkMeasurement['referenceRange'] | undefined;
+    let flag: BloodworkMeasurement['flag'] | undefined;
+
+    for (const part of otherParts) {
+        if (!part) {
+            continue;
+        }
+
+        if (!flag && /^(high|low|abnormal|normal|critical)$/i.test(part)) {
+            const normalizedPart = normalizeTextForMatch(part);
+            if (normalizedPart === 'high') flag = 'high';
+            if (normalizedPart === 'low') flag = 'low';
+            if (normalizedPart === 'abnormal') flag = 'abnormal';
+            if (normalizedPart === 'normal') flag = 'normal';
+            if (normalizedPart === 'critical') flag = 'critical';
+            continue;
+        }
+
+        if (!referenceRange) {
+            const parsedRange = parseReferenceRangeFromText(part);
+            if (parsedRange) {
+                referenceRange = parsedRange;
+                continue;
+            }
+        }
+
+        if (!unit && UNIT_TOKEN_PATTERN.test(part)) {
+            unit = part;
+            continue;
+        }
+
+        if (value === undefined) {
+            if (QUALITATIVE_RESULT_PATTERN.test(part)) {
+                value = part;
+                continue;
+            }
+            const exactValue = part.match(/^[<>]?\d+(?:[.,]\d+)?$/);
+            if (exactValue) {
+                value = parseNumericValueToken(exactValue[0]);
+                continue;
+            }
+            const inlineValue = part.match(/[<>]?\d+(?:[.,]\d+)?/);
+            if (inlineValue && part.length <= 18) {
+                value = parseNumericValueToken(inlineValue[0]);
+                continue;
+            }
+        }
+    }
+
+    if (value === undefined) {
+        return null;
+    }
+
+    return {
+        name,
+        originalName: name,
+        value,
+        unit,
+        referenceRange,
+        flag,
+    };
+}
+
+function parseMeasurementsFromTableLikeLines(lines: string[]): BloodworkMeasurement[] {
+    const parsed: BloodworkMeasurement[] = [];
+    for (const line of lines) {
+        const measurement = parseMeasurementFromTableLine(line);
+        if (measurement) {
+            parsed.push(measurement);
+        }
+    }
+    return parsed;
+}
+
+function extractCardStyleMeasurements(pageTexts: string[]): BloodworkMeasurement[] {
+    const measurements: BloodworkMeasurement[] = [];
+    const blockedHeadingPattern =
+        /\b(?:final|next steps|key:|ordering physician|performing lab|report status|panel|stress hormone test)\b/i;
+    const blockedValueLinePattern =
+        /\b(?:no historical data|for additional information|patients being treated|quest diagnostics|contact the|monday - friday)\b/i;
+
+    for (const pageText of pageTexts) {
+        const lines = pageText
+            .split('\n')
+            .map(line => line.replace(/\s+/g, ' ').trim())
+            .filter(Boolean);
+
+        for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+            const heading = lines[lineIndex]!;
+            if (!/^[A-Z0-9 ,().\-/'"]{3,}$/.test(heading)) {
+                continue;
+            }
+            if (blockedHeadingPattern.test(heading)) {
+                continue;
+            }
+            if (NON_MEASUREMENT_NAME_PATTERNS.some(pattern => pattern.test(heading))) {
+                continue;
+            }
+            if (!LIKELY_ANALYTE_NAME_PATTERN.test(heading)) {
+                continue;
+            }
+
+            let unit: string | undefined;
+            let referenceRange: BloodworkMeasurement['referenceRange'] | undefined;
+            let value: BloodworkMeasurement['value'];
+            let metadataLineIndex = lineIndex;
+
+            for (let lookahead = lineIndex + 1; lookahead <= lineIndex + 4 && lookahead < lines.length; lookahead++) {
+                const nextLine = lines[lookahead]!;
+                const desiredRange = nextLine.match(/^Desired Range:\s*(.+)$/i);
+                if (desiredRange) {
+                    referenceRange = parseReferenceRangeFromText(desiredRange[1]!);
+                    const unitTokens = desiredRange[1]!.match(/[A-Za-zµμ%/][A-Za-z0-9µμ%/.()-]*/g);
+                    if (!unit && unitTokens && unitTokens.length > 0) {
+                        unit = unitTokens.at(-1);
+                    }
+                    metadataLineIndex = lookahead;
+                    continue;
+                }
+                const unitMeasure = nextLine.match(/^Unit of Measure:\s*(.+)$/i);
+                if (unitMeasure) {
+                    unit = unitMeasure[1]!.trim();
+                    metadataLineIndex = lookahead;
+                }
+            }
+
+            for (
+                let lookahead = metadataLineIndex + 1;
+                lookahead <= metadataLineIndex + 12 && lookahead < lines.length;
+                lookahead++
+            ) {
+                const nextLine = lines[lookahead]!;
+                if (/^Desired Range:/i.test(nextLine) || /^Unit of Measure:/i.test(nextLine)) {
+                    continue;
+                }
+                if (
+                    lookahead > metadataLineIndex + 1 &&
+                    /^[A-Z0-9 ,().\-/'"]{3,}$/.test(nextLine) &&
+                    LIKELY_ANALYTE_NAME_PATTERN.test(nextLine)
+                ) {
+                    break;
+                }
+
+                const resultLine = nextLine.match(/^Result:\s*(.+)$/i);
+                if (resultLine && resultLine[1]!.trim()) {
+                    const resultValue = resultLine[1]!.trim();
+                    value = parseNumericValueToken(resultValue);
+                    break;
+                }
+
+                const directValue = nextLine.match(/^[<>]?\d+(?:[.,]\d+)?$/);
+                if (directValue) {
+                    value = parseNumericValueToken(directValue[0]);
+                    break;
+                }
+
+                const valueWithBar = nextLine.match(/^([<>]?\d+(?:[.,]\d+)?)\s*\|/);
+                if (valueWithBar) {
+                    value = parseNumericValueToken(valueWithBar[1]!);
+                    break;
+                }
+
+                if (blockedValueLinePattern.test(nextLine)) {
+                    continue;
+                }
+
+                if (!referenceRange) {
+                    const parsedRange = parseReferenceRangeFromText(nextLine);
+                    if (parsedRange) {
+                        referenceRange = parsedRange;
+                        continue;
+                    }
+                }
+
+                const numericMatch = nextLine.match(/[<>]?\d+(?:[.,]\d+)?/);
+                if (numericMatch) {
+                    value = parseNumericValueToken(numericMatch[0]);
+                    break;
+                }
+            }
+
+            if (value === undefined) {
+                continue;
+            }
+
+            const normalizedHeading =
+                heading === heading.toUpperCase()
+                    ? titleCase(heading.toLowerCase())
+                    : heading;
+
+            measurements.push({
+                name: normalizedHeading,
+                originalName: heading,
+                value,
+                unit,
+                referenceRange,
+            });
+        }
+    }
+
+    return mergeUniqueMeasurements(measurements);
+}
+
+function buildMeasurementExtractionPrompt({
     sourcePath,
     pageText,
-    excludedNames,
+    pageNumber,
 }: {
     sourcePath: string;
     pageText: string;
-    excludedNames: string[];
+    pageNumber: number;
 }): string {
-    const excluded = excludedNames.length > 0 ? excludedNames.join(', ') : 'none';
+    return [
+        `Source file: ${sourcePath}`,
+        `Page number: ${pageNumber}`,
+        '',
+        'Extract bloodwork analyte rows from this report page.',
+        'Only include rows that are true lab analytes or derived biomarker results with a reported value.',
+        'Do not include demographics, addresses, contact details, page headers/footers, IDs, notes, interpretations, guideline paragraphs, or section labels.',
+        'Use concise standardized English names in `name`.',
+        'If source text is non-English, preserve the raw source label in `originalName` and translate `name` to English.',
+        'Keep values, units, and reference ranges accurate to source.',
+        'If no analytes are present on this page, return an empty measurements array.',
+        '',
+        'Page text (layout-preserved):',
+        pageText.slice(0, EXTRACTED_TEXT_LIMIT),
+    ].join('\n');
+}
+
+function buildMeasurementNormalizationPrompt({
+    sourcePath,
+    extractedText,
+    candidates,
+}: {
+    sourcePath: string;
+    extractedText: string;
+    candidates: BloodworkMeasurement[];
+}): string {
     return [
         `Source file: ${sourcePath}`,
         '',
-        `Extract up to ${MEASUREMENT_BATCH_SIZE} bloodwork measurements from this page text.`,
-        'Do not include any item from the excluded names list.',
-        'Use standardized English measurement names and keep source values/ranges/units accurate.',
-        'If there are no new measurements, return an empty measurements array.',
+        'Clean and normalize these candidate bloodwork measurements.',
+        'Keep only real blood analytes and derived biomarkers.',
+        'Remove any candidate that is administrative text, page metadata, patient identity, addresses, phone/email, comments, interpretations, guideline citations, or narrative explanations.',
+        'Drop fragmentary/incomplete labels (for example words cut from sentence fragments) unless you can confidently normalize them into a standard analyte.',
+        'The final `name` must be in English. Keep `originalName` as source-language label when translation occurs.',
+        'Preserve numeric/string values, units, ranges, and flags exactly unless clearly malformed.',
+        'Return deduplicated measurements only.',
         '',
-        `Excluded names: ${excluded}`,
+        'Extracted report text (for context):',
+        extractedText.slice(0, EXTRACTED_TEXT_LIMIT),
         '',
-        'Page text:',
-        pageText,
+        'Candidate measurements JSON:',
+        JSON.stringify(candidates.slice(0, MAX_NORMALIZATION_CANDIDATES), null, 2),
     ].join('\n');
 }
 
@@ -354,6 +1064,24 @@ function mergeUniqueMeasurements(measurements: BloodworkMeasurement[]): Bloodwor
         }
     }
     return Array.from(unique.values());
+}
+
+function buildMeasurementNameKey(name: string): string {
+    return normalizeTextForMatch(name).replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function mergeMeasurementsByPreferredName(
+    preferred: BloodworkMeasurement[],
+    fallback: BloodworkMeasurement[],
+): BloodworkMeasurement[] {
+    const merged = new Map<string, BloodworkMeasurement>();
+    for (const measurement of fallback) {
+        merged.set(buildMeasurementNameKey(measurement.name), measurement);
+    }
+    for (const measurement of preferred) {
+        merged.set(buildMeasurementNameKey(measurement.name), measurement);
+    }
+    return mergeUniqueMeasurements(Array.from(merged.values()));
 }
 
 function titleCase(value: string): string {
@@ -412,6 +1140,52 @@ function heuristicExtractMeasurements(pageTexts: string[]): BloodworkMeasurement
     }
 
     return measurements;
+}
+
+function extractNarrativeResultMeasurements(pageTexts: string[]): BloodworkMeasurement[] {
+    const measurements: BloodworkMeasurement[] = [];
+    const combined = pageTexts.join('\n');
+    const qualitativeValueMatch = combined.match(
+        /\b(Abnormal|Positive|Negative|Reactive|Nonreactive|Detected|Not detected)\b/i,
+    );
+
+    if (/upper respiratory culture/i.test(combined) && qualitativeValueMatch) {
+        const rawValue = qualitativeValueMatch[1]!;
+        measurements.push({
+            name: 'Upper Respiratory Culture',
+            originalName: 'Upper Respiratory Culture',
+            value: rawValue[0]!.toUpperCase() + rawValue.slice(1).toLowerCase(),
+        });
+    }
+
+    const qualitativeLinePattern =
+        /^([A-Za-z][A-Za-z0-9 ,()/.-]{2,90})\s+(Abnormal|Positive|Negative|Reactive|Nonreactive|Detected|Not detected)\b/i;
+    for (const pageText of pageTexts) {
+        const lines = pageText.split('\n').map(line => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
+        for (const line of lines) {
+            const match = line.match(qualitativeLinePattern);
+            if (!match) {
+                continue;
+            }
+
+            const rawName = match[1]!.trim();
+            const value = match[2]!.trim();
+            if (
+                NON_MEASUREMENT_NAME_PATTERNS.some(pattern => pattern.test(rawName)) ||
+                normalizeTextForMatch(rawName).startsWith('result ')
+            ) {
+                continue;
+            }
+
+            measurements.push({
+                name: rawName,
+                originalName: rawName,
+                value,
+            });
+        }
+    }
+
+    return mergeUniqueMeasurements(measurements);
 }
 
 function normalizeMetadataOutput(
@@ -609,56 +1383,82 @@ async function extractMeasurementsFromPages({
     sourcePath: string;
     pageTexts: string[];
 }): Promise<BloodworkMeasurement[]> {
-    const uniqueMeasurements = new Map<string, BloodworkMeasurement>();
+    const extractedMeasurements: BloodworkMeasurement[] = [];
 
-    for (const pageText of pageTexts) {
-        for (let pass = 0; pass < MAX_MEASUREMENT_PASSES_PER_PAGE; pass++) {
-            const excludedNames = Array.from(uniqueMeasurements.values())
-                .map(item => item.originalName?.trim() || item.name)
-                .filter(Boolean)
-                .slice(-EXCLUDED_MEASUREMENT_NAMES_LIMIT);
+    for (let pageIndex = 0; pageIndex < pageTexts.length; pageIndex++) {
+        const pageText = pageTexts[pageIndex];
+        if (!/\d/.test(pageText)) {
+            continue;
+        }
 
-            const prompt = buildMeasurementPrompt({
-                sourcePath,
-                pageText,
-                excludedNames,
+        const tableLikeLines = extractTableLikeLines(pageText);
+        if (tableLikeLines.length === 0) {
+            continue;
+        }
+
+        extractedMeasurements.push(...parseMeasurementsFromTableLikeLines(tableLikeLines));
+
+        const prompt = buildMeasurementExtractionPrompt({
+            sourcePath,
+            pageText: tableLikeLines.join('\n'),
+            pageNumber: pageIndex + 1,
+        });
+
+        try {
+            const result = await generateObjectWithModelFallback({
+                provider,
+                modelIds,
+                schema: measurementBatchSchema,
+                prompt,
+                maxOutputTokens: MODEL_MAX_OUTPUT_TOKENS,
+                contextLabel: `${sourcePath} (measurements page ${pageIndex + 1})`,
             });
-
-            let batch: z.infer<typeof measurementBatchSchema>;
-            try {
-                const result = await generateObjectWithModelFallback({
-                    provider,
-                    modelIds,
-                    schema: measurementBatchSchema,
-                    prompt,
-                    maxOutputTokens: MODEL_MAX_OUTPUT_TOKENS,
-                    contextLabel: `${sourcePath} (measurement pass ${pass + 1})`,
-                });
-                batch = result.object;
-            } catch {
-                break;
-            }
-
-            if (batch.measurements.length === 0) {
-                break;
-            }
-
-            let added = 0;
-            for (const measurement of batch.measurements) {
-                const key = buildMeasurementKey(measurement);
-                if (!uniqueMeasurements.has(key)) {
-                    uniqueMeasurements.set(key, measurement);
-                    added++;
-                }
-            }
-
-            if (added === 0) {
-                break;
-            }
+            extractedMeasurements.push(...result.object.measurements);
+        } catch {
+            continue;
         }
     }
 
-    return Array.from(uniqueMeasurements.values());
+    return mergeUniqueMeasurements(extractedMeasurements);
+}
+
+async function normalizeMeasurementsWithModel({
+    provider,
+    modelIds,
+    sourcePath,
+    extractedText,
+    candidates,
+}: {
+    provider: ReturnType<typeof createOpenRouter>;
+    modelIds: string[];
+    sourcePath: string;
+    extractedText: string;
+    candidates: BloodworkMeasurement[];
+}): Promise<BloodworkMeasurement[]> {
+    const filteredCandidates = filterLikelyMeasurements(candidates).slice(0, MAX_NORMALIZATION_CANDIDATES);
+    if (filteredCandidates.length === 0) {
+        return [];
+    }
+
+    const prompt = buildMeasurementNormalizationPrompt({
+        sourcePath,
+        extractedText,
+        candidates: filteredCandidates,
+    });
+
+    try {
+        const result = await generateObjectWithModelFallback({
+            provider,
+            modelIds,
+            schema: measurementNormalizationSchema,
+            prompt,
+            maxOutputTokens: NORMALIZATION_MAX_OUTPUT_TOKENS,
+            contextLabel: `${sourcePath} (normalization)`,
+        });
+        return filterLikelyMeasurements(result.object.measurements);
+    } catch {
+        return filteredCandidates;
+    }
 }
 
 async function generateLabObject({
@@ -704,6 +1504,7 @@ async function generateLabObject({
         date: inferredMetadata.date,
     };
 
+    const cardStyleMeasurements = filterLikelyMeasurements(extractCardStyleMeasurements(pageTexts));
     let measurements: BloodworkMeasurement[] = [];
     try {
         const extractedMeasurements = await extractMeasurementsFromPages({
@@ -712,13 +1513,29 @@ async function generateLabObject({
             sourcePath: pdfPath,
             pageTexts,
         });
-        measurements = mergeUniqueMeasurements(extractedMeasurements);
+        measurements = await normalizeMeasurementsWithModel({
+            provider,
+            modelIds,
+            sourcePath: pdfPath,
+            extractedText,
+            candidates: extractedMeasurements,
+        });
     } catch {
         measurements = [];
     }
 
+    if (cardStyleMeasurements.length >= 3) {
+        measurements = mergeMeasurementsByPreferredName(cardStyleMeasurements, measurements);
+    }
+
     if (measurements.length === 0) {
-        measurements = heuristicExtractMeasurements(pageTexts);
+        const heuristicFallback = heuristicExtractMeasurements(pageTexts);
+        const narrativeFallback = extractNarrativeResultMeasurements(pageTexts);
+        measurements = filterLikelyMeasurements([
+            ...heuristicFallback,
+            ...cardStyleMeasurements,
+            ...narrativeFallback,
+        ]);
     }
     if (measurements.length === 0) {
         measurements = [{
@@ -815,7 +1632,7 @@ async function importSingleFile({
     const pdfBytes = new Uint8Array(await Bun.file(pdfPath).arrayBuffer());
     assertPdfSignature(pdfBytes, pdfPath);
 
-    const extracted = await extractPdfText(pdfBytes);
+    const extracted = await extractPdfText(pdfPath, pdfBytes);
     const { lab, modelId } = await generateLabObject({
         openRouterApiKey,
         modelIds,
@@ -938,6 +1755,7 @@ export {
     resolveInputFiles,
     assertPdfSignature,
     normalizeModelOutput,
+    filterLikelyMeasurements,
     resolveModelIds,
     runBloodworkImporter,
 };

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
     assertPdfSignature,
+    filterLikelyMeasurements,
     parseCliOptions,
     resolveModelIds,
 } from './bloodwork-import.ts';
@@ -45,5 +46,40 @@ describe('assertPdfSignature', () => {
 
         expect(() => assertPdfSignature(valid, '/tmp/ok.pdf')).not.toThrow();
         expect(() => assertPdfSignature(invalid, '/tmp/nope.pdf')).toThrow();
+    });
+});
+
+describe('filterLikelyMeasurements', () => {
+    test('removes non-analyte rows and keeps translated analytes', () => {
+        const filtered = filterLikelyMeasurements([
+            {
+                name: 'Page',
+                value: 1,
+            },
+            {
+                name: 'Tel:',
+                value: '030 / 443364-0',
+            },
+            {
+                name: 'Leukozyten (EB)',
+                value: 6.1,
+                unit: 'Gpt/l',
+            },
+            {
+                name: 'Comment: Canceled',
+                value: 'Canceled',
+            },
+            {
+                name: 'Hep B Core Ab, Tot',
+                value: 'Negative',
+            },
+        ]);
+
+        expect(filtered).toHaveLength(2);
+        expect(filtered.map(item => item.name)).toEqual([
+            'Leukocytes (EB)',
+            'Hep B Core Ab, Tot',
+        ]);
+        expect(filtered[0]?.originalName).toBe('Leukozyten (EB)');
     });
 });
