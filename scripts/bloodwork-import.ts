@@ -20,6 +20,7 @@ const DEFAULT_MODEL_IDS = ['google/gemini-3-flash', 'google/gemini-2.5-flash'];
 const DEFAULT_TO_IMPORT_DIRECTORY = path.resolve(process.cwd(), 'data/to-import');
 const DEFAULT_OUTPUT_DIRECTORY = path.resolve(process.cwd(), 'data');
 const EXTRACTED_TEXT_LIMIT = 45_000;
+const MODEL_MAX_OUTPUT_TOKENS = 3_500;
 
 type CliOptions = {
     importAll: boolean;
@@ -260,6 +261,11 @@ function buildPrompt(sourcePath: string, extractedText: string): string {
     ].join('\n');
 }
 
+function shouldFallbackToTextOnly(error: unknown): boolean {
+    const message = String(error).toLowerCase();
+    return message.includes('balance') && message.includes('files');
+}
+
 async function generateLabObject({
     openRouterApiKey,
     modelIds,
@@ -280,10 +286,13 @@ async function generateLabObject({
     for (const modelId of modelIds) {
         try {
             const result = await generateObject({
-                model: provider(modelId),
+                model: provider(modelId, {
+                    plugins: [{ id: 'response-healing' }],
+                }),
                 schema: bloodworkLabSchema,
                 temperature: 0,
                 maxRetries: 2,
+                maxOutputTokens: MODEL_MAX_OUTPUT_TOKENS,
                 system: 'You are a precise medical lab data extraction engine.',
                 messages: [{
                     role: 'user',
@@ -304,6 +313,29 @@ async function generateLabObject({
                 modelId,
             };
         } catch (err) {
+            if (shouldFallbackToTextOnly(err)) {
+                try {
+                    const textOnlyResult = await generateObject({
+                        model: provider(modelId, {
+                            plugins: [{ id: 'response-healing' }],
+                        }),
+                        schema: bloodworkLabSchema,
+                        temperature: 0,
+                        maxRetries: 2,
+                        maxOutputTokens: MODEL_MAX_OUTPUT_TOKENS,
+                        system: 'You are a precise medical lab data extraction engine.',
+                        prompt,
+                    });
+
+                    return {
+                        lab: normalizeModelOutput(textOnlyResult.object, pdfPath),
+                        modelId,
+                    };
+                } catch (textOnlyError) {
+                    lastError = textOnlyError;
+                    continue;
+                }
+            }
             lastError = err;
         }
     }

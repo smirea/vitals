@@ -23,9 +23,11 @@ Pick the next most important feature to work on, implement it fully and test it 
     - [ ] show a table of every single datapoint (names as rows, source as a column, from latest to oldest). allow filter
     - [ ] allow selecting rows and columns (default to all columns) to see data on a chart, I want to see how the various vitals have trended over time. chart should show to the right of the table always visible if there are items selected
     - [ ] in mobile portrait mode, only show the latest value and allow to switch the column to go to a different lab. checking items should show a chart under the table (chart always visible if values are selected so table takes up less space)
-- [ ] use the aws cli to create a purpose built user for this project with dedicated permissions and store the credentials in .env.local
-- [ ] create env with env-manager and create specific keys for everything requested (you can use env-manager to generate an openrouter key)
+- [x] use the aws cli to create a purpose built user for this project with dedicated permissions and store the credentials in .env.local
+- [x] create env with env-manager and create specific keys for everything requested (you can use env-manager to generate an openrouter key)
 
 # Notes:
 - `data/to-import/2024-06-20_Lab_Results.pdf` is not a valid PDF (signature mismatch), so it cannot currently be imported until the source file is fixed/replaced.
 - Importer runtime requires `OPENROUTER_API_KEY` and AWS env vars (`AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`) unless running with `--skip-upload`.
+- Dedicated IAM user `vitals-project-user` has been created with scoped access to `s3://stefan-life/vitals/*` and credentials are stored in `.env.local`.
+- Current OpenRouter key has a strict credit/token cap, which currently blocks full PDF extraction imports (`can only afford 318 output tokens`). Creating a higher-limit key via `env-manager new-key OPENROUTER_API_KEY` also needs a valid `OPENROUTER_MANAGEMENT_KEY`.
