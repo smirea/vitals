@@ -4,6 +4,17 @@ import styled from '@emotion/styled';
 import { ChartLineUp, Drop, Flask, Star } from '@phosphor-icons/react';
 import { Alert, Button, Checkbox, Empty, Input, Space, Spin, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import {
+    CartesianGrid,
+    Legend,
+    Line,
+    LineChart,
+    ReferenceLine,
+    ResponsiveContainer,
+    Tooltip,
+    XAxis,
+    YAxis,
+} from 'recharts';
 
 type BloodworkMeasurement = {
     name: string;
@@ -78,8 +89,19 @@ type TableRow = MeasurementDataRow | CategoryRow;
 
 type ChartSeries = {
     id: string;
+    chartKey: string;
     label: string;
-    points: Array<{ sourceId: string; value: number }>;
+    color: string;
+    valuesBySource: Record<string, MeasurementCell | undefined>;
+    normalizedValuesBySource: Record<string, number | null>;
+    outOfRangeBySource: Record<string, boolean>;
+    unitLabel?: string;
+};
+
+type TrendChartDatum = {
+    sourceId: string;
+    prettyDate: string;
+    [key: string]: string | number | boolean | null;
 };
 
 const { Text } = Typography;
@@ -93,6 +115,7 @@ const RESIZER_WIDTH = 10;
 const MIN_CHART_PANE_WIDTH = 300;
 const STARRED_MEASUREMENTS_STORAGE_KEY = 'vitals.starred.measurements';
 const UNCATEGORIZED_CATEGORY_LABEL = 'Uncategorized';
+const CHART_PALETTE = ['#0f172a', '#2563eb', '#b91c1c', '#15803d', '#9333ea', '#ca8a04'];
 
 function clamp(value: number, min: number, max: number): number {
     return Math.min(max, Math.max(min, value));
@@ -129,9 +152,16 @@ function formatNumericLabel(value: number): string {
     return value.toFixed(decimals).replace(/\.?0+$/, '');
 }
 
-function formatRangeCaption(cell: MeasurementCell): string {
-    const unitSuffix = cell.unit ? ` ${cell.unit}` : '';
-    const { rangeMin, rangeMax } = cell;
+function formatRangeCaption({
+    rangeMin,
+    rangeMax,
+    unit,
+}: {
+    rangeMin: number | null;
+    rangeMax: number | null;
+    unit?: string;
+}): string {
+    const unitSuffix = unit ? ` ${unit}` : '';
     if (rangeMin !== null && rangeMax !== null) {
         const low = Math.min(rangeMin, rangeMax);
         const high = Math.max(rangeMin, rangeMax);
@@ -234,17 +264,9 @@ function formatCell(measurement: BloodworkMeasurement): MeasurementCell {
         )
         : 0;
     const rangeCaption = formatRangeCaption({
-        display,
-        numericValue,
         rangeMin,
         rangeMax,
-        rangeVisualization,
-        rangeBandLeft,
-        rangeBandWidth,
-        rangeCaption: '',
         unit: unitText || undefined,
-        flag: measurement.flag,
-        note: measurement.note?.trim() || undefined,
     });
 
     return {
@@ -305,6 +327,108 @@ const MeasurementValueCell = memo(function MeasurementValueCell({ cell }: { cell
     );
 });
 
+function resolveSeriesUnitLabel(cells: Array<MeasurementCell | undefined>): string | undefined {
+    const normalizedUnits = new Set(
+        cells
+            .map(cell => cell?.unit?.trim())
+            .filter((unit): unit is string => Boolean(unit)),
+    );
+    if (normalizedUnits.size === 0) {
+        return undefined;
+    }
+    if (normalizedUnits.size === 1) {
+        return Array.from(normalizedUnits)[0];
+    }
+    return 'mixed units';
+}
+
+function getRowDefaultRange(cells: Array<MeasurementCell | undefined>): { min: number; max: number } | null {
+    for (const cell of cells) {
+        if (!cell) continue;
+        if (cell.rangeMin === null || cell.rangeMax === null) continue;
+        if (cell.rangeMax <= cell.rangeMin) continue;
+        return {
+            min: cell.rangeMin,
+            max: cell.rangeMax,
+        };
+    }
+    return null;
+}
+
+function getRowObservedBounds(cells: Array<MeasurementCell | undefined>): { min: number; max: number } | null {
+    const values = cells
+        .map(cell => cell?.numericValue)
+        .filter((value): value is number => value !== null && Number.isFinite(value));
+    if (values.length === 0) {
+        return null;
+    }
+    return {
+        min: Math.min(...values),
+        max: Math.max(...values),
+    };
+}
+
+function normalizeCellForChart({
+    cell,
+    defaultRange,
+    observedBounds,
+}: {
+    cell: MeasurementCell | undefined;
+    defaultRange: { min: number; max: number } | null;
+    observedBounds: { min: number; max: number } | null;
+}): number | null {
+    if (!cell || cell.numericValue === null) {
+        return null;
+    }
+
+    let rangeMin = cell.rangeMin;
+    let rangeMax = cell.rangeMax;
+    if (
+        (rangeMin === null || rangeMax === null || rangeMax <= rangeMin) &&
+        defaultRange
+    ) {
+        rangeMin = defaultRange.min;
+        rangeMax = defaultRange.max;
+    }
+
+    if (rangeMin !== null && rangeMax !== null && rangeMax > rangeMin) {
+        return (cell.numericValue - rangeMin) / (rangeMax - rangeMin);
+    }
+
+    if (!observedBounds) {
+        return 0.5;
+    }
+
+    const spread = observedBounds.max - observedBounds.min;
+    if (spread === 0) {
+        return 0.5;
+    }
+    return (cell.numericValue - observedBounds.min) / spread;
+}
+
+function isCellOutsideReferenceRange(cell: MeasurementCell | undefined): boolean {
+    if (!cell || cell.numericValue === null) {
+        return false;
+    }
+    if (cell.rangeMin !== null && cell.numericValue < cell.rangeMin) {
+        return true;
+    }
+    if (cell.rangeMax !== null && cell.numericValue > cell.rangeMax) {
+        return true;
+    }
+    return false;
+}
+
+function formatNormalizedYAxisTick(value: number): string {
+    if (Math.abs(value) < 0.001) {
+        return 'Low';
+    }
+    if (Math.abs(value - 1) < 0.001) {
+        return 'High';
+    }
+    return value.toFixed(2);
+}
+
 function useViewport() {
     const [size, setSize] = useState({
         width: window.innerWidth,
@@ -333,126 +457,209 @@ function TrendChart({
     series: ChartSeries[];
     orderedSources: SourceColumn[];
 }) {
-    const chartWidth = Math.max(780, orderedSources.length * 112);
-    const chartHeight = 370;
-    const margin = { top: 34, right: 20, bottom: 86, left: 64 };
-    const innerWidth = chartWidth - margin.left - margin.right;
-    const innerHeight = chartHeight - margin.top - margin.bottom;
+    const chartData = useMemo<TrendChartDatum[]>(
+        () =>
+            orderedSources.map(source => {
+                const datum: TrendChartDatum = {
+                    sourceId: source.id,
+                    prettyDate: source.prettyDate,
+                };
+                for (const item of series) {
+                    datum[item.chartKey] = item.normalizedValuesBySource[source.id];
+                    datum[`${item.chartKey}__out`] = item.outOfRangeBySource[source.id];
+                }
+                return datum;
+            }),
+        [orderedSources, series],
+    );
 
-    const allValues = series.flatMap(item => item.points.map(point => point.value));
-    if (allValues.length === 0) {
-        return <Empty description='No numeric values for current selection.' />;
-    }
+    const normalizedValues = useMemo(
+        () =>
+            series
+                .flatMap(item => Object.values(item.normalizedValuesBySource))
+                .filter((value): value is number => value !== null && Number.isFinite(value)),
+        [series],
+    );
 
-    const minValue = Math.min(...allValues);
-    const maxValue = Math.max(...allValues);
-    const range = maxValue - minValue || 1;
-    const paddedMin = minValue - range * 0.08;
-    const paddedMax = maxValue + range * 0.08;
+    const hasNumericData = normalizedValues.length > 0;
+    const yDomain = useMemo<[number, number]>(() => {
+        if (!hasNumericData) {
+            return [-0.2, 1.2];
+        }
+        const minValue = Math.min(0, ...normalizedValues);
+        const maxValue = Math.max(1, ...normalizedValues);
+        const spread = maxValue - minValue || 1;
+        const padding = Math.max(0.08 * spread, 0.12);
+        return [minValue - padding, maxValue + padding];
+    }, [hasNumericData, normalizedValues]);
 
-    const sourceIds = orderedSources.map(item => item.id);
-    const xStep = sourceIds.length > 1 ? innerWidth / (sourceIds.length - 1) : 0;
-
-    const getX = (sourceId: string) => {
-        const index = sourceIds.indexOf(sourceId);
-        return margin.left + (index < 0 ? 0 : index) * xStep;
-    };
-    const getY = (value: number) =>
-        margin.top + innerHeight - ((value - paddedMin) / (paddedMax - paddedMin)) * innerHeight;
-
-    const palette = ['#0f172a', '#2563eb', '#b91c1c', '#15803d', '#9333ea', '#ca8a04'];
-    const yTicks = 5;
-    const yTickValues = Array.from({ length: yTicks + 1 }, (_, index) => {
-        const ratio = index / yTicks;
-        return paddedMax - ratio * (paddedMax - paddedMin);
-    });
+    const sourceById = useMemo(
+        () => new Map(orderedSources.map(source => [source.id, source])),
+        [orderedSources],
+    );
 
     return (
         <ChartShell>
-            <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} role='img' aria-label='Selected vitals trends'>
-                {yTickValues.map(tick => (
-                    <g key={`y-${tick}`}>
-                        <line
-                            x1={margin.left}
-                            x2={margin.left + innerWidth}
-                            y1={getY(tick)}
-                            y2={getY(tick)}
-                            stroke='rgba(15, 23, 42, 0.14)'
-                            strokeWidth={1}
-                        />
-                        <text
-                            x={margin.left - 10}
-                            y={getY(tick) + 4}
-                            textAnchor='end'
-                            fontSize='12'
-                            fill='rgba(15, 23, 42, 0.75)'
+            <ChartCanvas>
+                {hasNumericData ? (
+                    <ResponsiveContainer width='100%' height='100%'>
+                        <LineChart
+                            data={chartData}
+                            margin={{ top: 18, right: 20, left: 12, bottom: 10 }}
                         >
-                            {tick.toFixed(1)}
-                        </text>
-                    </g>
-                ))}
-
-                {orderedSources.map(item => (
-                    <g key={`x-${item.id}`}>
-                        <line
-                            x1={getX(item.id)}
-                            x2={getX(item.id)}
-                            y1={margin.top}
-                            y2={margin.top + innerHeight}
-                            stroke='rgba(15, 23, 42, 0.08)'
-                            strokeWidth={1}
-                        />
-                        <text
-                            x={getX(item.id)}
-                            y={margin.top + innerHeight + 24}
-                            textAnchor='end'
-                            transform={`rotate(-26 ${getX(item.id)} ${margin.top + innerHeight + 24})`}
-                            fontSize='11'
-                            fill='rgba(15, 23, 42, 0.8)'
-                        >
-                            {item.prettyDate}
-                        </text>
-                    </g>
-                ))}
-
-                {series.map((item, index) => {
-                    const color = palette[index % palette.length];
-                    const points = item.points.map(point => `${getX(point.sourceId)},${getY(point.value)}`).join(' ');
-
-                    return (
-                        <g key={item.id}>
-                            <polyline
-                                points={points}
-                                fill='none'
-                                stroke={color}
-                                strokeWidth={2.8}
-                                strokeLinecap='round'
-                                strokeLinejoin='round'
+                            <CartesianGrid strokeDasharray='3 3' stroke='rgba(15, 23, 42, 0.16)' />
+                            <XAxis
+                                dataKey='sourceId'
+                                tickFormatter={sourceId => sourceById.get(String(sourceId))?.prettyDate ?? String(sourceId)}
+                                tick={{ fontSize: 11, fill: '#334155' }}
+                                minTickGap={22}
                             />
-                            {item.points.map(point => (
-                                <circle
-                                    key={`${item.id}-${point.sourceId}`}
-                                    cx={getX(point.sourceId)}
-                                    cy={getY(point.value)}
-                                    r={4.4}
-                                    fill={color}
-                                    stroke='#f8fafc'
-                                    strokeWidth={1.8}
+                            <YAxis
+                                domain={yDomain}
+                                tickFormatter={formatNormalizedYAxisTick}
+                                tick={{ fontSize: 11, fill: '#334155' }}
+                                width={56}
+                            />
+                            <ReferenceLine
+                                y={0}
+                                stroke='#64748b'
+                                strokeDasharray='4 4'
+                                label={{ value: 'Low', position: 'insideLeft', fill: '#64748b', fontSize: 11 }}
+                            />
+                            <ReferenceLine
+                                y={1}
+                                stroke='#64748b'
+                                strokeDasharray='4 4'
+                                label={{ value: 'High', position: 'insideLeft', fill: '#64748b', fontSize: 11 }}
+                            />
+                            <Tooltip
+                                content={({ active, label }) => {
+                                    if (!active || typeof label !== 'string') {
+                                        return null;
+                                    }
+                                    const source = sourceById.get(label);
+                                    if (!source) {
+                                        return null;
+                                    }
+
+                                    return (
+                                        <TooltipCard>
+                                            <TooltipTitle>{source.prettyDate}</TooltipTitle>
+                                            {series.map(item => {
+                                                const cell = item.valuesBySource[label];
+                                                const displayLabel = item.unitLabel
+                                                    ? `${item.label} (${item.unitLabel})`
+                                                    : item.label;
+                                                return (
+                                                    <TooltipRow key={`${label}-${item.id}`}>
+                                                        <TooltipLegendDot style={{ background: item.color }} />
+                                                        <TooltipLabel>{displayLabel}</TooltipLabel>
+                                                        <TooltipValue>{cell?.display ?? '—'}</TooltipValue>
+                                                    </TooltipRow>
+                                                );
+                                            })}
+                                        </TooltipCard>
+                                    );
+                                }}
+                            />
+                            <Legend
+                                verticalAlign='top'
+                                align='left'
+                                wrapperStyle={{ paddingBottom: 8 }}
+                            />
+                            {series.map(item => (
+                                <Line
+                                    key={item.id}
+                                    type='monotone'
+                                    dataKey={item.chartKey}
+                                    name={item.unitLabel ? `${item.label} (${item.unitLabel})` : item.label}
+                                    stroke={item.color}
+                                    strokeWidth={2.2}
+                                    connectNulls={false}
+                                    isAnimationActive={false}
+                                    dot={props => {
+                                        const { cx, cy, payload } = props as {
+                                            cx?: number;
+                                            cy?: number;
+                                            payload?: TrendChartDatum;
+                                        };
+                                        if (!Number.isFinite(cx) || !Number.isFinite(cy)) {
+                                            return null;
+                                        }
+                                        const isOutOfRange = Boolean(payload?.[`${item.chartKey}__out`]);
+                                        return (
+                                            <circle
+                                                cx={cx}
+                                                cy={cy}
+                                                r={4}
+                                                fill={isOutOfRange ? '#dc2626' : item.color}
+                                                stroke='#ffffff'
+                                                strokeWidth={1.6}
+                                            />
+                                        );
+                                    }}
+                                    activeDot={props => {
+                                        const { cx, cy, payload } = props as {
+                                            cx?: number;
+                                            cy?: number;
+                                            payload?: TrendChartDatum;
+                                        };
+                                        if (!Number.isFinite(cx) || !Number.isFinite(cy)) {
+                                            return null;
+                                        }
+                                        const isOutOfRange = Boolean(payload?.[`${item.chartKey}__out`]);
+                                        return (
+                                            <circle
+                                                cx={cx}
+                                                cy={cy}
+                                                r={5}
+                                                fill={isOutOfRange ? '#dc2626' : item.color}
+                                                stroke='#0f172a'
+                                                strokeWidth={1.6}
+                                            />
+                                        );
+                                    }}
                                 />
                             ))}
-                        </g>
-                    );
-                })}
-            </svg>
+                        </LineChart>
+                    </ResponsiveContainer>
+                ) : (
+                    <Empty description='No numeric values in the selected rows for this date range.' />
+                )}
+            </ChartCanvas>
 
-            <LegendGrid>
-                {series.map((item, index) => (
-                    <LegendItem key={item.id}>
-                        <LegendDot style={{ background: palette[index % palette.length] }} />
-                        <Text>{item.label}</Text>
-                    </LegendItem>
-                ))}
-            </LegendGrid>
+            <SelectedValuesShell>
+                <SelectedValuesTitle>Selected values</SelectedValuesTitle>
+                <SelectedValuesScroll>
+                    <SelectedValuesTable>
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                {series.map(item => (
+                                    <th key={`selected-values-heading-${item.id}`}>
+                                        {item.unitLabel ? `${item.label} (${item.unitLabel})` : item.label}
+                                    </th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {orderedSources.map(source => (
+                                <tr key={`selected-values-row-${source.id}`}>
+                                    <td>{source.prettyDate}</td>
+                                    {series.map(item => {
+                                        const cell = item.valuesBySource[source.id];
+                                        return (
+                                            <td key={`selected-values-${source.id}-${item.id}`}>
+                                                {cell?.display ?? '—'}
+                                            </td>
+                                        );
+                                    })}
+                                </tr>
+                            ))}
+                        </tbody>
+                    </SelectedValuesTable>
+                </SelectedValuesScroll>
+            </SelectedValuesShell>
         </ChartShell>
     );
 }
@@ -697,21 +904,34 @@ export default function App() {
     const chartSeries = useMemo<ChartSeries[]>(
         () =>
             selectedRows
-                .map(row => ({
-                    id: row.key,
-                    label: row.measurement,
-                    points: visibleSources
-                        .map(source => {
-                            const cell = row.valuesBySource[source.id];
-                            if (!cell || cell.numericValue === null) return null;
-                            return {
-                                sourceId: source.id,
-                                value: cell.numericValue,
-                            };
-                        })
-                        .filter((point): point is { sourceId: string; value: number } => !!point),
-                }))
-                .filter(series => series.points.length > 0),
+                .map((row, index) => {
+                    const cells = visibleSources.map(source => row.valuesBySource[source.id]);
+                    const defaultRange = getRowDefaultRange(cells);
+                    const observedBounds = getRowObservedBounds(cells);
+                    const normalizedValuesBySource: Record<string, number | null> = {};
+                    const outOfRangeBySource: Record<string, boolean> = {};
+
+                    for (const source of visibleSources) {
+                        const cell = row.valuesBySource[source.id];
+                        normalizedValuesBySource[source.id] = normalizeCellForChart({
+                            cell,
+                            defaultRange,
+                            observedBounds,
+                        });
+                        outOfRangeBySource[source.id] = isCellOutsideReferenceRange(cell);
+                    }
+
+                    return {
+                        id: row.key,
+                        chartKey: `series_${index}`,
+                        label: row.measurement,
+                        color: CHART_PALETTE[index % CHART_PALETTE.length],
+                        valuesBySource: row.valuesBySource,
+                        normalizedValuesBySource,
+                        outOfRangeBySource,
+                        unitLabel: resolveSeriesUnitLabel(cells),
+                    };
+                }),
         [selectedRows, visibleSources],
     );
 
@@ -1254,26 +1474,106 @@ const ChartHeader = styled.div`
 
 const ChartShell = styled.div`
     width: 100%;
-    overflow-x: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
     padding: 12px;
 `;
 
-const LegendGrid = styled.div`
+const ChartCanvas = styled.div`
+    width: 100%;
+    height: 380px;
+    min-height: 320px;
+`;
+
+const SelectedValuesShell = styled.section`
     display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 0 6px 4px;
-`;
-
-const LegendItem = styled.div`
-    display: inline-flex;
-    align-items: center;
+    flex-direction: column;
     gap: 6px;
-    padding: 3px 7px;
-    border: 1px solid #d4dbe6;
 `;
 
-const LegendDot = styled.span`
-    width: 9px;
-    height: 9px;
+const SelectedValuesTitle = styled.h3`
+    margin: 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: #334155;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+`;
+
+const SelectedValuesScroll = styled.div`
+    overflow-x: auto;
+    border: 1px solid #d7dde7;
+`;
+
+const SelectedValuesTable = styled.table`
+    width: max-content;
+    min-width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+
+    th,
+    td {
+        border: 1px solid #e2e8f0;
+        padding: 6px 8px;
+        white-space: nowrap;
+        text-align: left;
+    }
+
+    thead th {
+        background: #f8fafc;
+        color: #334155;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+    }
+
+    tbody tr:nth-of-type(odd) {
+        background: #fdfefe;
+    }
+`;
+
+const TooltipCard = styled.div`
+    min-width: 260px;
+    max-width: 440px;
+    padding: 10px 12px;
+    border: 1px solid #d7dde7;
+    border-radius: 4px;
+    background: #ffffff;
+    box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18);
+`;
+
+const TooltipTitle = styled.div`
+    margin-bottom: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #0f172a;
+`;
+
+const TooltipRow = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 0;
+`;
+
+const TooltipLegendDot = styled.span`
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    flex: 0 0 auto;
+`;
+
+const TooltipLabel = styled.span`
+    flex: 1;
+    min-width: 0;
+    color: #334155;
+    font-size: 12px;
+`;
+
+const TooltipValue = styled.span`
+    margin-left: auto;
+    color: #0f172a;
+    font-weight: 600;
+    font-size: 12px;
 `;
