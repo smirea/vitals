@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { runDownloadDataSync } from '../../scripts/download-data.ts';
+import { PROJECT_DATA_DIR } from '../../scripts/project-paths.ts';
 import { bloodworkLabSchema, type BloodworkLab } from '../../scripts/bloodwork-schema.ts';
 
 if (!process.env.API_PORT) throw new Error('process.env.API_PORT is not set');
@@ -11,7 +12,7 @@ if (shouldRunStartupSync) {
     await runDownloadDataSync();
 }
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const DATA_DIR = PROJECT_DATA_DIR;
 
 function listBloodworkJsonFiles(rootDir: string): string[] {
     if (!fs.existsSync(rootDir)) return [];

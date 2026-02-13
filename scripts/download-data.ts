@@ -4,10 +4,11 @@ import path from 'path';
 import { GetObjectCommand, ListObjectsV2Command, S3Client, type _Object } from '@aws-sdk/client-s3';
 
 import { createScript } from './createScript.ts';
+import { PROJECT_DATA_DIR } from './project-paths.ts';
 
 const DEFAULT_BUCKET = 'stefan-life';
 const DEFAULT_PREFIX = 'vitals';
-const DEFAULT_OUTPUT_DIR = path.resolve(process.cwd(), 'data');
+const DEFAULT_OUTPUT_DIR = PROJECT_DATA_DIR;
 const SYNC_STATE_FILE = path.resolve(DEFAULT_OUTPUT_DIR, '.s3-sync-state.json');
 
 type SyncStateEntry = {

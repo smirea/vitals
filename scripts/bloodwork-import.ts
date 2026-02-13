@@ -19,14 +19,19 @@ import {
     type BloodworkLab,
 } from './bloodwork-schema.ts';
 import { createScript } from './createScript.ts';
+import {
+    PROJECT_DATA_DIR,
+    PROJECT_GLOSSARY_PATH,
+    PROJECT_TO_IMPORT_DIR,
+} from './project-paths.ts';
 
 const DEFAULT_S3_BUCKET = 'stefan-life';
 const DEFAULT_S3_PREFIX = 'vitals';
 const DEFAULT_MODEL_IDS = ['google/gemini-3-flash-preview'];
 const DEFAULT_GLOSSARY_VALIDATOR_MODEL_IDS = ['google/gemini-3-flash-preview'];
-const DEFAULT_TO_IMPORT_DIRECTORY = path.resolve(process.cwd(), 'data/to-import');
-const DEFAULT_OUTPUT_DIRECTORY = path.resolve(process.cwd(), 'data');
-const DEFAULT_GLOSSARY_PATH = path.resolve(process.cwd(), 'server/src/bloodwork-glossary.json');
+const DEFAULT_TO_IMPORT_DIRECTORY = PROJECT_TO_IMPORT_DIR;
+const DEFAULT_OUTPUT_DIRECTORY = PROJECT_DATA_DIR;
+const DEFAULT_GLOSSARY_PATH = PROJECT_GLOSSARY_PATH;
 const EXTRACTED_TEXT_LIMIT = 45_000;
 const MODEL_MAX_OUTPUT_TOKENS = 1_400;
 const METADATA_MAX_OUTPUT_TOKENS = 280;
