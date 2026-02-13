@@ -22,6 +22,8 @@ Pick the next most important feature to work on, implement it fully and test it 
     - [x] optimized for web, but also usable on mobile
     - [x] use ant-design components
     - [x] show a table of every single datapoint (names as rows, source as a column, from latest to oldest). allow filter
+    - [x] allow starring measurements; starred rows are hoisted to the top and persisted in local storage
+    - [x] show per-cell reference range visualization (min/max markers with current value marker) when range data exists
     - [x] allow selecting rows and columns (default to all columns) to see data on a chart, I want to see how the various vitals have trended over time. chart should show to the right of the table always visible if there are items selected
     - [x] in mobile portrait mode, only show the latest value and allow to switch the column to go to a different lab. checking items should show a chart under the table (chart always visible if values are selected so table takes up less space)
     - [ ] on desktop UI should take over the entire space and show all nutrients at once
@@ -40,3 +42,5 @@ Pick the next most important feature to work on, implement it fully and test it 
 - `scripts/download-data.ts` uses a local sync state file (`data/.s3-sync-state.json`) to only download changed S3 objects.
 - Importer now maintains `server/src/bloodwork-glossary.json` with canonical measurement names, aliases, and known ranges; glossary updates happen automatically during import runs.
 - Unknown glossary names go through a second-pass validator prompt that enforces english-only canonical names and aliases before entries are accepted.
+- Starred dashboard measurements are saved under `localStorage` key `vitals.starred.measurements`; starred names are bold and sorted to the top of the table.
+- Dashboard table cells now render reference ranges visually with a track, min/max bounds, and the observed value marker when numeric range data is available.
