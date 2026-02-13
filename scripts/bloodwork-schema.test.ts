@@ -81,6 +81,35 @@ describe('measurement note support', () => {
         expect(payload.measurements[0]?.note).toBe('Fasting sample');
         expect(payload.measurements[0]?.referenceRange).toEqual({ max: 15 });
     });
+
+    test('accepts optional measurement original conversion snapshot', () => {
+        const payload = bloodworkLabSchema.parse({
+            date: '2025-08-29',
+            labName: 'Muenchen Lab',
+            measurements: [{
+                name: 'Glucose',
+                value: 110,
+                unit: 'mg/dL',
+                original: {
+                    value: 6.1,
+                    unit: 'mmol/L',
+                    referenceRange: {
+                        min: 3.9,
+                        max: 5.5,
+                    },
+                },
+            }],
+        });
+
+        expect(payload.measurements[0]?.original).toEqual({
+            value: 6.1,
+            unit: 'mmol/L',
+            referenceRange: {
+                min: 3.9,
+                max: 5.5,
+            },
+        });
+    });
 });
 
 describe('file and key naming', () => {

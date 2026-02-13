@@ -142,6 +142,11 @@ export const bloodworkMeasurementSchema = z.object({
     value: z.union([z.number().finite(), z.string().trim().min(1)]).optional(),
     unit: z.string().trim().min(1).optional(),
     referenceRange: bloodworkReferenceRangeSchema.optional(),
+    original: z.object({
+        value: z.union([z.number().finite(), z.string().trim().min(1)]).optional(),
+        unit: z.string().trim().min(1).optional(),
+        referenceRange: bloodworkReferenceRangeSchema.optional(),
+    }).optional(),
     flag: bloodworkMeasurementFlagSchema.optional(),
     note: z.string().trim().min(1).optional(),
     notes: z.string().trim().min(1).optional(),

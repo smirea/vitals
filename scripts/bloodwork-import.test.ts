@@ -7,6 +7,7 @@ import {
     normalizeGlossaryDecisionAction,
     parseCliOptions,
     resolveModelIds,
+    standardizeMeasurementUnits,
 } from './bloodwork-import.ts';
 
 describe('parseCliOptions', () => {
@@ -112,5 +113,87 @@ describe('isEnglishGlossaryName', () => {
         expect(isEnglishGlossaryName('Upper Respiratory Culture')).toBe(true);
         expect(isEnglishGlossaryName('Hämatokrit')).toBe(false);
         expect(isEnglishGlossaryName('Leukozyten')).toBe(false);
+    });
+});
+
+describe('standardizeMeasurementUnits', () => {
+    test('converts glucose mmol/L to canonical mg/dL and captures original snapshot', () => {
+        const [measurement] = standardizeMeasurementUnits([{
+            name: 'Glucose',
+            value: 6.1,
+            unit: 'mmol/l',
+            referenceRange: {
+                min: 3.9,
+                max: 5.5,
+            },
+        }]);
+
+        expect(measurement?.unit).toBe('mg/dL');
+        expect(typeof measurement?.value).toBe('number');
+        expect(measurement?.value as number).toBeCloseTo(109.91102, 5);
+        expect(measurement?.referenceRange?.min).toBeCloseTo(70.27098, 5);
+        expect(measurement?.referenceRange?.max).toBeCloseTo(99.1001, 4);
+        expect(measurement?.original).toEqual({
+            value: 6.1,
+            unit: 'mmol/L',
+            referenceRange: {
+                min: 3.9,
+                max: 5.5,
+            },
+        });
+    });
+
+    test('converts hemoglobin a1c IFCC units to percent', () => {
+        const [measurement] = standardizeMeasurementUnits([{
+            name: 'Hemoglobin A1c',
+            value: 39,
+            unit: 'mmol/mol',
+            referenceRange: {
+                min: 20,
+                max: 42,
+            },
+        }]);
+
+        expect(measurement?.unit).toBe('%');
+        expect(measurement?.value as number).toBeCloseTo(5.71972, 5);
+        expect(measurement?.referenceRange?.min).toBeCloseTo(3.9816, 4);
+        expect(measurement?.referenceRange?.max).toBeCloseTo(5.99416, 5);
+        expect(measurement?.original?.unit).toBe('mmol/mol');
+    });
+
+    test('does not convert hemoglobin a1c from ambiguous mmol/L units', () => {
+        const [measurement] = standardizeMeasurementUnits([{
+            name: 'Hemoglobin A1c',
+            value: 10.5,
+            unit: 'mmol/L',
+        }]);
+
+        expect(measurement?.unit).toBe('mmol/L');
+        expect(measurement?.value).toBe(10.5);
+        expect(measurement?.original).toBeUndefined();
+    });
+
+    test('normalizes equivalent units without creating original snapshot', () => {
+        const [measurement] = standardizeMeasurementUnits([{
+            name: 'TSH',
+            value: 2.1,
+            unit: 'mU/l',
+        }]);
+
+        expect(measurement?.unit).toBe('uIU/mL');
+        expect(measurement?.value).toBe(2.1);
+        expect(measurement?.original).toBeUndefined();
+    });
+
+    test('does not force target unit when conversion needs numeric data but value is qualitative', () => {
+        const [measurement] = standardizeMeasurementUnits([{
+            name: 'Glucose',
+            value: 'Negative',
+            unit: 'mmol/l',
+        }]);
+
+        expect(measurement?.unit).toBe('mmol/L');
+        expect(measurement?.value).toBe('Negative');
+        expect(measurement?.original).toBeUndefined();
     });
 });

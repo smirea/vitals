@@ -10,7 +10,7 @@ Pick the next most important feature to work on, implement it fully and test it 
     - [x] use createScript.ts framework
     - [x] `scripts/bloodwork-import.ts` accepts a pdf as input, uses AI (gemini 3 flash via ai sdk + openrouter) to convert it to a standardized json template that includes date, location, lab name, import location (optional, flag), weight and the table of all standardized measurements. for each measurement capture value, ranges, flags, notes etc. store all the parsed data as `data/bloodwork_{date}_{lab}.json` pretty json 4 spaces
     - [x] account for the bloodwork being in different languages and vastly different formats output must be standardized and in engligh
-    - [ ] when processing the data, also standardize the units, I want all the values to be the same for the same measurements. if a unit needs conversion, store an "original" value on it for reference.
+    - [x] when processing the data, also standardize the units, I want all the values to be the same for the same measurements. if a unit needs conversion, store an "original" value on it for reference.
     - [x] all data must also be uploaded to s3 in `stefan-life/vitals/bloodwork_{date}_{lab}.json` bucket location
     - [x] all my existing labs are in `data/to-import`, use them for testing and to get a sense of various potential formats. create a standard `BloodworkLab` zod type and use that as the basis for the various tools and enforce the json be in that shape. a lot of the properties will have to be optional most likely
     - [x] once everything is working and tested, import all data from `data/to-import`
@@ -40,3 +40,4 @@ Pick the next most important feature to work on, implement it fully and test it 
 - `scripts/download-data.ts` uses a local sync state file (`data/.s3-sync-state.json`) to only download changed S3 objects.
 - Importer now maintains `server/src/bloodwork-glossary.json` with canonical measurement names, aliases, and known ranges; glossary updates happen automatically during import runs.
 - Unknown glossary names go through a second-pass validator prompt that enforces english-only canonical names and aliases before entries are accepted.
+- Importer standardizes measurement units for key analytes; when a numeric unit conversion is applied it preserves pre-conversion data in `measurement.original` (`value`, `unit`, `referenceRange`).

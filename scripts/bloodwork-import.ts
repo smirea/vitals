@@ -1308,6 +1308,467 @@ function filterLikelyMeasurements(measurements: BloodworkMeasurement[]): Bloodwo
     );
 }
 
+type UnitStandardizationConverter = {
+    convert: (value: number) => number;
+    requiresOriginal: boolean;
+};
+
+type MeasurementUnitStandardizationRule = {
+    namePattern: RegExp;
+    canonicalUnit: string;
+    convertersByUnitKey: Record<string, UnitStandardizationConverter>;
+};
+
+const IDENTITY_UNIT_CONVERTER: UnitStandardizationConverter = {
+    convert: value => value,
+    requiresOriginal: false,
+};
+
+function scaledUnitConverter(factor: number): UnitStandardizationConverter {
+    return {
+        convert: value => value * factor,
+        requiresOriginal: Math.abs(factor - 1) > Number.EPSILON,
+    };
+}
+
+function shiftedScaledUnitConverter({
+    factor,
+    offset,
+}: {
+    factor: number;
+    offset: number;
+}): UnitStandardizationConverter {
+    return {
+        convert: value => value * factor + offset,
+        requiresOriginal: true,
+    };
+}
+
+function normalizeUnitKey(unit: string): string {
+    return unit
+        .trim()
+        .replace(/\u03bc/g, 'µ')
+        .replace(/μ/g, 'µ')
+        .replace(/\((?:calc|calculated)\)/gi, '')
+        .replace(/\./g, '')
+        .replace(/\s+/g, '')
+        .toLowerCase();
+}
+
+function createUnitConverterMap(
+    entries: Array<{
+        unit: string;
+        converter: UnitStandardizationConverter;
+    }>,
+): Record<string, UnitStandardizationConverter> {
+    const map: Record<string, UnitStandardizationConverter> = {};
+    for (const entry of entries) {
+        map[normalizeUnitKey(entry.unit)] = entry.converter;
+    }
+    return map;
+}
+
+const UNIT_CANONICAL_LABELS_BY_KEY: Record<string, string> = {
+    '%': '%',
+    '%oftotalhgb': '%',
+    '%gesfs': '%',
+    'mg/dl': 'mg/dL',
+    'mg/l': 'mg/L',
+    'mmol/l': 'mmol/L',
+    'mmol/mol': 'mmol/mol',
+    'g/dl': 'g/dL',
+    'g/l': 'g/L',
+    'µmol/l': 'µmol/L',
+    'umol/l': 'µmol/L',
+    'µg/dl': 'µg/dL',
+    'ug/dl': 'µg/dL',
+    'mcg/dl': 'µg/dL',
+    'µg/l': 'µg/L',
+    'ug/l': 'µg/L',
+    'ng/ml': 'ng/mL',
+    'pg/ml': 'pg/mL',
+    'ng/l': 'ng/L',
+    'iu/l': 'IU/L',
+    'u/l': 'U/L',
+    'mui/l': 'mUI/L',
+    'µkat/l': 'µkat/L',
+    'ukat/l': 'µkat/L',
+    'uiu/ml': 'uIU/mL',
+    'miu/l': 'mIU/L',
+    'mu/l': 'mU/L',
+    'x10e3/ul': 'x10E3/uL',
+    'x10e6/ul': 'x10E6/uL',
+    'gpt/l': 'Gpt/L',
+    'thous/mcl': 'Thous/mcL',
+    'l/l': 'L/L',
+    '/hpf': '/HPF',
+    's/coratio': 's/co ratio',
+    ratio: 'Ratio',
+    'ml/min/1.73m2': 'mL/min/1.73m2',
+};
+
+const MEASUREMENT_UNIT_STANDARDIZATION_RULES: MeasurementUnitStandardizationRule[] = [
+    {
+        namePattern: /^(?:glucose|estimated average glucose|mean glucose)$/i,
+        canonicalUnit: 'mg/dL',
+        convertersByUnitKey: createUnitConverterMap([
+            { unit: 'mg/dL', converter: IDENTITY_UNIT_CONVERTER },
+            { unit: 'mmol/L', converter: scaledUnitConverter(18.0182) },
+        ]),
+    },
+    {
+        namePattern:
+            /^(?:cholesterol|cholesterol, total|total cholesterol|hdl cholesterol|ldl cholesterol(?: \(calculated\))?|non-hdl cholesterol|vldl cholesterol)$/i,
+        canonicalUnit: 'mg/dL',
+        convertersByUnitKey: createUnitConverterMap([
+            { unit: 'mg/dL', converter: IDENTITY_UNIT_CONVERTER },
+            { unit: 'mmol/L', converter: scaledUnitConverter(38.67) },
+        ]),
+    },
+    {
+        namePattern: /^triglycerides?$/i,
+        canonicalUnit: 'mg/dL',
+        convertersByUnitKey: createUnitConverterMap([
+            { unit: 'mg/dL', converter: IDENTITY_UNIT_CONVERTER },
+            { unit: 'mmol/L', converter: scaledUnitConverter(88.57) },
+        ]),
+    },
+    {
+        namePattern: /^creatinine$/i,
+        canonicalUnit: 'mg/dL',
+        convertersByUnitKey: createUnitConverterMap([
+            { unit: 'mg/dL', converter: IDENTITY_UNIT_CONVERTER },
+            { unit: 'µmol/L', converter: scaledUnitConverter(1 / 88.4) },
+        ]),
+    },
+    {
+        namePattern: /^bilirubin(?:, (?:total|direct|indirect))?$/i,
+        canonicalUnit: 'mg/dL',
+        convertersByUnitKey: createUnitConverterMap([
+            { unit: 'mg/dL', converter: IDENTITY_UNIT_CONVERTER },
+            { unit: 'µmol/L', converter: scaledUnitConverter(1 / 17.104) },
+        ]),
+    },
+    {
+        namePattern: /^(?:albumin|globulin(?:, total)?|protein, total|total protein)$/i,
+        canonicalUnit: 'g/dL',
+        convertersByUnitKey: createUnitConverterMap([
+            { unit: 'g/dL', converter: IDENTITY_UNIT_CONVERTER },
+            { unit: 'g/L', converter: scaledUnitConverter(0.1) },
+        ]),
+    },
+    {
+        namePattern: /^hematocrit$/i,
+        canonicalUnit: '%',
+        convertersByUnitKey: createUnitConverterMap([
+            { unit: '%', converter: IDENTITY_UNIT_CONVERTER },
+            { unit: 'L/L', converter: scaledUnitConverter(100) },
+        ]),
+    },
+    {
+        namePattern: /^hemoglobin a1c$/i,
+        canonicalUnit: '%',
+        convertersByUnitKey: createUnitConverterMap([
+            { unit: '%', converter: IDENTITY_UNIT_CONVERTER },
+            { unit: '% of total Hgb', converter: IDENTITY_UNIT_CONVERTER },
+            { unit: 'mmol/mol', converter: shiftedScaledUnitConverter({ factor: 0.09148, offset: 2.152 }) },
+        ]),
+    },
+    {
+        namePattern: /^apolipoprotein (?:a1|b)$/i,
+        canonicalUnit: 'mg/dL',
+        convertersByUnitKey: createUnitConverterMap([
+            { unit: 'mg/dL', converter: IDENTITY_UNIT_CONVERTER },
+            { unit: 'g/L', converter: scaledUnitConverter(100) },
+        ]),
+    },
+    {
+        namePattern: /^iron$/i,
+        canonicalUnit: 'µg/dL',
+        convertersByUnitKey: createUnitConverterMap([
+            { unit: 'µg/dL', converter: IDENTITY_UNIT_CONVERTER },
+            { unit: 'µmol/L', converter: scaledUnitConverter(5.585) },
+        ]),
+    },
+    {
+        namePattern: /^c-reactive protein$/i,
+        canonicalUnit: 'mg/L',
+        convertersByUnitKey: createUnitConverterMap([
+            { unit: 'mg/L', converter: IDENTITY_UNIT_CONVERTER },
+            { unit: 'mg/dL', converter: scaledUnitConverter(10) },
+        ]),
+    },
+    {
+        namePattern: /^tsh$/i,
+        canonicalUnit: 'uIU/mL',
+        convertersByUnitKey: createUnitConverterMap([
+            { unit: 'uIU/mL', converter: IDENTITY_UNIT_CONVERTER },
+            { unit: 'mU/L', converter: IDENTITY_UNIT_CONVERTER },
+            { unit: 'mIU/L', converter: IDENTITY_UNIT_CONVERTER },
+        ]),
+    },
+    {
+        namePattern: /^(?:platelet count|platelets)$/i,
+        canonicalUnit: 'x10E3/uL',
+        convertersByUnitKey: createUnitConverterMap([
+            { unit: 'x10E3/uL', converter: IDENTITY_UNIT_CONVERTER },
+            { unit: 'Gpt/L', converter: IDENTITY_UNIT_CONVERTER },
+            { unit: 'Thous/mcL', converter: IDENTITY_UNIT_CONVERTER },
+        ]),
+    },
+];
+
+function canonicalizeUnitLabel(unit: string): string {
+    const normalizedKey = normalizeUnitKey(unit);
+    return UNIT_CANONICAL_LABELS_BY_KEY[normalizedKey] || unit.replace(/\s+/g, ' ').trim();
+}
+
+function roundStandardizedNumber(value: number): number {
+    const rounded = Number.parseFloat(value.toFixed(6));
+    if (Object.is(rounded, -0)) {
+        return 0;
+    }
+    return rounded;
+}
+
+function findMeasurementUnitStandardizationRule(
+    measurementName: string,
+): MeasurementUnitStandardizationRule | null {
+    const normalizedName = normalizeMeasurementNameForGlossary(measurementName) || measurementName;
+    for (const rule of MEASUREMENT_UNIT_STANDARDIZATION_RULES) {
+        if (rule.namePattern.test(normalizedName)) {
+            return rule;
+        }
+    }
+    return null;
+}
+
+function parseComparableNumericValue(
+    value: BloodworkMeasurement['value'],
+): { comparator: string; numericValue: number; hasComparator: boolean } | null {
+    if (typeof value === 'number') {
+        if (!Number.isFinite(value)) {
+            return null;
+        }
+        return {
+            comparator: '',
+            numericValue: value,
+            hasComparator: false,
+        };
+    }
+
+    if (typeof value !== 'string') {
+        return null;
+    }
+
+    const match = value.trim().match(/^(<=|>=|<|>)?\s*(-?\d+(?:[.,]\d+)?)$/);
+    if (!match) {
+        return null;
+    }
+
+    const numericValue = Number.parseFloat(match[2]!.replace(',', '.'));
+    if (!Number.isFinite(numericValue)) {
+        return null;
+    }
+
+    return {
+        comparator: match[1] || '',
+        numericValue,
+        hasComparator: Boolean(match[1]),
+    };
+}
+
+function convertMeasurementValueWithUnitConverter(
+    value: BloodworkMeasurement['value'],
+    converter: UnitStandardizationConverter,
+): {
+    nextValue: BloodworkMeasurement['value'];
+    converted: boolean;
+    changed: boolean;
+} {
+    const parsed = parseComparableNumericValue(value);
+    if (!parsed) {
+        return {
+            nextValue: value,
+            converted: false,
+            changed: false,
+        };
+    }
+
+    const convertedNumeric = roundStandardizedNumber(converter.convert(parsed.numericValue));
+    const nextValue: BloodworkMeasurement['value'] = parsed.hasComparator
+        ? `${parsed.comparator}${convertedNumeric}`
+        : convertedNumeric;
+    const changed = Math.abs(convertedNumeric - parsed.numericValue) > 1e-9;
+
+    return {
+        nextValue,
+        converted: true,
+        changed,
+    };
+}
+
+function convertReferenceRangeWithUnitConverter(
+    referenceRange: BloodworkMeasurement['referenceRange'],
+    converter: UnitStandardizationConverter,
+): {
+    nextReferenceRange: BloodworkMeasurement['referenceRange'];
+    converted: boolean;
+    changed: boolean;
+} {
+    if (!referenceRange) {
+        return {
+            nextReferenceRange: referenceRange,
+            converted: false,
+            changed: false,
+        };
+    }
+
+    let converted = false;
+    let changed = false;
+    const nextReferenceRange: NonNullable<BloodworkMeasurement['referenceRange']> = {};
+
+    if (referenceRange.min !== undefined) {
+        const nextMin = roundStandardizedNumber(converter.convert(referenceRange.min));
+        nextReferenceRange.min = nextMin;
+        converted = true;
+        if (Math.abs(nextMin - referenceRange.min) > 1e-9) {
+            changed = true;
+        }
+    }
+
+    if (referenceRange.max !== undefined) {
+        const nextMax = roundStandardizedNumber(converter.convert(referenceRange.max));
+        nextReferenceRange.max = nextMax;
+        converted = true;
+        if (Math.abs(nextMax - referenceRange.max) > 1e-9) {
+            changed = true;
+        }
+    }
+
+    return {
+        nextReferenceRange: converted ? nextReferenceRange : referenceRange,
+        converted,
+        changed,
+    };
+}
+
+function buildMeasurementOriginalSnapshot(measurement: BloodworkMeasurement): BloodworkMeasurement['original'] {
+    const original: NonNullable<BloodworkMeasurement['original']> = {
+        value: measurement.value,
+        unit: measurement.unit,
+        referenceRange: measurement.referenceRange
+            ? {
+                min: measurement.referenceRange.min,
+                max: measurement.referenceRange.max,
+            }
+            : undefined,
+    };
+
+    if (
+        original.value === undefined &&
+        original.unit === undefined &&
+        original.referenceRange === undefined
+    ) {
+        return undefined;
+    }
+
+    return original;
+}
+
+function standardizeMeasurementUnit(measurement: BloodworkMeasurement): BloodworkMeasurement {
+    const unit = measurement.unit?.trim();
+    if (!unit) {
+        return measurement;
+    }
+
+    const canonicalizedSourceUnit = canonicalizeUnitLabel(unit);
+    const measurementWithCanonicalizedUnit =
+        canonicalizedSourceUnit === unit
+            ? measurement
+            : {
+                ...measurement,
+                unit: canonicalizedSourceUnit,
+            };
+
+    const rule = findMeasurementUnitStandardizationRule(measurementWithCanonicalizedUnit.name);
+    if (!rule) {
+        return measurementWithCanonicalizedUnit;
+    }
+
+    const sourceUnitKey = normalizeUnitKey(canonicalizedSourceUnit);
+    const targetUnitKey = normalizeUnitKey(rule.canonicalUnit);
+    const converter = rule.convertersByUnitKey[sourceUnitKey];
+    if (!converter) {
+        if (sourceUnitKey === targetUnitKey) {
+            return {
+                ...measurementWithCanonicalizedUnit,
+                unit: rule.canonicalUnit,
+            };
+        }
+        return measurementWithCanonicalizedUnit;
+    }
+
+    const convertedValue = convertMeasurementValueWithUnitConverter(
+        measurementWithCanonicalizedUnit.value,
+        converter,
+    );
+    const convertedReferenceRange = convertReferenceRangeWithUnitConverter(
+        measurementWithCanonicalizedUnit.referenceRange,
+        converter,
+    );
+    const convertedAnyNumericField =
+        convertedValue.converted || convertedReferenceRange.converted;
+
+    if (
+        sourceUnitKey !== targetUnitKey &&
+        converter.requiresOriginal &&
+        !convertedAnyNumericField
+    ) {
+        return measurementWithCanonicalizedUnit;
+    }
+
+    let nextMeasurement: BloodworkMeasurement = {
+        ...measurementWithCanonicalizedUnit,
+        unit: sourceUnitKey === targetUnitKey ? rule.canonicalUnit : measurementWithCanonicalizedUnit.unit,
+    };
+
+    if (convertedValue.converted) {
+        nextMeasurement = {
+            ...nextMeasurement,
+            value: convertedValue.nextValue,
+        };
+    }
+    if (convertedReferenceRange.converted) {
+        nextMeasurement = {
+            ...nextMeasurement,
+            referenceRange: convertedReferenceRange.nextReferenceRange,
+        };
+    }
+    if (sourceUnitKey !== targetUnitKey) {
+        nextMeasurement = {
+            ...nextMeasurement,
+            unit: rule.canonicalUnit,
+        };
+    }
+
+    if (sourceUnitKey !== targetUnitKey && converter.requiresOriginal) {
+        const originalSnapshot = buildMeasurementOriginalSnapshot(measurementWithCanonicalizedUnit);
+        if (originalSnapshot) {
+            nextMeasurement = {
+                ...nextMeasurement,
+                original: originalSnapshot,
+            };
+        }
+    }
+
+    return nextMeasurement;
+}
+
+function standardizeMeasurementUnits(measurements: BloodworkMeasurement[]): BloodworkMeasurement[] {
+    return measurements.map(standardizeMeasurementUnit);
+}
+
 function extractTableLikeLines(pageText: string): string[] {
     const rawLines = pageText
         .split('\n')
@@ -1887,10 +2348,10 @@ function applyGlossaryDecision({
             return;
         }
 
-        const aliasedMeasurement: BloodworkMeasurement = {
+        const aliasedMeasurement = standardizeMeasurementUnit({
             ...measurement,
             name: existingEntry.canonicalName,
-        };
+        });
         updateGlossaryEntryWithMeasurement({
             entry: existingEntry,
             measurement: aliasedMeasurement,
@@ -1910,10 +2371,10 @@ function applyGlossaryDecision({
         lookup,
         name: canonicalName,
     });
-    const measurementWithCanonicalName: BloodworkMeasurement = {
+    const measurementWithCanonicalName = standardizeMeasurementUnit({
         ...measurement,
         name: canonicalName,
-    };
+    });
 
     if (existingEntry) {
         updateGlossaryEntryWithMeasurement({
@@ -1962,7 +2423,9 @@ async function applyGlossaryValidationToMeasurements({
     const unknown: Array<{ index: number; measurement: BloodworkMeasurement }> = [];
 
     for (const measurement of measurements) {
-        const normalizedMeasurement = normalizeMeasurementForGlossary(measurement);
+        const normalizedMeasurement = normalizeMeasurementForGlossary(
+            standardizeMeasurementUnit(measurement),
+        );
         if (!normalizedMeasurement) {
             continue;
         }
@@ -2612,6 +3075,8 @@ async function generateLabObject({
         ]);
     }
 
+    measurements = standardizeMeasurementUnits(measurements);
+
     measurements = await applyGlossaryValidationToMeasurements({
         provider,
         glossary,
@@ -2619,6 +3084,8 @@ async function generateLabObject({
         primaryModelIds: modelIds,
         measurements,
     });
+
+    measurements = standardizeMeasurementUnits(measurements);
 
     if (measurements.length === 0) {
         measurements = [{
@@ -2850,6 +3317,7 @@ export {
     assertPdfSignature,
     normalizeModelOutput,
     filterLikelyMeasurements,
+    standardizeMeasurementUnits,
     isEnglishGlossaryName,
     normalizeGlossaryDecisionAction,
     resolveModelIds,
