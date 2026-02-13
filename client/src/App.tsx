@@ -1,9 +1,10 @@
-import { memo, startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type Key } from 'react';
+import { memo, startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ChangeEvent, type Key } from 'react';
 
 import styled from '@emotion/styled';
-import { ChartLineUp, Drop, Flask, Star } from '@phosphor-icons/react';
-import { Alert, Button, Checkbox, Empty, Input, Space, Spin, Table, Tag, Typography } from 'antd';
-import type { ColumnsType } from 'antd/es/table';
+import { ChartLineUp, CheckCircle, Drop, Flask, Star, WarningCircle } from '@phosphor-icons/react';
+import { Alert, Button, Checkbox, Empty, Input, Space, Spin, Table, Tag, Tooltip as AntTooltip, Typography } from 'antd';
+import type { CheckboxChangeEvent } from 'antd/es/checkbox';
+import type { ColumnsType, TableProps } from 'antd/es/table';
 import {
     CartesianGrid,
     Legend,
@@ -11,7 +12,7 @@ import {
     LineChart,
     ReferenceLine,
     ResponsiveContainer,
-    Tooltip,
+    Tooltip as RechartsTooltip,
     XAxis,
     YAxis,
 } from 'recharts';
@@ -73,6 +74,8 @@ type MeasurementDataRow = {
     rowType: 'measurement';
     measurement: string;
     category: string;
+    measurementSearchText: string;
+    categorySearchText: string;
     valuesBySource: Record<string, MeasurementCell | undefined>;
 };
 
@@ -86,6 +89,17 @@ type CategoryRow = {
 };
 
 type TableRow = MeasurementDataRow | CategoryRow;
+
+type CategorySelectionState = {
+    checked: boolean;
+    indeterminate: boolean;
+    disabled: boolean;
+};
+
+type MeasurementOverviewTally = {
+    inRange: number;
+    outOfRange: number;
+};
 
 type ChartSeries = {
     id: string;
@@ -113,9 +127,14 @@ const DATE_FORMATTER = new Intl.DateTimeFormat('en-US', {
 });
 const RESIZER_WIDTH = 10;
 const MIN_CHART_PANE_WIDTH = 300;
+const SELECTION_COLUMN_WIDTH = 52;
+const MEASUREMENT_COLUMN_WIDTH = 250;
+const OVERVIEW_COLUMN_WIDTH = 94;
+const SOURCE_COLUMN_WIDTH = 164;
 const STARRED_MEASUREMENTS_STORAGE_KEY = 'vitals.starred.measurements';
+const GROUP_BY_CATEGORY_STORAGE_KEY = 'vitals.group-by-category';
 const UNCATEGORIZED_CATEGORY_LABEL = 'Uncategorized';
-const CHART_PALETTE = ['#0f172a', '#2563eb', '#b91c1c', '#15803d', '#9333ea', '#ca8a04'];
+const CHART_PALETTE = ['#0f172a', '#2563eb', '#0f766e', '#15803d', '#7c3aed', '#ca8a04'];
 
 function clamp(value: number, min: number, max: number): number {
     return Math.min(max, Math.max(min, value));
@@ -143,6 +162,17 @@ function readStoredStarredMeasurementKeys(): string[] {
         return normalizeStarredMeasurementKeys(JSON.parse(raw));
     } catch {
         return [];
+    }
+}
+
+function readStoredGroupByCategory(): boolean {
+    if (typeof window === 'undefined') return true;
+    try {
+        const raw = window.localStorage.getItem(GROUP_BY_CATEGORY_STORAGE_KEY);
+        if (raw === null) return true;
+        return raw === 'true';
+    } catch {
+        return true;
     }
 }
 
@@ -450,7 +480,7 @@ function useViewport() {
     return size;
 }
 
-function TrendChart({
+const TrendChart = memo(function TrendChart({
     series,
     orderedSources,
 }: {
@@ -532,7 +562,7 @@ function TrendChart({
                                 strokeDasharray='4 4'
                                 label={{ value: 'High', position: 'insideLeft', fill: '#64748b', fontSize: 11 }}
                             />
-                            <Tooltip
+                            <RechartsTooltip
                                 content={({ active, label }) => {
                                     if (!active || typeof label !== 'string') {
                                         return null;
@@ -570,12 +600,12 @@ function TrendChart({
                             {series.map(item => (
                                 <Line
                                     key={item.id}
-                                    type='monotone'
+                                    type='linear'
                                     dataKey={item.chartKey}
                                     name={item.unitLabel ? `${item.label} (${item.unitLabel})` : item.label}
                                     stroke={item.color}
                                     strokeWidth={2.2}
-                                    connectNulls={false}
+                                    connectNulls
                                     isAnimationActive={false}
                                     dot={props => {
                                         const { cx, cy, payload } = props as {
@@ -662,7 +692,7 @@ function TrendChart({
             </SelectedValuesShell>
         </ChartShell>
     );
-}
+});
 
 export default function App() {
     const viewport = useViewport();
@@ -676,7 +706,7 @@ export default function App() {
     const [starredMeasurementKeys, setStarredMeasurementKeys] = useState<string[]>(() => readStoredStarredMeasurementKeys());
     const [dateRangeStart, setDateRangeStart] = useState('');
     const [dateRangeEnd, setDateRangeEnd] = useState('');
-    const [groupByCategory, setGroupByCategory] = useState(false);
+    const [groupByCategory, setGroupByCategory] = useState(() => readStoredGroupByCategory());
     const [tablePaneWidth, setTablePaneWidth] = useState(0);
     const [isResizing, setIsResizing] = useState(false);
 
@@ -767,6 +797,11 @@ export default function App() {
         [dateRangeEnd, dateRangeStart, sources],
     );
 
+    const chartSources = useMemo(
+        () => [...visibleSources].sort((left, right) => left.date.localeCompare(right.date)),
+        [visibleSources],
+    );
+
     const allMeasurementRows = useMemo<MeasurementDataRow[]>(() => {
         const grouped = new Map<string, MeasurementDataRow>();
 
@@ -785,6 +820,7 @@ export default function App() {
                         category !== UNCATEGORIZED_CATEGORY_LABEL
                     ) {
                         existing.category = category;
+                        existing.categorySearchText = category.toLowerCase();
                     }
                     return;
                 }
@@ -794,6 +830,8 @@ export default function App() {
                     rowType: 'measurement',
                     measurement: measurement.name,
                     category,
+                    measurementSearchText: measurement.name.trim().toLowerCase(),
+                    categorySearchText: category.toLowerCase(),
                     valuesBySource: {
                         [sourceId]: formatCell(measurement),
                     },
@@ -808,6 +846,11 @@ export default function App() {
         if (typeof window === 'undefined') return;
         window.localStorage.setItem(STARRED_MEASUREMENTS_STORAGE_KEY, JSON.stringify(starredMeasurementKeys));
     }, [starredMeasurementKeys]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        window.localStorage.setItem(GROUP_BY_CATEGORY_STORAGE_KEY, String(groupByCategory));
+    }, [groupByCategory]);
 
     useEffect(() => {
         const availableRowIds = new Set(allMeasurementRows.map(item => item.key));
@@ -831,8 +874,8 @@ export default function App() {
         const normalizedFilter = deferredMeasurementFilter.trim().toLowerCase();
         const candidateRows = normalizedFilter
             ? allMeasurementRows.filter(row =>
-                row.measurement.toLowerCase().includes(normalizedFilter) ||
-                row.category.toLowerCase().includes(normalizedFilter),
+                row.measurementSearchText.includes(normalizedFilter) ||
+                row.categorySearchText.includes(normalizedFilter),
             )
             : allMeasurementRows;
         return [...candidateRows].sort((left, right) => {
@@ -843,19 +886,32 @@ export default function App() {
         });
     }, [allMeasurementRows, deferredMeasurementFilter, starredMeasurementSet]);
 
-    const tableSources = useMemo(() => {
+    const visibleSourceIdsWithData = useMemo(() => {
         const normalizedFilter = deferredMeasurementFilter.trim();
         if (!normalizedFilter) {
-            return visibleSources;
+            return null;
         }
 
-        return visibleSources.filter(source =>
-            filteredMeasurementRows.some(row => {
+        const sourceIds = new Set<string>();
+        for (const row of filteredMeasurementRows) {
+            for (const source of visibleSources) {
                 const cell = row.valuesBySource[source.id];
-                return Boolean(cell && cell.display !== '—');
-            }),
-        );
+                if (cell && cell.display !== '—') {
+                    sourceIds.add(source.id);
+                }
+            }
+        }
+        return sourceIds;
     }, [deferredMeasurementFilter, filteredMeasurementRows, visibleSources]);
+
+    const tableSources = useMemo(
+        () => (
+            visibleSourceIdsWithData
+                ? visibleSources.filter(source => visibleSourceIdsWithData.has(source.id))
+                : visibleSources
+        ),
+        [visibleSourceIdsWithData, visibleSources],
+    );
 
     const tableRows = useMemo<TableRow[]>(() => {
         if (!groupByCategory) {
@@ -888,30 +944,167 @@ export default function App() {
         });
     }, [filteredMeasurementRows, groupByCategory]);
 
+    const measurementKeysByCategory = useMemo(() => {
+        const grouped = new Map<string, string[]>();
+        filteredMeasurementRows.forEach(row => {
+            const existing = grouped.get(row.category);
+            if (existing) {
+                existing.push(row.key);
+                return;
+            }
+            grouped.set(row.category, [row.key]);
+        });
+        return grouped;
+    }, [filteredMeasurementRows]);
+
     useEffect(() => {
         const availableRowIds = new Set(filteredMeasurementRows.map(item => item.key));
-        setSelectedRowKeys(previous => previous.filter(item => availableRowIds.has(String(item))));
+        setSelectedRowKeys(previous => {
+            const next = previous.filter(item => availableRowIds.has(String(item)));
+            if (next.length !== previous.length) {
+                return next;
+            }
+            for (let index = 0; index < previous.length; index += 1) {
+                if (previous[index] !== next[index]) {
+                    return next;
+                }
+            }
+            return previous;
+        });
     }, [filteredMeasurementRows]);
 
     const selectedRowKeySet = useMemo(
         () => new Set(selectedRowKeys.map(key => String(key))),
         [selectedRowKeys],
     );
+
+    const categorySelectionByName = useMemo(() => {
+        const stateByCategory = new Map<string, CategorySelectionState>();
+        measurementKeysByCategory.forEach((measurementKeys, category) => {
+            const selectedCount = measurementKeys.reduce(
+                (count, key) => (selectedRowKeySet.has(key) ? count + 1 : count),
+                0,
+            );
+            const total = measurementKeys.length;
+            stateByCategory.set(category, {
+                checked: total > 0 && selectedCount === total,
+                indeterminate: selectedCount > 0 && selectedCount < total,
+                disabled: total === 0,
+            });
+        });
+        return stateByCategory;
+    }, [measurementKeysByCategory, selectedRowKeySet]);
+
     const selectedRows = useMemo(
         () => filteredMeasurementRows.filter(row => selectedRowKeySet.has(row.key)),
         [filteredMeasurementRows, selectedRowKeySet],
     );
+
+    const measurementRangesTooltipByKey = useMemo(() => {
+        const tooltipByKey = new Map<string, { heading: string; lines: string[] }>();
+        filteredMeasurementRows.forEach(row => {
+            const rangeLines = sources
+                .map(source => {
+                    const rangeCaption = row.valuesBySource[source.id]?.rangeCaption;
+                    if (!rangeCaption) return null;
+                    return `${source.prettyDate}: ${rangeCaption}`;
+                })
+                .filter((entry): entry is string => Boolean(entry));
+
+            tooltipByKey.set(row.key, {
+                heading: row.measurement,
+                lines: rangeLines.length > 0 ? rangeLines : ['No recorded reference ranges.'],
+            });
+        });
+        return tooltipByKey;
+    }, [filteredMeasurementRows, sources]);
+
+    const measurementOverviewByKey = useMemo(() => {
+        const overviewByKey = new Map<string, MeasurementOverviewTally>();
+        filteredMeasurementRows.forEach(row => {
+            let inRange = 0;
+            let outOfRange = 0;
+
+            tableSources.forEach(source => {
+                const cell = row.valuesBySource[source.id];
+                if (!cell) {
+                    return;
+                }
+                if (isCellOutsideReferenceRange(cell)) {
+                    outOfRange += 1;
+                    return;
+                }
+                inRange += 1;
+            });
+
+            overviewByKey.set(row.key, {
+                inRange,
+                outOfRange,
+            });
+        });
+        return overviewByKey;
+    }, [filteredMeasurementRows, tableSources]);
+
+    const onMeasurementFilterChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+        setMeasurementFilter(event.target.value);
+    }, []);
+
+    const onDateRangeStartChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+        const nextStart = event.target.value;
+        setDateRangeStart(nextStart);
+        if (dateRangeEnd && nextStart && nextStart > dateRangeEnd) {
+            setDateRangeEnd(nextStart);
+        }
+    }, [dateRangeEnd]);
+
+    const onDateRangeEndChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+        const nextEnd = event.target.value;
+        setDateRangeEnd(nextEnd);
+        if (dateRangeStart && nextEnd && nextEnd < dateRangeStart) {
+            setDateRangeStart(nextEnd);
+        }
+    }, [dateRangeStart]);
+
+    const onGroupByCategoryChange = useCallback((event: CheckboxChangeEvent) => {
+        setGroupByCategory(event.target.checked);
+    }, []);
+
+    const onSelectedRowsChange = useCallback((keys: Key[]) => {
+        startTransition(() => {
+            setSelectedRowKeys(keys);
+        });
+    }, []);
+
+    const toggleCategorySelection = useCallback((category: string, shouldSelect: boolean) => {
+        const categoryMeasurementKeys = measurementKeysByCategory.get(category);
+        if (!categoryMeasurementKeys || categoryMeasurementKeys.length === 0) {
+            return;
+        }
+
+        startTransition(() => {
+            setSelectedRowKeys(previous => {
+                const next = new Set(previous.map(key => String(key)));
+                if (shouldSelect) {
+                    categoryMeasurementKeys.forEach(key => next.add(key));
+                } else {
+                    categoryMeasurementKeys.forEach(key => next.delete(key));
+                }
+                return Array.from(next);
+            });
+        });
+    }, [measurementKeysByCategory]);
+
     const chartSeries = useMemo<ChartSeries[]>(
         () =>
             selectedRows
                 .map((row, index) => {
-                    const cells = visibleSources.map(source => row.valuesBySource[source.id]);
+                    const cells = chartSources.map(source => row.valuesBySource[source.id]);
                     const defaultRange = getRowDefaultRange(cells);
                     const observedBounds = getRowObservedBounds(cells);
                     const normalizedValuesBySource: Record<string, number | null> = {};
                     const outOfRangeBySource: Record<string, boolean> = {};
 
-                    for (const source of visibleSources) {
+                    for (const source of chartSources) {
                         const cell = row.valuesBySource[source.id];
                         normalizedValuesBySource[source.id] = normalizeCellForChart({
                             cell,
@@ -932,7 +1125,7 @@ export default function App() {
                         unitLabel: resolveSeriesUnitLabel(cells),
                     };
                 }),
-        [selectedRows, visibleSources],
+        [chartSources, selectedRows],
     );
 
     const hasAnyData = labs.length > 0;
@@ -1006,7 +1199,7 @@ export default function App() {
             ),
             dataIndex: 'measurement',
             key: 'measurement',
-            width: 250,
+            width: MEASUREMENT_COLUMN_WIDTH,
             fixed: isMobileViewport ? false : 'left',
             render: (value, row) => {
                 if (row.rowType === 'category') {
@@ -1018,23 +1211,93 @@ export default function App() {
                     );
                 }
                 const isStarred = starredMeasurementSet.has(row.key);
+                const rangeTooltip = measurementRangesTooltipByKey.get(row.key);
                 return (
-                    <MeasurementNameCell>
-                        <StarToggle
-                            type='button'
-                            active={isStarred}
-                            aria-pressed={isStarred}
-                            aria-label={isStarred ? `Unstar ${value}` : `Star ${value}`}
-                            onClick={event => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                toggleMeasurementStar(row.key);
-                            }}
-                        >
-                            <Star size={14} weight={isStarred ? 'fill' : 'regular'} />
-                        </StarToggle>
-                        <Text strong={isStarred}>{value}</Text>
-                    </MeasurementNameCell>
+                    <AntTooltip
+                        placement='topLeft'
+                        mouseEnterDelay={0.2}
+                        title={(
+                            <MeasurementRangesTooltipContent>
+                                <MeasurementRangesTooltipTitle>{rangeTooltip?.heading ?? value}</MeasurementRangesTooltipTitle>
+                                {rangeTooltip?.lines.map(line => (
+                                    <MeasurementRangesTooltipLine key={`${row.key}-${line}`}>{line}</MeasurementRangesTooltipLine>
+                                ))}
+                            </MeasurementRangesTooltipContent>
+                        )}
+                    >
+                        <MeasurementNameCell>
+                            <StarToggle
+                                type='button'
+                                active={isStarred}
+                                aria-pressed={isStarred}
+                                aria-label={isStarred ? `Unstar ${value}` : `Star ${value}`}
+                                onClick={event => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    toggleMeasurementStar(row.key);
+                                }}
+                            >
+                                <Star size={14} weight={isStarred ? 'fill' : 'regular'} />
+                            </StarToggle>
+                            <Text strong={isStarred}>{value}</Text>
+                        </MeasurementNameCell>
+                    </AntTooltip>
+                );
+            },
+        };
+
+        const overviewColumn: ColumnsType<TableRow>[number] = {
+            title: <Text>Overview</Text>,
+            key: 'overview',
+            width: OVERVIEW_COLUMN_WIDTH,
+            fixed: isMobileViewport ? false : 'left',
+            shouldCellUpdate: (record, previousRecord) => {
+                if (record.rowType !== previousRecord.rowType) {
+                    return true;
+                }
+                if (record.rowType === 'category' || previousRecord.rowType === 'category') {
+                    return record !== previousRecord;
+                }
+                return tableSources.some(source => (
+                    record.valuesBySource[source.id] !== previousRecord.valuesBySource[source.id]
+                ));
+            },
+            render: (_, row) => {
+                if (row.rowType === 'category') {
+                    return <CategoryFillerCell />;
+                }
+
+                const tally = measurementOverviewByKey.get(row.key) ?? {
+                    inRange: 0,
+                    outOfRange: 0,
+                };
+                const hasAnyCounter = tally.inRange > 0 || tally.outOfRange > 0;
+
+                return (
+                    <OverviewTallyCell>
+                        {hasAnyCounter ? (
+                            <>
+                                {tally.inRange > 0 && (
+                                    <AntTooltip title={`${tally.inRange} in range`}>
+                                        <OverviewTallyItem tone='inRange'>
+                                            <CheckCircle size={13} weight='fill' />
+                                            <span>{tally.inRange}</span>
+                                        </OverviewTallyItem>
+                                    </AntTooltip>
+                                )}
+                                {tally.outOfRange > 0 && (
+                                    <AntTooltip title={`${tally.outOfRange} out of range`}>
+                                        <OverviewTallyItem tone='outOfRange'>
+                                            <WarningCircle size={13} weight='fill' />
+                                            <span>{tally.outOfRange}</span>
+                                        </OverviewTallyItem>
+                                    </AntTooltip>
+                                )}
+                            </>
+                        ) : (
+                            <Text type='secondary'>—</Text>
+                        )}
+                    </OverviewTallyCell>
                 );
             },
         };
@@ -1042,7 +1305,7 @@ export default function App() {
         const sourceColumns: ColumnsType<TableRow> = tableSources.map(source => ({
             title: <Text>{source.prettyDate}</Text>,
             key: source.id,
-            width: 164,
+            width: SOURCE_COLUMN_WIDTH,
             shouldCellUpdate: (record, previousRecord) => {
                 if (record.rowType !== previousRecord.rowType) {
                     return true;
@@ -1054,7 +1317,7 @@ export default function App() {
             },
             render: (_, row) => {
                 if (row.rowType === 'category') {
-                    return null;
+                    return <CategoryFillerCell />;
                 }
                 const cell = row.valuesBySource[source.id];
                 if (!cell) return <Text type='secondary'>—</Text>;
@@ -1062,27 +1325,91 @@ export default function App() {
             },
         }));
 
-        return [measurementColumn, ...sourceColumns];
-    }, [isMobileViewport, starredMeasurementSet, tableSources, toggleMeasurementStar]);
+        return [measurementColumn, overviewColumn, ...sourceColumns];
+    }, [
+        isMobileViewport,
+        measurementOverviewByKey,
+        measurementRangesTooltipByKey,
+        starredMeasurementSet,
+        tableSources,
+        toggleMeasurementStar,
+    ]);
 
     const tableScrollY = useMemo(
         () => Math.max(240, isMobileViewport ? viewport.height - 178 : viewport.height - 132),
         [isMobileViewport, viewport.height],
     );
 
-    const resetRange = () => {
+    const tableScrollX = useMemo(
+        () => (
+            SELECTION_COLUMN_WIDTH +
+            MEASUREMENT_COLUMN_WIDTH +
+            OVERVIEW_COLUMN_WIDTH +
+            (tableSources.length * SOURCE_COLUMN_WIDTH)
+        ),
+        [tableSources.length],
+    );
+
+    const resetRange = useCallback(() => {
         setDateRangeStart(dateBounds.min);
         setDateRangeEnd(dateBounds.max);
-    };
+    }, [dateBounds.max, dateBounds.min]);
 
-    const isRangeResetDisabled =
-        !dateBounds.min ||
-        !dateBounds.max ||
-        (dateRangeStart === dateBounds.min && dateRangeEnd === dateBounds.max);
+    const isRangeResetDisabled = useMemo(
+        () => (
+            !dateBounds.min ||
+            !dateBounds.max ||
+            (dateRangeStart === dateBounds.min && dateRangeEnd === dateBounds.max)
+        ),
+        [dateBounds.max, dateBounds.min, dateRangeEnd, dateRangeStart],
+    );
 
-    const chartContent = chartSeries.length > 0
-        ? <TrendChart series={chartSeries} orderedSources={visibleSources} />
-        : <Empty description='No numeric values in the selected rows for this date range.' />;
+    const tableRowSelection = useMemo<NonNullable<TableProps<TableRow>['rowSelection']>>(
+        () => ({
+            selectedRowKeys,
+            onChange: onSelectedRowsChange,
+            columnWidth: SELECTION_COLUMN_WIDTH,
+            fixed: !isMobileViewport,
+            getCheckboxProps: row => ({
+                disabled: row.rowType === 'category',
+            }),
+            renderCell: (checked, row, _index, originNode) => {
+                if (row.rowType !== 'category') {
+                    return originNode;
+                }
+                const categorySelection = categorySelectionByName.get(row.category);
+                return (
+                    <Checkbox
+                        checked={categorySelection?.checked}
+                        indeterminate={categorySelection?.indeterminate}
+                        disabled={categorySelection?.disabled}
+                        onChange={event => toggleCategorySelection(row.category, event.target.checked)}
+                    />
+                );
+            },
+        }),
+        [
+            categorySelectionByName,
+            isMobileViewport,
+            onSelectedRowsChange,
+            selectedRowKeys,
+            toggleCategorySelection,
+        ],
+    );
+
+    const tableRowClassName = useCallback(
+        (row: TableRow) => (row.rowType === 'category' ? 'category-row' : ''),
+        [],
+    );
+
+    const chartContent = useMemo(
+        () => (
+            chartSeries.length > 0
+                ? <TrendChart series={chartSeries} orderedSources={chartSources} />
+                : <Empty description='No numeric values in the selected rows for this date range.' />
+        ),
+        [chartSeries, chartSources],
+    );
 
     return (
         <Page mobile={isMobileViewport}>
@@ -1114,7 +1441,7 @@ export default function App() {
                                     prefix={<Drop size={16} />}
                                     placeholder='Filter measurements'
                                     value={measurementFilter}
-                                    onChange={event => setMeasurementFilter(event.target.value)}
+                                    onChange={onMeasurementFilterChange}
                                     allowClear
                                 />
                                 <DateRangeInputs>
@@ -1123,13 +1450,7 @@ export default function App() {
                                         value={dateRangeStart}
                                         min={dateBounds.min || undefined}
                                         max={dateRangeEnd || dateBounds.max || undefined}
-                                        onChange={event => {
-                                            const nextStart = event.target.value;
-                                            setDateRangeStart(nextStart);
-                                            if (dateRangeEnd && nextStart && nextStart > dateRangeEnd) {
-                                                setDateRangeEnd(nextStart);
-                                            }
-                                        }}
+                                        onChange={onDateRangeStartChange}
                                     />
                                     <RangeDivider>to</RangeDivider>
                                     <DateInput
@@ -1137,13 +1458,7 @@ export default function App() {
                                         value={dateRangeEnd}
                                         min={dateRangeStart || dateBounds.min || undefined}
                                         max={dateBounds.max || undefined}
-                                        onChange={event => {
-                                            const nextEnd = event.target.value;
-                                            setDateRangeEnd(nextEnd);
-                                            if (dateRangeStart && nextEnd && nextEnd < dateRangeStart) {
-                                                setDateRangeStart(nextEnd);
-                                            }
-                                        }}
+                                        onChange={onDateRangeEndChange}
                                     />
                                 </DateRangeInputs>
                                 <Button onClick={resetRange} disabled={isRangeResetDisabled}>
@@ -1151,7 +1466,7 @@ export default function App() {
                                 </Button>
                                 <Checkbox
                                     checked={groupByCategory}
-                                    onChange={event => setGroupByCategory(event.target.checked)}
+                                    onChange={onGroupByCategoryChange}
                                 >
                                     Group by category
                                 </Checkbox>
@@ -1165,20 +1480,10 @@ export default function App() {
                                     dataSource={tableRows}
                                     columns={tableColumns}
                                     pagination={false}
-                                    virtual
-                                    scroll={{ x: 'max-content', y: tableScrollY }}
-                                    rowClassName={row => (row.rowType === 'category' ? 'category-row' : '')}
-                                    rowSelection={{
-                                        selectedRowKeys,
-                                        onChange: keys => {
-                                            startTransition(() => {
-                                                setSelectedRowKeys(keys);
-                                            });
-                                        },
-                                        getCheckboxProps: row => ({
-                                            disabled: row.rowType === 'category',
-                                        }),
-                                    }}
+                                    tableLayout='fixed'
+                                    scroll={{ x: tableScrollX, y: tableScrollY }}
+                                    rowClassName={tableRowClassName}
+                                    rowSelection={tableRowSelection}
                                 />
                             </TableShell>
                         </TablePane>
@@ -1312,14 +1617,41 @@ const TableShell = styled.div`
         border-bottom: 1px solid #d7dde7;
     }
 
+    .ant-table-body,
+    .ant-table-tbody-virtual-holder {
+        overflow-y: scroll !important;
+        scrollbar-gutter: stable;
+    }
+
+    .ant-table-thead > tr > th.ant-table-selection-column,
+    .ant-table-tbody > tr > td.ant-table-selection-column {
+        width: ${SELECTION_COLUMN_WIDTH}px;
+        min-width: ${SELECTION_COLUMN_WIDTH}px;
+        text-align: center;
+        padding-inline: 8px;
+    }
+
+    .ant-table-selection-column .ant-checkbox-wrapper {
+        margin-inline: auto;
+    }
+
     .ant-table-tbody > tr > td {
         padding: 7px 8px;
     }
 
     .ant-table-tbody > tr.category-row > td {
-        background: #f1f5f9;
-        border-top: 1px solid #d5dce7;
-        border-bottom: 1px solid #d5dce7;
+        background: #e7eef8;
+        border-top: 1px solid #c7d3e2;
+        border-bottom: 1px solid #c7d3e2;
+    }
+
+    .ant-table-tbody > tr.category-row:hover > td {
+        background: #dde8f5;
+    }
+
+    .ant-table-cell-fix-left,
+    .ant-table-cell-fix-left-last {
+        background-clip: padding-box;
     }
 
     .ant-table,
@@ -1335,15 +1667,59 @@ const MeasurementNameCell = styled.div`
     min-width: 0;
 `;
 
+const MeasurementRangesTooltipContent = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+`;
+
+const MeasurementRangesTooltipTitle = styled.div`
+    font-weight: 600;
+    margin-bottom: 2px;
+`;
+
+const MeasurementRangesTooltipLine = styled.div`
+    font-size: 12px;
+`;
+
 const CategoryHeadingCell = styled.div`
     display: inline-flex;
     align-items: center;
     gap: 8px;
+    min-height: 22px;
 `;
 
 const CategoryCountText = styled.span`
     font-size: 11px;
     color: #64748b;
+`;
+
+const CategoryFillerCell = styled.div`
+    min-height: 18px;
+`;
+
+const OverviewTallyCell = styled.div`
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+`;
+
+const OverviewTallyItem = styled.span<{ tone: 'inRange' | 'outOfRange' }>`
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    line-height: 1;
+    color: ${({ tone }) => {
+        if (tone === 'inRange') return '#15803d';
+        return '#b91c1c';
+    }};
+
+    span {
+        font-weight: 600;
+        color: #0f172a;
+    }
 `;
 
 const StarToggle = styled.button<{ active: boolean }>`
