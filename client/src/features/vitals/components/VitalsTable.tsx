@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 
 import { CheckCircle, Star, WarningCircle } from '@phosphor-icons/react';
 
@@ -26,7 +26,6 @@ type VitalsTableProps = {
     starredMeasurementSet: Set<string>;
     measurementOverviewByKey: Map<string, MeasurementOverviewTally>;
     measurementRangesTooltipByKey: Map<string, string>;
-    tableScrollY: number;
     tableScrollX: number;
     onToggleRow: (key: string, checked: boolean) => void;
     onToggleAllRows: (checked: boolean) => void;
@@ -140,7 +139,7 @@ const MeasurementRow = memo(function MeasurementRow({
     const hasAnyCounter = overview.inRange > 0 || overview.outOfRange > 0;
 
     return (
-        <tr className={selected ? 'bg-slate-100/60' : ''}>
+        <tr className={selected ? 'vitals-row-selected' : ''}>
             <td className='vitals-cell vitals-col-select'>
                 <SelectionCheckbox
                     checked={selected}
@@ -149,17 +148,18 @@ const MeasurementRow = memo(function MeasurementRow({
                 />
             </td>
             <td className='vitals-cell vitals-col-measurement'>
-                <div className='inline-flex min-w-0 items-center gap-1.5' title={tooltip}>
+                <div className='flex min-w-0 items-start gap-1.5' title={tooltip}>
                     <button
                         type='button'
                         aria-pressed={starred}
                         aria-label={starred ? `Unstar ${row.measurement}` : `Star ${row.measurement}`}
+                        onMouseDown={event => event.preventDefault()}
                         onClick={() => onToggleStar(row.key)}
                         className={`grid h-5 w-5 place-items-center rounded-sm border border-transparent p-0 ${starred ? 'text-amber-600 hover:text-amber-700' : 'text-slate-400 hover:text-slate-700'} hover:border-slate-300 hover:bg-slate-50`}
                     >
                         <Star size={14} weight={starred ? 'fill' : 'regular'} />
                     </button>
-                    <span className={`truncate ${starred ? 'font-semibold' : ''}`}>{row.measurement}</span>
+                    <span className={`min-w-0 break-words whitespace-normal leading-snug ${starred ? 'font-semibold' : ''}`}>{row.measurement}</span>
                 </div>
             </td>
             <td className='vitals-cell vitals-col-overview'>
@@ -256,13 +256,15 @@ export const VitalsTable = memo(function VitalsTable({
     starredMeasurementSet,
     measurementOverviewByKey,
     measurementRangesTooltipByKey,
-    tableScrollY,
     tableScrollX,
     onToggleRow,
     onToggleAllRows,
     onToggleCategory,
     onToggleStar,
 }: VitalsTableProps) {
+    const tableShellRef = useRef<HTMLDivElement | null>(null);
+    const pendingScrollTopRef = useRef<number | null>(null);
+
     const selectableRowKeys = useMemo(
         () => rows.filter((row): row is VitalsRowModel => row.rowType === 'measurement').map(row => row.key),
         [rows],
@@ -276,9 +278,22 @@ export const VitalsTable = memo(function VitalsTable({
     const allChecked = selectableRowKeys.length > 0 && selectedCount === selectableRowKeys.length;
     const someChecked = selectedCount > 0 && selectedCount < selectableRowKeys.length;
 
+    const onToggleStarWithScrollLock = useCallback((measurementKey: string) => {
+        pendingScrollTopRef.current = tableShellRef.current?.scrollTop ?? null;
+        onToggleStar(measurementKey);
+    }, [onToggleStar]);
+
+    useLayoutEffect(() => {
+        if (pendingScrollTopRef.current === null || !tableShellRef.current) {
+            return;
+        }
+        tableShellRef.current.scrollTop = pendingScrollTopRef.current;
+        pendingScrollTopRef.current = null;
+    }, [rows]);
+
     return (
         <div className='flex min-h-0 flex-1'>
-            <div className='vitals-table-shell' style={{ maxHeight: tableScrollY }}>
+            <div ref={tableShellRef} className='vitals-table-shell'>
                 <table
                     className='vitals-table'
                     style={{
@@ -337,7 +352,7 @@ export const VitalsTable = memo(function VitalsTable({
                                     tooltip={measurementRangesTooltipByKey.get(row.key) ?? row.measurement}
                                     overview={measurementOverviewByKey.get(row.key) ?? { inRange: 0, outOfRange: 0 }}
                                     onToggleRow={onToggleRow}
-                                    onToggleStar={onToggleStar}
+                                    onToggleStar={onToggleStarWithScrollLock}
                                 />
                             );
                         })}

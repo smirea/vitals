@@ -1,43 +1,44 @@
 import type { ChangeEvent } from 'react';
 
-import { Drop } from '@phosphor-icons/react';
+import { DownloadSimple, Drop } from '@phosphor-icons/react';
+import { Slider } from 'antd';
 
-type DateBounds = {
-    min: string;
-    max: string;
-};
+import { formatPrettyDate } from '../utils';
 
 type VitalsControlsProps = {
     isMobile: boolean;
     measurementFilter: string;
     onMeasurementFilterChange: (event: ChangeEvent<HTMLInputElement>) => void;
-    dateRangeStart: string;
-    dateRangeEnd: string;
-    dateBounds: DateBounds;
-    onDateRangeStartChange: (event: ChangeEvent<HTMLInputElement>) => void;
-    onDateRangeEndChange: (event: ChangeEvent<HTMLInputElement>) => void;
-    onResetRange: () => void;
-    isRangeResetDisabled: boolean;
+    availableDates: string[];
+    dateRangeValue: [number, number];
+    onDateRangeSliderChange: (nextRange: [number, number]) => void;
     groupByCategory: boolean;
     onGroupByCategoryChange: (event: ChangeEvent<HTMLInputElement>) => void;
+    onDownloadCsv: () => void;
+    isDownloadCsvDisabled: boolean;
 };
 
 export function VitalsControls({
     isMobile,
     measurementFilter,
     onMeasurementFilterChange,
-    dateRangeStart,
-    dateRangeEnd,
-    dateBounds,
-    onDateRangeStartChange,
-    onDateRangeEndChange,
-    onResetRange,
-    isRangeResetDisabled,
+    availableDates,
+    dateRangeValue,
+    onDateRangeSliderChange,
     groupByCategory,
     onGroupByCategoryChange,
+    onDownloadCsv,
+    isDownloadCsvDisabled,
 }: VitalsControlsProps) {
+    const sliderDates = [...availableDates].reverse();
+    const maxIndex = Math.max(availableDates.length - 1, 0);
+    const startIndex = Math.min(maxIndex, Math.max(0, dateRangeValue[0] ?? 0));
+    const endIndex = Math.min(maxIndex, Math.max(0, dateRangeValue[1] ?? 0));
+    const startDateLabel = sliderDates[startIndex] ? formatPrettyDate(sliderDates[startIndex]) : '--';
+    const endDateLabel = sliderDates[endIndex] ? formatPrettyDate(sliderDates[endIndex]) : '--';
+
     return (
-        <div className={`grid items-center gap-2 border-b border-slate-300 p-2 ${isMobile ? 'grid-cols-1' : 'grid-cols-[minmax(260px,1fr)_auto_auto_auto]'}`}>
+        <div className={`grid items-center gap-2 border-b border-slate-300 p-2 ${isMobile ? 'grid-cols-1' : 'grid-cols-[minmax(240px,1fr)_minmax(320px,1.35fr)_auto_auto]'}`}>
             <label className='relative flex items-center'>
                 <Drop size={16} className='pointer-events-none absolute left-2 text-slate-600' />
                 <input
@@ -48,34 +49,30 @@ export function VitalsControls({
                 />
             </label>
 
-            <div className='inline-flex items-center gap-1.5'>
-                <input
-                    type='date'
-                    value={dateRangeStart}
-                    min={dateBounds.min || undefined}
-                    max={dateRangeEnd || dateBounds.max || undefined}
-                    onChange={onDateRangeStartChange}
-                    className='h-8 rounded-sm border border-slate-300 bg-white px-2 text-sm text-slate-900 outline-none transition focus:border-slate-500'
-                />
-                <span className='text-xs uppercase tracking-[0.04em] text-slate-600'>to</span>
-                <input
-                    type='date'
-                    value={dateRangeEnd}
-                    min={dateRangeStart || dateBounds.min || undefined}
-                    max={dateBounds.max || undefined}
-                    onChange={onDateRangeEndChange}
-                    className='h-8 rounded-sm border border-slate-300 bg-white px-2 text-sm text-slate-900 outline-none transition focus:border-slate-500'
+            <div className='flex min-w-0 flex-col gap-1'>
+                <div className='inline-flex items-center justify-between text-[11px] uppercase tracking-[0.04em] text-slate-600'>
+                    <span>{startDateLabel}</span>
+                    <span>{endDateLabel}</span>
+                </div>
+                <Slider
+                    range
+                    min={0}
+                    max={maxIndex}
+                    step={1}
+                    value={dateRangeValue}
+                    disabled={availableDates.length <= 1}
+                    onChange={value => {
+                        if (!Array.isArray(value) || value.length !== 2) return;
+                        onDateRangeSliderChange([value[0], value[1]]);
+                    }}
+                    tooltip={{ formatter: value => (value === undefined ? '' : formatPrettyDate(sliderDates[value] ?? '')) }}
+                    styles={{
+                        rail: { background: '#cbd5e1' },
+                        track: { background: '#334155' },
+                        handle: { borderColor: '#0f172a', background: '#0f172a' },
+                    }}
                 />
             </div>
-
-            <button
-                type='button'
-                onClick={onResetRange}
-                disabled={isRangeResetDisabled}
-                className='h-8 rounded-sm border border-slate-300 bg-white px-3 text-sm text-slate-900 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50'
-            >
-                All dates
-            </button>
 
             <label className='inline-flex items-center gap-2 text-sm text-slate-800'>
                 <input
@@ -86,6 +83,16 @@ export function VitalsControls({
                 />
                 Group by category
             </label>
+
+            <button
+                type='button'
+                onClick={onDownloadCsv}
+                disabled={isDownloadCsvDisabled}
+                className='inline-flex h-8 items-center gap-1.5 rounded-sm border border-slate-300 bg-white px-3 text-sm text-slate-900 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50'
+            >
+                <DownloadSimple size={14} />
+                CSV
+            </button>
         </div>
     );
 }

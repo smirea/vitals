@@ -1,9 +1,6 @@
 import {
     memo,
-    useEffect,
     useMemo,
-    useRef,
-    useState,
 } from 'react';
 
 import { Empty } from 'antd';
@@ -31,29 +28,25 @@ export const TrendChart = memo(function TrendChart({
     series,
     orderedSources,
 }: TrendChartProps) {
-    const chartCanvasRef = useRef<HTMLDivElement | null>(null);
-    const [chartSize, setChartSize] = useState({ width: 0, height: 0 });
+    const visibleSeries = useMemo(
+        () =>
+            series.filter(item => orderedSources.some(source => {
+                const cell = item.valuesBySourceIndex[source.index];
+                if (!cell) return false;
+                return cell.display !== '—' && cell.display !== '--' && cell.display.trim() !== '';
+            })),
+        [orderedSources, series],
+    );
 
-    useEffect(() => {
-        const element = chartCanvasRef.current;
-        if (!element || typeof ResizeObserver === 'undefined') return;
-
-        const observer = new ResizeObserver(entries => {
-            const entry = entries[0];
-            if (!entry) return;
-            const width = entry.contentRect.width;
-            const height = entry.contentRect.height;
-            setChartSize(previous => {
-                if (Math.round(previous.width) === Math.round(width) && Math.round(previous.height) === Math.round(height)) {
-                    return previous;
-                }
-                return { width, height };
-            });
-        });
-
-        observer.observe(element);
-        return () => observer.disconnect();
-    }, []);
+    const tableSources = useMemo(
+        () =>
+            orderedSources.filter(source => visibleSeries.some(item => {
+                const cell = item.valuesBySourceIndex[source.index];
+                if (!cell) return false;
+                return cell.display !== '—' && cell.display !== '--' && cell.display.trim() !== '';
+            })),
+        [orderedSources, visibleSeries],
+    );
 
     const chartData = useMemo<TrendChartDatum[]>(
         () =>
@@ -62,21 +55,21 @@ export const TrendChart = memo(function TrendChart({
                     sourceId: source.id,
                     prettyDate: source.prettyDate,
                 };
-                for (const item of series) {
+                for (const item of visibleSeries) {
                     datum[item.chartKey] = item.normalizedValuesBySourceIndex[source.index] ?? null;
                     datum[`${item.chartKey}__out`] = item.outOfRangeBySourceIndex[source.index] ?? false;
                 }
                 return datum;
             }),
-        [orderedSources, series],
+        [orderedSources, visibleSeries],
     );
 
     const normalizedValues = useMemo(
         () =>
-            series
+            visibleSeries
                 .flatMap(item => orderedSources.map(source => item.normalizedValuesBySourceIndex[source.index] ?? null))
                 .filter((value): value is number => value !== null && Number.isFinite(value)),
-        [orderedSources, series],
+        [orderedSources, visibleSeries],
     );
 
     const hasNumericData = normalizedValues.length > 0;
@@ -97,13 +90,11 @@ export const TrendChart = memo(function TrendChart({
         [orderedSources],
     );
 
-    const canRenderChart = chartSize.width > 0 && chartSize.height > 0;
-
     return (
         <div className='flex w-full flex-col gap-3 p-3'>
-            <div ref={chartCanvasRef} className='h-[380px] min-h-[320px] w-full'>
-                {hasNumericData && canRenderChart ? (
-                    <ResponsiveContainer width={chartSize.width} height={chartSize.height}>
+            <div className='h-[380px] min-h-[320px] w-full'>
+                {hasNumericData ? (
+                    <ResponsiveContainer width='100%' height='100%'>
                         <LineChart
                             data={chartData}
                             margin={{ top: 18, right: 20, left: 12, bottom: 10 }}
@@ -144,9 +135,9 @@ export const TrendChart = memo(function TrendChart({
                                     }
 
                                     return (
-                                        <div className='min-w-[260px] max-w-[440px] rounded border border-slate-300 bg-white px-3 py-2 shadow-[0_10px_28px_rgba(15,23,42,0.18)]'>
-                                            <div className='mb-2 text-xs font-semibold text-slate-900'>{source.prettyDate}</div>
-                                            {series.map(item => {
+                                            <div className='min-w-[260px] max-w-[440px] rounded border border-slate-300 bg-white px-3 py-2 shadow-[0_10px_28px_rgba(15,23,42,0.18)]'>
+                                                <div className='mb-2 text-xs font-semibold text-slate-900'>{source.prettyDate}</div>
+                                            {visibleSeries.map(item => {
                                                 const cell = item.valuesBySourceIndex[source.index];
                                                 const displayLabel = item.unitLabel
                                                     ? `${item.label} (${item.unitLabel})`
@@ -164,11 +155,13 @@ export const TrendChart = memo(function TrendChart({
                                 }}
                             />
                             <Legend
-                                verticalAlign='top'
+                                verticalAlign='bottom'
                                 align='left'
-                                wrapperStyle={{ paddingBottom: 8 }}
+                                iconSize={8}
+                                formatter={value => <span className='text-[11px] leading-tight text-slate-700'>{value}</span>}
+                                wrapperStyle={{ paddingTop: 8 }}
                             />
-                            {series.map(item => (
+                            {visibleSeries.map(item => (
                                 <Line
                                     key={item.id}
                                     type='linear'
@@ -238,7 +231,7 @@ export const TrendChart = memo(function TrendChart({
                         <thead>
                             <tr>
                                 <th className='sticky top-0 z-[1] border border-slate-200 bg-slate-50 px-2 py-1.5 text-left text-slate-700'>Date</th>
-                                {series.map(item => (
+                                {visibleSeries.map(item => (
                                     <th
                                         key={`selected-values-heading-${item.id}`}
                                         className='sticky top-0 z-[1] border border-slate-200 bg-slate-50 px-2 py-1.5 text-left text-slate-700'
@@ -249,10 +242,10 @@ export const TrendChart = memo(function TrendChart({
                             </tr>
                         </thead>
                         <tbody>
-                            {orderedSources.map(source => (
+                            {tableSources.map(source => (
                                 <tr key={`selected-values-row-${source.id}`} className='odd:bg-slate-50/30'>
                                     <td className='border border-slate-200 px-2 py-1.5'>{source.prettyDate}</td>
-                                    {series.map(item => {
+                                    {visibleSeries.map(item => {
                                         const cell = item.valuesBySourceIndex[source.index];
                                         return (
                                             <td key={`selected-values-${source.id}-${item.id}`} className='border border-slate-200 px-2 py-1.5'>

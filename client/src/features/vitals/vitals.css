@@ -17,6 +17,8 @@
 
 .vitals-table-shell {
     flex: 1;
+    display: flex;
+    flex-direction: column;
     min-height: 0;
     height: 100%;
     overflow: auto;
@@ -25,6 +27,8 @@
 }
 
 .vitals-table {
+    min-width: 100%;
+    min-height: 100%;
     width: max-content;
     border-collapse: collapse;
     table-layout: fixed;
@@ -55,6 +59,10 @@
     font-size: 14px;
 }
 
+.vitals-row-selected > .vitals-cell {
+    background: #f1f5f9;
+}
+
 .vitals-col-select {
     position: sticky;
     left: 0;
@@ -62,7 +70,6 @@
     width: var(--selection-col-width);
     max-width: var(--selection-col-width);
     z-index: 6;
-    background: inherit;
     text-align: center;
 }
 
@@ -73,7 +80,6 @@
     width: var(--measurement-col-width);
     max-width: var(--measurement-col-width);
     z-index: 5;
-    background: inherit;
 }
 
 .vitals-col-overview {
@@ -83,6 +89,11 @@
     width: var(--overview-col-width);
     max-width: var(--overview-col-width);
     z-index: 4;
+}
+
+.vitals-cell.vitals-col-select,
+.vitals-cell.vitals-col-measurement,
+.vitals-cell.vitals-col-overview {
     background: inherit;
 }
 
@@ -90,6 +101,7 @@
 .vitals-head.vitals-col-measurement,
 .vitals-head.vitals-col-overview {
     z-index: 8;
+    background: #f8fafc;
 }
 
 .vitals-category-row > .vitals-cell {

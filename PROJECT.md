@@ -27,7 +27,7 @@ Pick the next most important feature to work on, implement it fully and test it 
     - [x] show per-cell reference range visualization (min/max markers with current value marker) when range data exists
     - [x] allow selecting rows and columns (default to all columns) to see data on a chart, I want to see how the various vitals have trended over time. chart should show to the right of the table always visible if there are items selected
     - [x] in mobile portrait mode, only show the latest value and allow to switch the column to go to a different lab. checking items should show a chart under the table (chart always visible if values are selected so table takes up less space)
-    - [ ] on desktop UI should take over the entire space and show all measurements at once
+    - [x] on desktop UI should take over the entire space and show all measurements at once
 - [x] use the aws cli to create a purpose built user for this project with dedicated permissions and store the credentials in .env.local
 - [x] create env with env-manager and create specific keys for everything requested (you can use env-manager to generate an openrouter key)
 - [x] bloodwork glossary enforcement: track canonical measurement names, aliases, and ranges with LLM-validated updates
@@ -51,6 +51,11 @@ Pick the next most important feature to work on, implement it fully and test it 
 - Dashboard styling moved away from Emotion/styled to Tailwind utility classes plus `client/src/features/vitals/vitals.css` for shared table/range visuals.
 - Added `bun run perf:client:dev` (`scripts/client-perf.ts`) to run repeatable dev-mode interaction benchmarks and enforce a configurable threshold.
 - Latest dev benchmark on current dataset (10 runs): median select `83.5ms`, unselect `25ms`, regroup `64.5ms`, short filter `141.5ms`, clear filter `134ms` (threshold `250ms`, PASS).
+- Dashboard date filtering now uses a double-handle slider constrained to available lab dates, replacing freeform date inputs/reset.
+- Dashboard now hides empty measurement rows and empty date columns in the main table, and prunes trend x-axis dates/selected-values table columns that have no datapoints.
+- Star toggling no longer jumps table scroll position, and starred keys are no longer cleared during initial load before labs are available.
+- Added visible-table CSV export from dashboard controls; exported file includes measurement/category/overview and currently visible date columns.
+- Fixed sticky header backgrounds for measurement/overview columns, enabled wrapped measurement names, and removed desktop outer padding to use full viewport space.
 
 ## Active iteration requirements (2026-02-13)
 
@@ -65,3 +70,8 @@ Pick the next most important feature to work on, implement it fully and test it 
 - [x] Make "Group by category" default to enabled and persist that preference in local storage.
 - [x] Add category-level checkbox selection so selecting a category selects all measurements in that category.
 - [x] Add an overview tally column next to measurement name showing counts for in-range, out-of-range, and missing values across visible bloodworks.
+- [x] Limit visible dashboard/table/chart axes to rows and dates with actual datapoints in the active filter window.
+- [x] Replace date range inputs with a bounded double slider and remove the "All dates" reset button.
+- [x] Keep star interactions from resetting table scroll and preserve starred state across refreshes.
+- [x] Add download-to-CSV for the currently visible dashboard data.
+- [x] Fix first-selection split-view flicker and sticky header/background wrapping regressions.

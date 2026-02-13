@@ -195,6 +195,21 @@ export function formatCell(measurement: BloodworkMeasurement): MeasurementCell {
     };
 }
 
+export function hasCellDisplayValue(cell: MeasurementCell | undefined): boolean {
+    if (!cell) {
+        return false;
+    }
+    const value = cell.display.trim();
+    return value !== '' && value !== '—' && value !== '--';
+}
+
+export function hasCellNumericValue(cell: MeasurementCell | undefined): boolean {
+    if (!cell || cell.numericValue === null) {
+        return false;
+    }
+    return Number.isFinite(cell.numericValue);
+}
+
 export function resolveSeriesUnitLabel(cells: Array<MeasurementCell | undefined>): string | undefined {
     const normalizedUnits = new Set(
         cells

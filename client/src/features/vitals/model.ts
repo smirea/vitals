@@ -12,6 +12,8 @@ import {
     CHART_PALETTE,
     formatCell,
     formatPrettyDate,
+    hasCellDisplayValue,
+    hasCellNumericValue,
     getRowDefaultRange,
     getRowObservedBounds,
     isCellOutsideReferenceRange,
@@ -59,8 +61,26 @@ export function getVisibleSources({
     });
 }
 
-export function getChartSources(visibleSources: SourceColumn[]): SourceColumn[] {
-    return [...visibleSources].sort((left, right) => left.date.localeCompare(right.date));
+export function getChartSources({
+    visibleSources,
+    selectedRows,
+}: {
+    visibleSources: SourceColumn[];
+    selectedRows: VitalsRowModel[];
+}): SourceColumn[] {
+    if (selectedRows.length === 0) {
+        return [];
+    }
+
+    return visibleSources
+        .filter(source => selectedRows.some(row => hasCellNumericValue(row.valuesBySourceIndex[source.index])))
+        .sort((left, right) => {
+            const byDate = left.date.localeCompare(right.date);
+            if (byDate !== 0) {
+                return byDate;
+            }
+            return left.index - right.index;
+        });
 }
 
 export function getAllMeasurementRows({
@@ -132,24 +152,34 @@ export function getFilteredMeasurementRows({
     });
 }
 
-function getVisibleSourceIndicesWithData({
+export function getRowsWithVisibleData({
     filteredMeasurementRows,
     visibleSources,
-    measurementFilter,
 }: {
     filteredMeasurementRows: VitalsRowModel[];
     visibleSources: SourceColumn[];
-    measurementFilter: string;
-}): Set<number> | null {
-    if (!measurementFilter.trim()) {
-        return null;
+}): VitalsRowModel[] {
+    if (visibleSources.length === 0) {
+        return [];
     }
 
+    return filteredMeasurementRows.filter(row => (
+        visibleSources.some(source => hasCellDisplayValue(row.valuesBySourceIndex[source.index]))
+    ));
+}
+
+function getVisibleSourceIndicesWithData({
+    filteredMeasurementRows,
+    visibleSources,
+}: {
+    filteredMeasurementRows: VitalsRowModel[];
+    visibleSources: SourceColumn[];
+}): Set<number> {
     const sourceIndices = new Set<number>();
     for (const row of filteredMeasurementRows) {
         for (const source of visibleSources) {
             const cell = row.valuesBySourceIndex[source.index];
-            if (cell && cell.display !== '—') {
+            if (hasCellDisplayValue(cell)) {
                 sourceIndices.add(source.index);
             }
         }
@@ -160,21 +190,14 @@ function getVisibleSourceIndicesWithData({
 export function getTableSources({
     filteredMeasurementRows,
     visibleSources,
-    measurementFilter,
 }: {
     filteredMeasurementRows: VitalsRowModel[];
     visibleSources: SourceColumn[];
-    measurementFilter: string;
 }): SourceColumn[] {
     const visibleSourceIndicesWithData = getVisibleSourceIndicesWithData({
         filteredMeasurementRows,
         visibleSources,
-        measurementFilter,
     });
-
-    if (!visibleSourceIndicesWithData) {
-        return visibleSources;
-    }
 
     return visibleSources.filter(source => visibleSourceIndicesWithData.has(source.index));
 }
@@ -335,8 +358,14 @@ export function getChartSeries({
     selectedRows: VitalsRowModel[];
     chartSources: SourceColumn[];
 }): ChartSeriesModel[] {
-    return selectedRows.map((row, index) => {
+    const result: ChartSeriesModel[] = [];
+
+    selectedRows.forEach(row => {
         const cells = chartSources.map(source => row.valuesBySourceIndex[source.index]);
+        const hasAnyNumericData = cells.some(hasCellNumericValue);
+        if (!hasAnyNumericData) {
+            return;
+        }
         const defaultRange = getRowDefaultRange(cells);
         const observedBounds = getRowObservedBounds(cells);
         const normalizedValuesBySourceIndex = Array.from({ length: row.valuesBySourceIndex.length }, () => null as number | null);
@@ -344,23 +373,28 @@ export function getChartSeries({
 
         for (const source of chartSources) {
             const cell = row.valuesBySourceIndex[source.index];
-            normalizedValuesBySourceIndex[source.index] = normalizeCellForChart({
+            const normalizedValue = normalizeCellForChart({
                 cell,
                 defaultRange,
                 observedBounds,
             });
-            outOfRangeBySourceIndex[source.index] = isCellOutsideReferenceRange(cell);
+            normalizedValuesBySourceIndex[source.index] = normalizedValue;
+            outOfRangeBySourceIndex[source.index] = isCellOutsideReferenceRange(cell) || (
+                normalizedValue !== null && (normalizedValue < 0 || normalizedValue > 1)
+            );
         }
 
-        return {
+        result.push({
             id: row.key,
-            chartKey: `series_${index}`,
+            chartKey: `series_${result.length}`,
             label: row.measurement,
-            color: CHART_PALETTE[index % CHART_PALETTE.length],
+            color: CHART_PALETTE[result.length % CHART_PALETTE.length],
             valuesBySourceIndex: row.valuesBySourceIndex,
             normalizedValuesBySourceIndex,
             outOfRangeBySourceIndex,
             unitLabel: resolveSeriesUnitLabel(cells),
-        };
+        });
     });
+
+    return result;
 }

@@ -2,6 +2,7 @@ import {
     useCallback,
     useDeferredValue,
     useEffect,
+    useLayoutEffect,
     useMemo,
     useRef,
     useState,
@@ -26,6 +27,7 @@ import {
     getMeasurementRangesTooltipByKey,
     getOrderedLabs,
     getPrunedSelectedRowKeys,
+    getRowsWithVisibleData,
     getSelectedRows,
     getSources,
     getTableRows,
@@ -35,6 +37,7 @@ import {
 import type {
     ApiResponse,
     BloodworkLab,
+    VitalsRowModel,
 } from './types';
 import {
     clamp,
@@ -120,6 +123,10 @@ export function VitalsDashboard() {
 
     const orderedLabs = useMemo(() => getOrderedLabs(labs), [labs]);
     const sources = useMemo(() => getSources(orderedLabs), [orderedLabs]);
+    const availableDates = useMemo(
+        () => Array.from(new Set(sources.map(source => source.date))).sort((left, right) => left.localeCompare(right)),
+        [sources],
+    );
     const dateBounds = useMemo(() => getDateBounds(sources), [sources]);
 
     useEffect(() => {
@@ -144,13 +151,23 @@ export function VitalsDashboard() {
         });
     }, [dateBounds.max, dateBounds.min]);
 
+    useEffect(() => {
+        if (availableDates.length === 0) {
+            return;
+        }
+        if (!availableDates.includes(dateRangeStart)) {
+            setDateRangeStart(availableDates[0] ?? '');
+        }
+        if (!availableDates.includes(dateRangeEnd)) {
+            setDateRangeEnd(availableDates[availableDates.length - 1] ?? '');
+        }
+    }, [availableDates, dateRangeEnd, dateRangeStart]);
+
     const visibleSources = useMemo(() => getVisibleSources({
         sources,
         dateRangeStart,
         dateRangeEnd,
     }), [dateRangeEnd, dateRangeStart, sources]);
-
-    const chartSources = useMemo(() => getChartSources(visibleSources), [visibleSources]);
 
     const allMeasurementRows = useMemo(() => getAllMeasurementRows({
         orderedLabs,
@@ -168,6 +185,9 @@ export function VitalsDashboard() {
     }, [groupByCategory]);
 
     useEffect(() => {
+        if (allMeasurementRows.length === 0) {
+            return;
+        }
         const availableRowIds = new Set(allMeasurementRows.map(item => item.key));
         setStarredMeasurementKeys(previous => {
             const next = previous.filter(item => availableRowIds.has(item));
@@ -181,15 +201,20 @@ export function VitalsDashboard() {
         starredMeasurementSet,
     }), [allMeasurementRows, deferredMeasurementFilter, starredMeasurementSet]);
 
+    const rowsWithVisibleData = useMemo(() => getRowsWithVisibleData({
+        filteredMeasurementRows,
+        visibleSources,
+    }), [filteredMeasurementRows, visibleSources]);
+
     useEffect(() => {
         setSelectedRowKeys(previous => {
             const next = getPrunedSelectedRowKeys({
                 selectedRowKeys: previous,
-                filteredMeasurementRows,
+                filteredMeasurementRows: rowsWithVisibleData,
             });
             return next.length === previous.length ? previous : next;
         });
-    }, [filteredMeasurementRows]);
+    }, [rowsWithVisibleData]);
 
     const selectedRowKeySet = useMemo(
         () => new Set(selectedRowKeys),
@@ -197,19 +222,23 @@ export function VitalsDashboard() {
     );
 
     const tableSources = useMemo(() => getTableSources({
-        filteredMeasurementRows,
+        filteredMeasurementRows: rowsWithVisibleData,
         visibleSources,
-        measurementFilter: deferredMeasurementFilter,
-    }), [deferredMeasurementFilter, filteredMeasurementRows, visibleSources]);
+    }), [rowsWithVisibleData, visibleSources]);
+
+    const tableMeasurementRows = useMemo(() => getRowsWithVisibleData({
+        filteredMeasurementRows: rowsWithVisibleData,
+        visibleSources: tableSources,
+    }), [rowsWithVisibleData, tableSources]);
 
     const tableRows = useMemo(() => getTableRows({
-        filteredMeasurementRows,
+        filteredMeasurementRows: tableMeasurementRows,
         groupByCategory,
-    }), [filteredMeasurementRows, groupByCategory]);
+    }), [groupByCategory, tableMeasurementRows]);
 
     const measurementKeysByCategory = useMemo(
-        () => getMeasurementKeysByCategory(filteredMeasurementRows),
-        [filteredMeasurementRows],
+        () => getMeasurementKeysByCategory(tableMeasurementRows),
+        [tableMeasurementRows],
     );
 
     const categorySelectionByName = useMemo(() => getCategorySelectionByName({
@@ -218,19 +247,24 @@ export function VitalsDashboard() {
     }), [measurementKeysByCategory, selectedRowKeySet]);
 
     const selectedRows = useMemo(() => getSelectedRows({
-        filteredMeasurementRows,
+        filteredMeasurementRows: tableMeasurementRows,
         selectedRowKeySet,
-    }), [filteredMeasurementRows, selectedRowKeySet]);
+    }), [selectedRowKeySet, tableMeasurementRows]);
+
+    const chartSources = useMemo(() => getChartSources({
+        visibleSources,
+        selectedRows,
+    }), [selectedRows, visibleSources]);
 
     const measurementRangesTooltipByKey = useMemo(() => getMeasurementRangesTooltipByKey({
-        filteredMeasurementRows,
+        filteredMeasurementRows: tableMeasurementRows,
         sources,
-    }), [filteredMeasurementRows, sources]);
+    }), [sources, tableMeasurementRows]);
 
     const measurementOverviewByKey = useMemo(() => getMeasurementOverviewByKey({
-        filteredMeasurementRows,
+        filteredMeasurementRows: tableMeasurementRows,
         tableSources,
-    }), [filteredMeasurementRows, tableSources]);
+    }), [tableMeasurementRows, tableSources]);
 
     const chartSeries = useMemo(() => getChartSeries({
         selectedRows,
@@ -241,21 +275,47 @@ export function VitalsDashboard() {
         setMeasurementFilter(event.target.value);
     }, []);
 
-    const onDateRangeStartChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
-        const nextStart = event.target.value;
-        setDateRangeStart(nextStart);
-        if (dateRangeEnd && nextStart && nextStart > dateRangeEnd) {
-            setDateRangeEnd(nextStart);
+    const dateRangeSliderValue = useMemo<[number, number]>(() => {
+        if (availableDates.length === 0) {
+            return [0, 0];
         }
-    }, [dateRangeEnd]);
+        const minIndex = 0;
+        const maxIndex = availableDates.length - 1;
+        const startIndex = availableDates.indexOf(dateRangeStart);
+        const endIndex = availableDates.indexOf(dateRangeEnd);
+        const safeStart = startIndex >= 0 ? startIndex : minIndex;
+        const safeEnd = endIndex >= 0 ? endIndex : maxIndex;
 
-    const onDateRangeEndChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
-        const nextEnd = event.target.value;
-        setDateRangeEnd(nextEnd);
-        if (dateRangeStart && nextEnd && nextEnd < dateRangeStart) {
-            setDateRangeStart(nextEnd);
+        const newestHandle = maxIndex - safeEnd;
+        const oldestHandle = maxIndex - safeStart;
+
+        if (newestHandle <= oldestHandle) {
+            return [newestHandle, oldestHandle];
         }
-    }, [dateRangeStart]);
+        return [oldestHandle, newestHandle];
+    }, [availableDates, dateRangeEnd, dateRangeStart]);
+
+    const onDateRangeSliderChange = useCallback((nextRange: [number, number]) => {
+        if (availableDates.length === 0) {
+            return;
+        }
+
+        const maxIndex = availableDates.length - 1;
+        const rawNewestHandle = Math.round(Math.min(nextRange[0], nextRange[1]));
+        const rawOldestHandle = Math.round(Math.max(nextRange[0], nextRange[1]));
+        const newestHandle = clamp(rawNewestHandle, 0, maxIndex);
+        const oldestHandle = clamp(rawOldestHandle, 0, maxIndex);
+        const endIndex = maxIndex - newestHandle;
+        const startIndex = maxIndex - oldestHandle;
+        const nextStartDate = availableDates[startIndex];
+        const nextEndDate = availableDates[endIndex];
+        if (!nextStartDate || !nextEndDate) {
+            return;
+        }
+
+        setDateRangeStart(nextStartDate);
+        setDateRangeEnd(nextEndDate);
+    }, [availableDates]);
 
     const onGroupByCategoryChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
         setGroupByCategory(event.target.checked);
@@ -274,7 +334,7 @@ export function VitalsDashboard() {
 
     const onToggleAllRows = useCallback((checked: boolean) => {
         setSelectedRowKeys(previous => {
-            const visibleMeasurementKeys = filteredMeasurementRows.map(row => row.key);
+            const visibleMeasurementKeys = tableMeasurementRows.map(row => row.key);
             if (!checked) {
                 const visibleSet = new Set(visibleMeasurementKeys);
                 const next = previous.filter(key => !visibleSet.has(key));
@@ -286,7 +346,7 @@ export function VitalsDashboard() {
             if (nextSet.size === previous.length) return previous;
             return Array.from(nextSet);
         });
-    }, [filteredMeasurementRows]);
+    }, [tableMeasurementRows]);
 
     const onToggleCategory = useCallback((category: string, shouldSelect: boolean) => {
         const categoryMeasurementKeys = measurementKeysByCategory.get(category);
@@ -314,7 +374,7 @@ export function VitalsDashboard() {
     }, []);
 
     const hasAnyData = labs.length > 0;
-    const hasSelectedRows = selectedRowKeys.length > 0;
+    const hasSelectedRows = selectedRows.length > 0;
     const showSplitLayout = hasSelectedRows && !isMobileViewport;
 
     const clampTablePaneWidth = useCallback((nextWidth: number) => {
@@ -328,7 +388,7 @@ export function VitalsDashboard() {
         return clamp(nextWidth, minTablePaneWidth, maxTablePaneWidth);
     }, []);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         if (!showSplitLayout) return;
         const workspace = workspaceRef.current;
         if (!workspace) return;
@@ -374,11 +434,6 @@ export function VitalsDashboard() {
         };
     }, [isResizing]);
 
-    const tableScrollY = useMemo(
-        () => Math.max(240, isMobileViewport ? viewport.height - 178 : viewport.height - 132),
-        [isMobileViewport, viewport.height],
-    );
-
     const tableScrollX = useMemo(
         () => (
             SELECTION_COLUMN_WIDTH +
@@ -389,19 +444,71 @@ export function VitalsDashboard() {
         [tableSources.length],
     );
 
-    const onResetRange = useCallback(() => {
-        setDateRangeStart(dateBounds.min);
-        setDateRangeEnd(dateBounds.max);
-    }, [dateBounds.max, dateBounds.min]);
+    const resolvedTablePaneWidth = useMemo(() => {
+        if (!showSplitLayout) {
+            return 0;
+        }
+        const workspaceWidth = workspaceRef.current?.getBoundingClientRect().width ?? viewport.width;
+        const preferredWidth = tablePaneWidth > 0 ? tablePaneWidth : workspaceWidth * 0.66;
+        return clampTablePaneWidth(preferredWidth);
+    }, [clampTablePaneWidth, showSplitLayout, tablePaneWidth, viewport.width]);
 
-    const isRangeResetDisabled = useMemo(
-        () => (
-            !dateBounds.min ||
-            !dateBounds.max ||
-            (dateRangeStart === dateBounds.min && dateRangeEnd === dateBounds.max)
-        ),
-        [dateBounds.max, dateBounds.min, dateRangeEnd, dateRangeStart],
+    const csvMeasurementRows = useMemo(
+        () => tableRows.filter((row): row is VitalsRowModel => row.rowType === 'measurement'),
+        [tableRows],
     );
+
+    const isDownloadCsvDisabled = csvMeasurementRows.length === 0 || tableSources.length === 0;
+
+    const onDownloadCsv = useCallback(() => {
+        if (isDownloadCsvDisabled || typeof document === 'undefined') {
+            return;
+        }
+
+        const escapeCsv = (value: string | number) => {
+            const text = String(value);
+            if (!/[",\n]/.test(text)) {
+                return text;
+            }
+            return `"${text.replace(/"/g, '""')}"`;
+        };
+
+        const headers = [
+            'Measurement',
+            'Category',
+            'In range',
+            'Out of range',
+            ...tableSources.map(source => source.prettyDate),
+        ];
+
+        const rows = csvMeasurementRows.map(row => {
+            const overview = measurementOverviewByKey.get(row.key) ?? { inRange: 0, outOfRange: 0 };
+            return [
+                row.measurement,
+                row.category,
+                overview.inRange,
+                overview.outOfRange,
+                ...tableSources.map(source => {
+                    const cell = row.valuesBySourceIndex[source.index];
+                    if (!cell || cell.display === '—' || cell.display === '--') {
+                        return '';
+                    }
+                    return cell.display;
+                }),
+            ];
+        });
+
+        const csv = [headers, ...rows].map(row => row.map(escapeCsv).join(',')).join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+        const href = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = href;
+        link.download = `vitals-visible-data-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.append(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(href), 0);
+    }, [csvMeasurementRows, isDownloadCsvDisabled, measurementOverviewByKey, tableSources]);
 
     const chartContent = useMemo(() => (
         chartSeries.length > 0
@@ -410,7 +517,7 @@ export function VitalsDashboard() {
     ), [chartSeries, chartSources]);
 
     return (
-        <main className='vitals-page gap-2 p-2 max-[899px]:gap-0 max-[899px]:p-0'>
+        <main className='vitals-page'>
             {isLoading ? (
                 <section className='grid h-full w-full place-items-center border border-slate-300 bg-white'>
                     <Spin size='large' />
@@ -433,7 +540,7 @@ export function VitalsDashboard() {
                         className='vitals-workspace'
                         style={{
                             gridTemplateColumns: showSplitLayout
-                                ? `${Math.round(tablePaneWidth)}px ${RESIZER_WIDTH}px minmax(${MIN_CHART_PANE_WIDTH}px, 1fr)`
+                                ? `${Math.round(resolvedTablePaneWidth)}px ${RESIZER_WIDTH}px minmax(${MIN_CHART_PANE_WIDTH}px, 1fr)`
                                 : '1fr',
                         }}
                     >
@@ -442,15 +549,13 @@ export function VitalsDashboard() {
                                 isMobile={isMobileViewport}
                                 measurementFilter={measurementFilter}
                                 onMeasurementFilterChange={onMeasurementFilterChange}
-                                dateRangeStart={dateRangeStart}
-                                dateRangeEnd={dateRangeEnd}
-                                dateBounds={dateBounds}
-                                onDateRangeStartChange={onDateRangeStartChange}
-                                onDateRangeEndChange={onDateRangeEndChange}
-                                onResetRange={onResetRange}
-                                isRangeResetDisabled={isRangeResetDisabled}
+                                availableDates={availableDates}
+                                dateRangeValue={dateRangeSliderValue}
+                                onDateRangeSliderChange={onDateRangeSliderChange}
                                 groupByCategory={groupByCategory}
                                 onGroupByCategoryChange={onGroupByCategoryChange}
+                                onDownloadCsv={onDownloadCsv}
+                                isDownloadCsvDisabled={isDownloadCsvDisabled}
                             />
 
                             <VitalsTable
@@ -461,7 +566,6 @@ export function VitalsDashboard() {
                                 starredMeasurementSet={starredMeasurementSet}
                                 measurementOverviewByKey={measurementOverviewByKey}
                                 measurementRangesTooltipByKey={measurementRangesTooltipByKey}
-                                tableScrollY={tableScrollY}
                                 tableScrollX={tableScrollX}
                                 onToggleRow={onToggleRow}
                                 onToggleAllRows={onToggleAllRows}
