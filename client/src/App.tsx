@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type Key } from 'react';
+import { memo, startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type Key } from 'react';
 
 import styled from '@emotion/styled';
 import { ChartLineUp, Drop, Flask, Star } from '@phosphor-icons/react';
-import { Alert, Button, Empty, Input, Space, Spin, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Checkbox, Empty, Input, Space, Spin, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 
 type BloodworkMeasurement = {
@@ -44,16 +44,37 @@ type MeasurementCell = {
     numericValue: number | null;
     rangeMin: number | null;
     rangeMax: number | null;
+    rangeCaption: string;
+    rangeVisualization: {
+        minPosition: number | null;
+        maxPosition: number | null;
+        valuePosition: number;
+    } | null;
+    rangeBandLeft: number;
+    rangeBandWidth: number;
     unit?: string;
     flag?: BloodworkMeasurement['flag'];
     note?: string;
 };
 
-type MeasurementRow = {
+type MeasurementDataRow = {
     key: string;
+    rowType: 'measurement';
     measurement: string;
+    category: string;
     valuesBySource: Record<string, MeasurementCell | undefined>;
 };
+
+type CategoryRow = {
+    key: string;
+    rowType: 'category';
+    measurement: string;
+    category: string;
+    categoryCount: number;
+    valuesBySource: Record<string, MeasurementCell | undefined>;
+};
+
+type TableRow = MeasurementDataRow | CategoryRow;
 
 type ChartSeries = {
     id: string;
@@ -71,6 +92,7 @@ const DATE_FORMATTER = new Intl.DateTimeFormat('en-US', {
 const RESIZER_WIDTH = 10;
 const MIN_CHART_PANE_WIDTH = 300;
 const STARRED_MEASUREMENTS_STORAGE_KEY = 'vitals.starred.measurements';
+const UNCATEGORIZED_CATEGORY_LABEL = 'Uncategorized';
 
 function clamp(value: number, min: number, max: number): number {
     return Math.min(max, Math.max(min, value));
@@ -126,17 +148,25 @@ function formatRangeCaption(cell: MeasurementCell): string {
     return '';
 }
 
-function getRangeVisualization(cell: MeasurementCell): {
+function getRangeVisualization({
+    numericValue,
+    rangeMin,
+    rangeMax,
+}: {
+    numericValue: number | null;
+    rangeMin: number | null;
+    rangeMax: number | null;
+}): {
     minPosition: number | null;
     maxPosition: number | null;
     valuePosition: number;
 } | null {
-    if (cell.numericValue === null) return null;
-    if (cell.rangeMin === null && cell.rangeMax === null) return null;
+    if (numericValue === null) return null;
+    if (rangeMin === null && rangeMax === null) return null;
 
-    const anchors = [cell.numericValue];
-    if (cell.rangeMin !== null) anchors.push(cell.rangeMin);
-    if (cell.rangeMax !== null) anchors.push(cell.rangeMax);
+    const anchors = [numericValue];
+    if (rangeMin !== null) anchors.push(rangeMin);
+    if (rangeMax !== null) anchors.push(rangeMax);
 
     const minAnchor = Math.min(...anchors);
     const maxAnchor = Math.max(...anchors);
@@ -149,9 +179,9 @@ function getRangeVisualization(cell: MeasurementCell): {
     const toPosition = (value: number) => clamp(((value - domainMin) / domainRange) * 100, 0, 100);
 
     return {
-        minPosition: cell.rangeMin === null ? null : toPosition(cell.rangeMin),
-        maxPosition: cell.rangeMax === null ? null : toPosition(cell.rangeMax),
-        valuePosition: toPosition(cell.numericValue),
+        minPosition: rangeMin === null ? null : toPosition(rangeMin),
+        maxPosition: rangeMax === null ? null : toPosition(rangeMax),
+        valuePosition: toPosition(numericValue),
     };
 }
 
@@ -159,6 +189,11 @@ function formatPrettyDate(value: string): string {
     const parsed = Date.parse(value);
     if (!Number.isFinite(parsed)) return value;
     return DATE_FORMATTER.format(new Date(parsed));
+}
+
+function normalizeCategoryLabel(value: string | undefined): string {
+    const trimmed = value?.trim();
+    return trimmed || UNCATEGORIZED_CATEGORY_LABEL;
 }
 
 function parseNumericValue(value: number | string | undefined): number | null {
@@ -177,17 +212,98 @@ function formatCell(measurement: BloodworkMeasurement): MeasurementCell {
     const display = [valueText, unitText].filter(Boolean).join(' ').trim() || '—';
     const rangeMin = parseNumericValue(measurement.referenceRange?.min);
     const rangeMax = parseNumericValue(measurement.referenceRange?.max);
+    const numericValue = parseNumericValue(measurement.value);
+    const rangeVisualization = getRangeVisualization({
+        numericValue,
+        rangeMin,
+        rangeMax,
+    });
+    const hasBand =
+        rangeVisualization?.minPosition !== null &&
+        rangeVisualization?.maxPosition !== null;
+    const rangeBandLeft = hasBand
+        ? Math.min(
+            rangeVisualization?.minPosition ?? 0,
+            rangeVisualization?.maxPosition ?? 0,
+        )
+        : 0;
+    const rangeBandWidth = hasBand
+        ? Math.abs(
+            (rangeVisualization?.maxPosition ?? 0) -
+            (rangeVisualization?.minPosition ?? 0),
+        )
+        : 0;
+    const rangeCaption = formatRangeCaption({
+        display,
+        numericValue,
+        rangeMin,
+        rangeMax,
+        rangeVisualization,
+        rangeBandLeft,
+        rangeBandWidth,
+        rangeCaption: '',
+        unit: unitText || undefined,
+        flag: measurement.flag,
+        note: measurement.note?.trim() || undefined,
+    });
 
     return {
         display,
-        numericValue: parseNumericValue(measurement.value),
+        numericValue,
         rangeMin,
         rangeMax,
+        rangeCaption,
+        rangeVisualization,
+        rangeBandLeft,
+        rangeBandWidth,
         unit: unitText || undefined,
         flag: measurement.flag,
         note: measurement.note?.trim() || undefined,
     };
 }
+
+const MeasurementValueCell = memo(function MeasurementValueCell({ cell }: { cell: MeasurementCell }) {
+    const rangeVisualization = cell.rangeVisualization;
+    const rangeCaption = cell.rangeCaption;
+    const hasBand =
+        rangeVisualization?.minPosition !== null &&
+        rangeVisualization?.maxPosition !== null;
+
+    return (
+        <CellValueStack>
+            <CellPrimaryRow>
+                <Text>{cell.display}</Text>
+            </CellPrimaryRow>
+            {rangeVisualization && rangeCaption && (
+                <RangeVisualizationShell>
+                    <RangeTrack>
+                        {hasBand && (
+                            <RangeBand
+                                style={{
+                                    left: `${cell.rangeBandLeft}%`,
+                                    width: `${cell.rangeBandWidth}%`,
+                                }}
+                            />
+                        )}
+                        {rangeVisualization.minPosition !== null && (
+                            <RangeMarker style={{ left: `${rangeVisualization.minPosition}%` }} />
+                        )}
+                        {rangeVisualization.maxPosition !== null && (
+                            <RangeMarker style={{ left: `${rangeVisualization.maxPosition}%` }} />
+                        )}
+                        <ValueMarker style={{ left: `${rangeVisualization.valuePosition}%` }} />
+                    </RangeTrack>
+                    <RangeCaption>{rangeCaption}</RangeCaption>
+                </RangeVisualizationShell>
+            )}
+            {cell.flag && cell.flag !== 'normal' && (
+                <Tag color={cell.flag === 'high' || cell.flag === 'critical' ? 'red' : 'orange'}>
+                    {cell.flag}
+                </Tag>
+            )}
+        </CellValueStack>
+    );
+});
 
 function useViewport() {
     const [size, setSize] = useState({
@@ -353,11 +469,13 @@ export default function App() {
     const [starredMeasurementKeys, setStarredMeasurementKeys] = useState<string[]>(() => readStoredStarredMeasurementKeys());
     const [dateRangeStart, setDateRangeStart] = useState('');
     const [dateRangeEnd, setDateRangeEnd] = useState('');
+    const [groupByCategory, setGroupByCategory] = useState(false);
     const [tablePaneWidth, setTablePaneWidth] = useState(0);
     const [isResizing, setIsResizing] = useState(false);
 
     const workspaceRef = useRef<HTMLDivElement | null>(null);
     const starredMeasurementSet = useMemo(() => new Set(starredMeasurementKeys), [starredMeasurementKeys]);
+    const deferredMeasurementFilter = useDeferredValue(measurementFilter);
 
     useEffect(() => {
         const controller = new AbortController();
@@ -442,8 +560,8 @@ export default function App() {
         [dateRangeEnd, dateRangeStart, sources],
     );
 
-    const allRows = useMemo<MeasurementRow[]>(() => {
-        const grouped = new Map<string, MeasurementRow>();
+    const allMeasurementRows = useMemo<MeasurementDataRow[]>(() => {
+        const grouped = new Map<string, MeasurementDataRow>();
 
         orderedLabs.forEach((lab, labIndex) => {
             const sourceId = sources[labIndex]?.id;
@@ -451,15 +569,24 @@ export default function App() {
 
             lab.measurements.forEach(measurement => {
                 const key = measurement.name.trim().toLowerCase();
+                const category = normalizeCategoryLabel(measurement.category);
                 const existing = grouped.get(key);
                 if (existing) {
                     existing.valuesBySource[sourceId] = formatCell(measurement);
+                    if (
+                        existing.category === UNCATEGORIZED_CATEGORY_LABEL &&
+                        category !== UNCATEGORIZED_CATEGORY_LABEL
+                    ) {
+                        existing.category = category;
+                    }
                     return;
                 }
 
                 grouped.set(key, {
                     key,
+                    rowType: 'measurement',
                     measurement: measurement.name,
+                    category,
                     valuesBySource: {
                         [sourceId]: formatCell(measurement),
                     },
@@ -476,40 +603,97 @@ export default function App() {
     }, [starredMeasurementKeys]);
 
     useEffect(() => {
-        const availableRowIds = new Set(allRows.map(item => item.key));
+        const availableRowIds = new Set(allMeasurementRows.map(item => item.key));
         setStarredMeasurementKeys(previous => {
             const next = previous.filter(item => availableRowIds.has(item));
             return next.length === previous.length ? previous : next;
         });
-    }, [allRows]);
+    }, [allMeasurementRows]);
 
     const toggleMeasurementStar = useCallback((measurementKey: string) => {
-        setStarredMeasurementKeys(previous =>
-            previous.includes(measurementKey)
-                ? previous.filter(item => item !== measurementKey)
-                : [...previous, measurementKey],
-        );
+        startTransition(() => {
+            setStarredMeasurementKeys(previous =>
+                previous.includes(measurementKey)
+                    ? previous.filter(item => item !== measurementKey)
+                    : [...previous, measurementKey],
+            );
+        });
     }, []);
 
-    const filteredRows = useMemo(() => {
-        const normalizedFilter = measurementFilter.trim().toLowerCase();
+    const filteredMeasurementRows = useMemo(() => {
+        const normalizedFilter = deferredMeasurementFilter.trim().toLowerCase();
         const candidateRows = normalizedFilter
-            ? allRows.filter(row => row.measurement.toLowerCase().includes(normalizedFilter))
-            : allRows;
+            ? allMeasurementRows.filter(row =>
+                row.measurement.toLowerCase().includes(normalizedFilter) ||
+                row.category.toLowerCase().includes(normalizedFilter),
+            )
+            : allMeasurementRows;
         return [...candidateRows].sort((left, right) => {
             const leftIsStarred = starredMeasurementSet.has(left.key);
             const rightIsStarred = starredMeasurementSet.has(right.key);
             if (leftIsStarred !== rightIsStarred) return leftIsStarred ? -1 : 1;
             return left.measurement.localeCompare(right.measurement);
         });
-    }, [allRows, measurementFilter, starredMeasurementSet]);
+    }, [allMeasurementRows, deferredMeasurementFilter, starredMeasurementSet]);
+
+    const tableSources = useMemo(() => {
+        const normalizedFilter = deferredMeasurementFilter.trim();
+        if (!normalizedFilter) {
+            return visibleSources;
+        }
+
+        return visibleSources.filter(source =>
+            filteredMeasurementRows.some(row => {
+                const cell = row.valuesBySource[source.id];
+                return Boolean(cell && cell.display !== '—');
+            }),
+        );
+    }, [deferredMeasurementFilter, filteredMeasurementRows, visibleSources]);
+
+    const tableRows = useMemo<TableRow[]>(() => {
+        if (!groupByCategory) {
+            return filteredMeasurementRows;
+        }
+
+        const grouped = new Map<string, MeasurementDataRow[]>();
+        filteredMeasurementRows.forEach(row => {
+            const key = row.category;
+            const existing = grouped.get(key);
+            if (existing) {
+                existing.push(row);
+                return;
+            }
+            grouped.set(key, [row]);
+        });
+
+        const categories = Array.from(grouped.keys()).sort((left, right) => left.localeCompare(right));
+        return categories.flatMap(category => {
+            const items = grouped.get(category) ?? [];
+            const header: CategoryRow = {
+                key: `category:${category.toLowerCase()}`,
+                rowType: 'category',
+                measurement: '',
+                category,
+                categoryCount: items.length,
+                valuesBySource: {},
+            };
+            return [header, ...items];
+        });
+    }, [filteredMeasurementRows, groupByCategory]);
 
     useEffect(() => {
-        const availableRowIds = new Set(filteredRows.map(item => item.key));
+        const availableRowIds = new Set(filteredMeasurementRows.map(item => item.key));
         setSelectedRowKeys(previous => previous.filter(item => availableRowIds.has(String(item))));
-    }, [filteredRows]);
+    }, [filteredMeasurementRows]);
 
-    const selectedRows = filteredRows.filter(row => selectedRowKeys.includes(row.key));
+    const selectedRowKeySet = useMemo(
+        () => new Set(selectedRowKeys.map(key => String(key))),
+        [selectedRowKeys],
+    );
+    const selectedRows = useMemo(
+        () => filteredMeasurementRows.filter(row => selectedRowKeySet.has(row.key)),
+        [filteredMeasurementRows, selectedRowKeySet],
+    );
     const chartSeries = useMemo<ChartSeries[]>(
         () =>
             selectedRows
@@ -592,8 +776,8 @@ export default function App() {
         };
     }, [isResizing]);
 
-    const tableColumns = useMemo<ColumnsType<MeasurementRow>>(() => {
-        const measurementColumn: ColumnsType<MeasurementRow>[number] = {
+    const tableColumns = useMemo<ColumnsType<TableRow>>(() => {
+        const measurementColumn: ColumnsType<TableRow>[number] = {
             title: (
                 <Space size={6}>
                     <Flask size={16} weight='duotone' />
@@ -605,6 +789,14 @@ export default function App() {
             width: 250,
             fixed: isMobileViewport ? false : 'left',
             render: (value, row) => {
+                if (row.rowType === 'category') {
+                    return (
+                        <CategoryHeadingCell>
+                            <Text strong>{row.category}</Text>
+                            <CategoryCountText>{row.categoryCount}</CategoryCountText>
+                        </CategoryHeadingCell>
+                    );
+                }
                 const isStarred = starredMeasurementSet.has(row.key);
                 return (
                     <MeasurementNameCell>
@@ -627,75 +819,36 @@ export default function App() {
             },
         };
 
-        const sourceColumns: ColumnsType<MeasurementRow> = visibleSources.map(source => ({
+        const sourceColumns: ColumnsType<TableRow> = tableSources.map(source => ({
             title: <Text>{source.prettyDate}</Text>,
             key: source.id,
             width: 164,
+            shouldCellUpdate: (record, previousRecord) => {
+                if (record.rowType !== previousRecord.rowType) {
+                    return true;
+                }
+                if (record.rowType === 'category' || previousRecord.rowType === 'category') {
+                    return record !== previousRecord;
+                }
+                return record.valuesBySource[source.id] !== previousRecord.valuesBySource[source.id];
+            },
             render: (_, row) => {
+                if (row.rowType === 'category') {
+                    return null;
+                }
                 const cell = row.valuesBySource[source.id];
                 if (!cell) return <Text type='secondary'>—</Text>;
-
-                const rangeVisualization = getRangeVisualization(cell);
-                const rangeCaption = formatRangeCaption(cell);
-                const hasBand =
-                    rangeVisualization?.minPosition !== null &&
-                    rangeVisualization?.maxPosition !== null;
-                const bandLeft = hasBand
-                    ? Math.min(
-                        rangeVisualization?.minPosition ?? 0,
-                        rangeVisualization?.maxPosition ?? 0,
-                    )
-                    : 0;
-                const bandWidth = hasBand
-                    ? Math.abs(
-                        (rangeVisualization?.maxPosition ?? 0) -
-                        (rangeVisualization?.minPosition ?? 0),
-                    )
-                    : 0;
-
-                return (
-                    <CellValueStack>
-                        <CellPrimaryRow>
-                            <Text>{cell.display}</Text>
-                        </CellPrimaryRow>
-                        {rangeVisualization && rangeCaption && (
-                            <RangeVisualizationShell>
-                                <RangeTrack>
-                                    {hasBand && (
-                                        <RangeBand
-                                            style={{
-                                                left: `${bandLeft}%`,
-                                                width: `${bandWidth}%`,
-                                            }}
-                                        />
-                                    )}
-                                    {rangeVisualization.minPosition !== null && (
-                                        <RangeMarker style={{ left: `${rangeVisualization.minPosition}%` }} />
-                                    )}
-                                    {rangeVisualization.maxPosition !== null && (
-                                        <RangeMarker style={{ left: `${rangeVisualization.maxPosition}%` }} />
-                                    )}
-                                    <ValueMarker style={{ left: `${rangeVisualization.valuePosition}%` }} />
-                                </RangeTrack>
-                                <RangeCaption>{rangeCaption}</RangeCaption>
-                            </RangeVisualizationShell>
-                        )}
-                        {cell.flag && cell.flag !== 'normal' && (
-                            <Tag color={cell.flag === 'high' || cell.flag === 'critical' ? 'red' : 'orange'}>
-                                {cell.flag}
-                            </Tag>
-                        )}
-                    </CellValueStack>
-                );
+                return <MeasurementValueCell cell={cell} />;
             },
         }));
 
         return [measurementColumn, ...sourceColumns];
-    }, [isMobileViewport, starredMeasurementSet, toggleMeasurementStar, visibleSources]);
+    }, [isMobileViewport, starredMeasurementSet, tableSources, toggleMeasurementStar]);
 
-    const tableScrollY = isMobileViewport
-        ? 'calc(100dvh - 178px)'
-        : 'calc(100dvh - 132px)';
+    const tableScrollY = useMemo(
+        () => Math.max(240, isMobileViewport ? viewport.height - 178 : viewport.height - 132),
+        [isMobileViewport, viewport.height],
+    );
 
     const resetRange = () => {
         setDateRangeStart(dateBounds.min);
@@ -776,20 +929,35 @@ export default function App() {
                                 <Button onClick={resetRange} disabled={isRangeResetDisabled}>
                                     All dates
                                 </Button>
+                                <Checkbox
+                                    checked={groupByCategory}
+                                    onChange={event => setGroupByCategory(event.target.checked)}
+                                >
+                                    Group by category
+                                </Checkbox>
                             </ControlsRow>
 
                             <TableShell>
-                                <Table<MeasurementRow>
+                                <Table<TableRow>
                                     bordered
                                     size='small'
                                     rowKey='key'
-                                    dataSource={filteredRows}
+                                    dataSource={tableRows}
                                     columns={tableColumns}
                                     pagination={false}
+                                    virtual
                                     scroll={{ x: 'max-content', y: tableScrollY }}
+                                    rowClassName={row => (row.rowType === 'category' ? 'category-row' : '')}
                                     rowSelection={{
                                         selectedRowKeys,
-                                        onChange: keys => setSelectedRowKeys(keys),
+                                        onChange: keys => {
+                                            startTransition(() => {
+                                                setSelectedRowKeys(keys);
+                                            });
+                                        },
+                                        getCheckboxProps: row => ({
+                                            disabled: row.rowType === 'category',
+                                        }),
                                     }}
                                 />
                             </TableShell>
@@ -876,7 +1044,7 @@ const TablePane = styled.section`
 
 const ControlsRow = styled.div<{ mobile: boolean }>`
     display: grid;
-    grid-template-columns: ${({ mobile }) => (mobile ? '1fr' : 'minmax(260px, 1fr) auto auto')};
+    grid-template-columns: ${({ mobile }) => (mobile ? '1fr' : 'minmax(260px, 1fr) auto auto auto')};
     gap: 8px;
     align-items: center;
     padding: 8px;
@@ -928,6 +1096,12 @@ const TableShell = styled.div`
         padding: 7px 8px;
     }
 
+    .ant-table-tbody > tr.category-row > td {
+        background: #f1f5f9;
+        border-top: 1px solid #d5dce7;
+        border-bottom: 1px solid #d5dce7;
+    }
+
     .ant-table,
     .ant-table-container {
         border-radius: 0;
@@ -939,6 +1113,17 @@ const MeasurementNameCell = styled.div`
     align-items: center;
     gap: 7px;
     min-width: 0;
+`;
+
+const CategoryHeadingCell = styled.div`
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+`;
+
+const CategoryCountText = styled.span`
+    font-size: 11px;
+    color: #64748b;
 `;
 
 const StarToggle = styled.button<{ active: boolean }>`

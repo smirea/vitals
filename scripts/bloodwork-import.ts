@@ -260,6 +260,51 @@ const GLOSSARY_CANONICAL_NAME_RULES: Array<{ pattern: RegExp; canonicalName: str
     { pattern: /^tibc$/i, canonicalName: 'TIBC' },
     { pattern: /^platelet$/i, canonicalName: 'Platelets' },
 ];
+const UNCATEGORIZED_CATEGORY = 'Uncategorized';
+
+const CATEGORY_TRANSLATION_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string }> = [
+    { pattern: /\bhaematology\b/gi, replacement: 'Hematology' },
+    { pattern: /\bhämatologie\b/gi, replacement: 'Hematology' },
+    { pattern: /\bblutbild\b/gi, replacement: 'Complete Blood Count' },
+    { pattern: /\blipidprofil\b/gi, replacement: 'Lipid Panel' },
+    { pattern: /\bleber\b/gi, replacement: 'Liver' },
+    { pattern: /\bnieren\b/gi, replacement: 'Kidney' },
+    { pattern: /\bschilddr[uü]se\b/gi, replacement: 'Thyroid' },
+    { pattern: /\bentzuendung\b/gi, replacement: 'Inflammation' },
+    { pattern: /\bentzündung\b/gi, replacement: 'Inflammation' },
+    { pattern: /\bvitamine?\b/gi, replacement: 'Vitamins' },
+    { pattern: /\bmineralstoffe?\b/gi, replacement: 'Minerals' },
+    { pattern: /\beisenstatus\b/gi, replacement: 'Iron Studies' },
+];
+
+const GLOSSARY_CANONICAL_CATEGORY_RULES: Array<{ pattern: RegExp; canonicalCategory: string }> = [
+    { pattern: /\b(?:cbc|complete blood count|hematology)\b/i, canonicalCategory: 'Complete Blood Count' },
+    { pattern: /\b(?:lipid|cholesterol|cardio|apolipoprotein)\b/i, canonicalCategory: 'Lipids & Cardiovascular' },
+    { pattern: /\b(?:glucose|glycemic|diabet|insulin|hba1c|a1c|homa)\b/i, canonicalCategory: 'Glucose & Insulin' },
+    { pattern: /\b(?:thyroid|tsh|ft3|ft4|triiodothyronine|thyroxine)\b/i, canonicalCategory: 'Thyroid' },
+    { pattern: /\b(?:hormone|endocrine|testosterone|estradiol|prolactin|dhea|cortisol|pregnanediol|fsh|lh|shbg)\b/i, canonicalCategory: 'Hormones' },
+    { pattern: /\b(?:liver|hepatic|alt|ast|bilirubin|alkaline phosphatase|ggt|fibrosis|steatosis|nash|albumin globulin)\b/i, canonicalCategory: 'Liver Function' },
+    { pattern: /\b(?:kidney|renal|creatinine|egfr|bun|uric)\b/i, canonicalCategory: 'Kidney Function' },
+    { pattern: /\b(?:inflamm|immune|infect|serology|culture|crp|igg|hcv|hep b|hbsag)\b/i, canonicalCategory: 'Inflammation & Immunity' },
+    { pattern: /\b(?:vitamin|mineral|magnesium|folate|b12|b6|b2|d3|25 oh)\b/i, canonicalCategory: 'Vitamins & Minerals' },
+    { pattern: /\b(?:iron|ferritin|transferrin|uibc|tibc)\b/i, canonicalCategory: 'Iron Studies' },
+    { pattern: /\b(?:electrolyte|sodium|potassium|chloride|calcium)\b/i, canonicalCategory: 'Electrolytes' },
+    { pattern: /\b(?:metabolic|chemistry|cmp)\b/i, canonicalCategory: 'Metabolic Panel' },
+];
+
+const MEASUREMENT_CANONICAL_CATEGORY_RULES: Array<{ pattern: RegExp; canonicalCategory: string }> = [
+    { pattern: /\b(?:wbc|rbc|leukocyte|erythrocyte|hemoglobin|hematocrit|platelet|neutrophil|lymphocyte|monocyte|eosinophil|basophil)\b/i, canonicalCategory: 'Complete Blood Count' },
+    { pattern: /\b(?:cholesterol|hdl|ldl|triglyceride|apolipoprotein|vldl)\b/i, canonicalCategory: 'Lipids & Cardiovascular' },
+    { pattern: /\b(?:glucose|hemoglobin a1c|hba1c|insulin|homa)\b/i, canonicalCategory: 'Glucose & Insulin' },
+    { pattern: /\b(?:tsh|free t3|free t4|triiodothyronine|thyroxine)\b/i, canonicalCategory: 'Thyroid' },
+    { pattern: /\b(?:testosterone|estradiol|prolactin|dhea|cortisol|pregnanediol|luteinizing hormone|follicle stimulating hormone|sex hormone binding globulin|androsterone|etiocholanolone|estriol|estrone)\b/i, canonicalCategory: 'Hormones' },
+    { pattern: /\b(?:alt|ast|bilirubin|alkaline phosphatase|ggt|fibrosis|steatosis|nash|albumin|globulin|amylase|lipase)\b/i, canonicalCategory: 'Liver Function' },
+    { pattern: /\b(?:creatinine|egfr|bun|uric acid)\b/i, canonicalCategory: 'Kidney Function' },
+    { pattern: /\b(?:c reactive protein|crp|igg|hcv|hep b|culture)\b/i, canonicalCategory: 'Inflammation & Immunity' },
+    { pattern: /\b(?:vitamin|folate|magnesium)\b/i, canonicalCategory: 'Vitamins & Minerals' },
+    { pattern: /\b(?:ferritin|iron|transferrin|uibc|tibc)\b/i, canonicalCategory: 'Iron Studies' },
+    { pattern: /\b(?:sodium|potassium|chloride|calcium)\b/i, canonicalCategory: 'Electrolytes' },
+];
 
 const QUALITATIVE_RESULT_PATTERN =
     /\b(?:negative|positive|detected|not detected|nonreactive|reactive|indeterminate|trace|abnormal|normal)\b/i;
@@ -339,7 +384,9 @@ const glossaryRangeSchema = z.object({
 
 const bloodworkGlossaryEntrySchema = z.object({
     canonicalName: z.string().trim().min(1),
+    canonicalCategory: z.string().trim().min(1).default(UNCATEGORIZED_CATEGORY),
     aliases: z.array(z.string().trim().min(1)).default([]),
+    categoryAliases: z.array(z.string().trim().min(1)).default([]),
     knownRanges: z.array(glossaryRangeSchema).default([]),
     unitHints: z.array(z.string().trim().min(1)).default([]),
     createdAt: z.string().trim().min(1),
@@ -357,7 +404,9 @@ const glossaryValidationDecisionSchema = z.object({
     action: z.string().trim().min(1),
     targetCanonicalName: z.string().trim().min(1).optional(),
     canonicalName: z.string().trim().min(1).optional(),
+    canonicalCategory: z.string().trim().min(1).optional(),
     aliases: z.array(z.string().trim().min(1)).max(6).optional(),
+    categoryAliases: z.array(z.string().trim().min(1)).max(6).optional(),
     reason: z.string().trim().min(1).optional(),
 });
 
@@ -781,6 +830,86 @@ function normalizeMeasurementNameForGlossary(name: string): string {
     return next;
 }
 
+function normalizeCategoryNameKey(name: string): string {
+    return normalizeTextForMatch(name).replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function normalizeCategoryNameForGlossary(category: string): string {
+    let next = category
+        .replace(/\u00a0/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!next) {
+        return UNCATEGORIZED_CATEGORY;
+    }
+
+    for (const replacement of CATEGORY_TRANSLATION_REPLACEMENTS) {
+        next = next.replace(replacement.pattern, replacement.replacement);
+    }
+
+    next = next
+        .replace(/\b(?:panel|profile|markers?|tests?|results?)\b/gi, ' ')
+        .replace(/[,:;]+$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const normalized = normalizeCategoryNameKey(next);
+    if (!normalized) {
+        return UNCATEGORIZED_CATEGORY;
+    }
+
+    for (const rule of GLOSSARY_CANONICAL_CATEGORY_RULES) {
+        if (rule.pattern.test(normalized)) {
+            return rule.canonicalCategory;
+        }
+    }
+
+    return UNCATEGORIZED_CATEGORY;
+}
+
+function isUncategorizedCategory(category: string): boolean {
+    return normalizeCategoryNameKey(category) === normalizeCategoryNameKey(UNCATEGORIZED_CATEGORY);
+}
+
+function inferCanonicalCategoryFromMeasurementName(measurementName: string): string {
+    const normalizedName = normalizeGlossaryNameKey(measurementName);
+    if (!normalizedName) {
+        return UNCATEGORIZED_CATEGORY;
+    }
+
+    for (const rule of MEASUREMENT_CANONICAL_CATEGORY_RULES) {
+        if (rule.pattern.test(normalizedName)) {
+            return rule.canonicalCategory;
+        }
+    }
+
+    return UNCATEGORIZED_CATEGORY;
+}
+
+function resolveCanonicalCategoryForMeasurement({
+    measurementName,
+    category,
+    fallbackCategory,
+}: {
+    measurementName: string;
+    category?: string;
+    fallbackCategory?: string;
+}): string {
+    if (category?.trim()) {
+        const normalizedCategory = normalizeCategoryNameForGlossary(category);
+        if (!isUncategorizedCategory(normalizedCategory)) {
+            return normalizedCategory;
+        }
+    }
+    if (fallbackCategory?.trim()) {
+        const normalizedFallbackCategory = normalizeCategoryNameForGlossary(fallbackCategory);
+        if (!isUncategorizedCategory(normalizedFallbackCategory)) {
+            return normalizedFallbackCategory;
+        }
+    }
+    return inferCanonicalCategoryFromMeasurementName(measurementName);
+}
+
 function normalizeMeasurementForGlossary(measurement: BloodworkMeasurement): BloodworkMeasurement | null {
     const sourceName = measurement.name.replace(/\s+/g, ' ').trim();
     const canonicalName = normalizeMeasurementNameForGlossary(sourceName);
@@ -794,11 +923,16 @@ function normalizeMeasurementForGlossary(measurement: BloodworkMeasurement): Blo
         normalizeGlossaryNameKey(sourceOriginalName) !== normalizeGlossaryNameKey(canonicalName)
             ? sourceOriginalName
             : undefined;
+    const category = resolveCanonicalCategoryForMeasurement({
+        measurementName: canonicalName,
+        category: measurement.category,
+    });
 
     return {
         ...measurement,
         name: canonicalName,
         originalName: nextOriginalName,
+        category,
     };
 }
 
@@ -887,11 +1021,22 @@ function normalizeGlossaryEntry(entry: BloodworkGlossaryEntry): BloodworkGlossar
         return null;
     }
     const canonicalKey = normalizeGlossaryNameKey(canonicalName);
+    const canonicalCategory = resolveCanonicalCategoryForMeasurement({
+        measurementName: canonicalName,
+        category: entry.canonicalCategory,
+    });
+    const canonicalCategoryKey = normalizeCategoryNameKey(canonicalCategory);
     const aliases = sortUniqueStrings(
         entry.aliases
             .map(alias => normalizeMeasurementNameForGlossary(alias))
             .filter(alias => isEnglishGlossaryName(alias))
             .filter(alias => normalizeGlossaryNameKey(alias) !== canonicalKey),
+    );
+    const categoryAliases = sortUniqueStrings(
+        entry.categoryAliases
+            .map(alias => normalizeCategoryNameForGlossary(alias))
+            .filter(alias => !isUncategorizedCategory(alias))
+            .filter(alias => normalizeCategoryNameKey(alias) !== canonicalCategoryKey),
     );
     const unitHints = sortUniqueStrings(entry.unitHints);
     const rangesByKey = new Map<string, z.infer<typeof glossaryRangeSchema>>();
@@ -913,7 +1058,9 @@ function normalizeGlossaryEntry(entry: BloodworkGlossaryEntry): BloodworkGlossar
 
     return {
         canonicalName,
+        canonicalCategory,
         aliases,
+        categoryAliases,
         knownRanges: Array.from(rangesByKey.values()),
         unitHints,
         createdAt: entry.createdAt || nowIsoTimestamp(),
@@ -922,6 +1069,26 @@ function normalizeGlossaryEntry(entry: BloodworkGlossaryEntry): BloodworkGlossar
 }
 
 function mergeGlossaryEntries(target: BloodworkGlossaryEntry, source: BloodworkGlossaryEntry): void {
+    const targetCategory = resolveCanonicalCategoryForMeasurement({
+        measurementName: target.canonicalName,
+        category: target.canonicalCategory,
+    });
+    const sourceCategory = resolveCanonicalCategoryForMeasurement({
+        measurementName: target.canonicalName,
+        category: source.canonicalCategory,
+    });
+    target.canonicalCategory = targetCategory;
+    upsertCategoryAliasIntoGlossaryEntry(target, sourceCategory);
+    for (const categoryAlias of source.categoryAliases) {
+        upsertCategoryAliasIntoGlossaryEntry(target, categoryAlias);
+    }
+    if (
+        normalizeCategoryNameKey(targetCategory) === normalizeCategoryNameKey(UNCATEGORIZED_CATEGORY) &&
+        normalizeCategoryNameKey(sourceCategory) !== normalizeCategoryNameKey(UNCATEGORIZED_CATEGORY)
+    ) {
+        target.canonicalCategory = sourceCategory;
+    }
+
     for (const alias of source.aliases) {
         upsertAliasIntoGlossaryEntry(target, alias);
     }
@@ -1048,6 +1215,60 @@ function upsertAliasIntoGlossaryEntry(entry: BloodworkGlossaryEntry, alias: stri
     }
 }
 
+function upsertCategoryAliasIntoGlossaryEntry(entry: BloodworkGlossaryEntry, alias: string): void {
+    const normalizedAlias = normalizeCategoryNameForGlossary(alias);
+    if (isUncategorizedCategory(normalizedAlias)) {
+        return;
+    }
+    const aliasKey = normalizeCategoryNameKey(normalizedAlias);
+    const canonicalKey = normalizeCategoryNameKey(entry.canonicalCategory);
+    if (!aliasKey || aliasKey === canonicalKey) {
+        return;
+    }
+    if (!entry.categoryAliases.some(existing => normalizeCategoryNameKey(existing) === aliasKey)) {
+        entry.categoryAliases = sortUniqueStrings([...entry.categoryAliases, normalizedAlias]);
+    }
+}
+
+function resolveEntryCanonicalCategoryFromMeasurement({
+    entry,
+    measurement,
+    extraCategoryAliases = [],
+}: {
+    entry: BloodworkGlossaryEntry;
+    measurement: BloodworkMeasurement;
+    extraCategoryAliases?: string[];
+}): string {
+    const existingCanonicalCategory = resolveCanonicalCategoryForMeasurement({
+        measurementName: entry.canonicalName,
+        category: entry.canonicalCategory,
+    });
+    const measurementCanonicalCategory = resolveCanonicalCategoryForMeasurement({
+        measurementName: entry.canonicalName,
+        category: measurement.category,
+        fallbackCategory: existingCanonicalCategory,
+    });
+    const hasDefaultExistingCategory =
+        normalizeCategoryNameKey(existingCanonicalCategory) === normalizeCategoryNameKey(UNCATEGORIZED_CATEGORY);
+    const hasDefaultMeasurementCategory =
+        normalizeCategoryNameKey(measurementCanonicalCategory) === normalizeCategoryNameKey(UNCATEGORIZED_CATEGORY);
+
+    if (hasDefaultExistingCategory && !hasDefaultMeasurementCategory) {
+        entry.canonicalCategory = measurementCanonicalCategory;
+    } else {
+        entry.canonicalCategory = existingCanonicalCategory;
+        if (normalizeCategoryNameKey(measurementCanonicalCategory) !== normalizeCategoryNameKey(existingCanonicalCategory)) {
+            upsertCategoryAliasIntoGlossaryEntry(entry, measurementCanonicalCategory);
+        }
+    }
+
+    for (const alias of extraCategoryAliases) {
+        upsertCategoryAliasIntoGlossaryEntry(entry, alias);
+    }
+
+    return entry.canonicalCategory;
+}
+
 function upsertUnitHintIntoGlossaryEntry(entry: BloodworkGlossaryEntry, unit: string | undefined): void {
     if (!unit) {
         return;
@@ -1091,11 +1312,18 @@ function updateGlossaryEntryWithMeasurement({
     entry,
     measurement,
     extraAliases = [],
+    extraCategoryAliases = [],
 }: {
     entry: BloodworkGlossaryEntry;
     measurement: BloodworkMeasurement;
     extraAliases?: string[];
-}): void {
+    extraCategoryAliases?: string[];
+}): string {
+    const canonicalCategory = resolveEntryCanonicalCategoryFromMeasurement({
+        entry,
+        measurement,
+        extraCategoryAliases,
+    });
     upsertAliasIntoGlossaryEntry(entry, measurement.name);
     if (measurement.originalName) {
         upsertAliasIntoGlossaryEntry(entry, measurement.originalName);
@@ -1106,6 +1334,7 @@ function updateGlossaryEntryWithMeasurement({
     upsertUnitHintIntoGlossaryEntry(entry, measurement.unit);
     upsertRangeIntoGlossaryEntry(entry, measurement);
     touchGlossaryEntry(entry);
+    return canonicalCategory;
 }
 
 function createGlossaryEntryFromMeasurement({
@@ -1116,9 +1345,15 @@ function createGlossaryEntryFromMeasurement({
     measurement: BloodworkMeasurement;
 }): BloodworkGlossaryEntry {
     const timestamp = nowIsoTimestamp();
+    const canonicalCategory = resolveCanonicalCategoryForMeasurement({
+        measurementName: canonicalName,
+        category: measurement.category,
+    });
     const entry: BloodworkGlossaryEntry = {
         canonicalName,
+        canonicalCategory,
         aliases: [],
+        categoryAliases: [],
         knownRanges: [],
         unitHints: [],
         createdAt: timestamp,
@@ -1129,6 +1364,7 @@ function createGlossaryEntryFromMeasurement({
         measurement: {
             ...measurement,
             name: canonicalName,
+            category: canonicalCategory,
         },
     });
     return entry;
@@ -1140,7 +1376,9 @@ function cleanMeasurementCandidate(measurement: BloodworkMeasurement): Bloodwork
     const originalName = measurement.originalName?.replace(/\s+/g, ' ').trim() || undefined;
     let unit = measurement.unit?.replace(/\s+/g, ' ').trim() || undefined;
     const note = measurement.note?.replace(/\s+/g, ' ').trim() || legacyNotes?.replace(/\s+/g, ' ').trim() || undefined;
-    const category = measurement.category?.replace(/\s+/g, ' ').trim() || undefined;
+    const category = measurement.category?.replace(/\s+/g, ' ').trim()
+        ? normalizeCategoryNameForGlossary(measurement.category)
+        : undefined;
     let normalizedName = name;
     let flag = measurement.flag;
 
@@ -1769,17 +2007,65 @@ function standardizeMeasurementUnits(measurements: BloodworkMeasurement[]): Bloo
     return measurements.map(standardizeMeasurementUnit);
 }
 
-function extractTableLikeLines(pageText: string): string[] {
+type TableLikeRow = {
+    line: string;
+    category?: string;
+};
+
+function isLikelyCategoryHeading(line: string): boolean {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.length < 3 || trimmed.length > 90) {
+        return false;
+    }
+    if (/\d/.test(trimmed) || VALUE_TOKEN_PATTERN.test(trimmed) || RANGE_TOKEN_PATTERN.test(trimmed)) {
+        return false;
+    }
+
+    const normalized = normalizeTextForMatch(trimmed);
+    if (!normalized) {
+        return false;
+    }
+    if (NON_MEASUREMENT_NAME_EXACT.has(normalized)) {
+        return false;
+    }
+    if (NON_MEASUREMENT_NAME_PATTERNS.some(pattern => pattern.test(normalized))) {
+        return false;
+    }
+    if (
+        LIKELY_ANALYTE_NAME_PATTERN.test(normalized) &&
+        !/\b(?:panel|profile|section|markers?|hematology|cbc|lipid|hormone|thyroid|liver|kidney|metabolic|immune|vitamin|mineral)\b/i.test(normalized)
+    ) {
+        return false;
+    }
+
+    const tokenCount = normalized.split(' ').length;
+    if (tokenCount > 7) {
+        return false;
+    }
+
+    return (
+        trimmed === trimmed.toUpperCase() ||
+        trimmed.endsWith(':') ||
+        /\b(?:panel|profile|section|markers?|hematology|cbc|lipid|hormone|thyroid|liver|kidney|metabolic|immune|vitamin|mineral|iron|electrolyte)\b/i.test(trimmed)
+    );
+}
+
+function extractTableLikeRows(pageText: string): TableLikeRow[] {
     const rawLines = pageText
         .split('\n')
         .map(line => line.replace(/\t/g, ' ').replace(/\u00a0/g, ' '))
         .map(line => line.replace(/\s+$/g, ''));
 
-    const selected = new Set<string>();
+    const selected = new Map<string, TableLikeRow>();
+    let activeCategory: string | undefined;
 
     for (let index = 0; index < rawLines.length; index++) {
         const rawLine = rawLines[index]?.trim();
         if (!rawLine || rawLine.length > 220) {
+            continue;
+        }
+        if (isLikelyCategoryHeading(rawLine)) {
+            activeCategory = normalizeCategoryNameForGlossary(rawLine);
             continue;
         }
 
@@ -1839,10 +2125,17 @@ function extractTableLikeLines(pageText: string): string[] {
             }
         }
 
-        selected.add([mergedName, ...parts.slice(1)].join(' | '));
+        const line = [mergedName, ...parts.slice(1)].join(' | ');
+        const dedupeKey = `${line}|${normalizeCategoryNameKey(activeCategory || '')}`;
+        if (!selected.has(dedupeKey)) {
+            selected.set(dedupeKey, {
+                line,
+                category: activeCategory,
+            });
+        }
     }
 
-    return Array.from(selected);
+    return Array.from(selected.values());
 }
 
 function parseNumericValueToken(raw: string): number | string {
@@ -1864,7 +2157,13 @@ function parseReferenceRangeFromText(text: string): BloodworkMeasurement['refere
     return parseReferenceRangeBoundsFromText(text);
 }
 
-function parseMeasurementFromTableLine(line: string): BloodworkMeasurement | null {
+function parseMeasurementFromTableLine({
+    line,
+    category,
+}: {
+    line: string;
+    category?: string;
+}): BloodworkMeasurement | null {
     const parts = line
         .split('|')
         .map(part => part.trim())
@@ -1933,6 +2232,7 @@ function parseMeasurementFromTableLine(line: string): BloodworkMeasurement | nul
     return {
         name,
         originalName: name,
+        category,
         value,
         unit,
         referenceRange,
@@ -1940,10 +2240,13 @@ function parseMeasurementFromTableLine(line: string): BloodworkMeasurement | nul
     };
 }
 
-function parseMeasurementsFromTableLikeLines(lines: string[]): BloodworkMeasurement[] {
+function parseMeasurementsFromTableLikeRows(rows: TableLikeRow[]): BloodworkMeasurement[] {
     const parsed: BloodworkMeasurement[] = [];
-    for (const line of lines) {
-        const measurement = parseMeasurementFromTableLine(line);
+    for (const row of rows) {
+        const measurement = parseMeasurementFromTableLine({
+            line: row.line,
+            category: row.category,
+        });
         if (measurement) {
             parsed.push(measurement);
         }
@@ -1959,6 +2262,7 @@ function extractCardStyleMeasurements(pageTexts: string[]): BloodworkMeasurement
         /\b(?:no historical data|for additional information|patients being treated|quest diagnostics|contact the|monday - friday)\b/i;
 
     for (const pageText of pageTexts) {
+        let activeCategory: string | undefined;
         const lines = pageText
             .split('\n')
             .map(line => line.replace(/\s+/g, ' ').trim())
@@ -1966,6 +2270,10 @@ function extractCardStyleMeasurements(pageTexts: string[]): BloodworkMeasurement
 
         for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
             const heading = lines[lineIndex]!;
+            if (isLikelyCategoryHeading(heading)) {
+                activeCategory = normalizeCategoryNameForGlossary(heading);
+                continue;
+            }
             if (!/^[A-Z0-9 ,().\-/'"]{3,}$/.test(heading)) {
                 continue;
             }
@@ -2070,6 +2378,7 @@ function extractCardStyleMeasurements(pageTexts: string[]): BloodworkMeasurement
             measurements.push({
                 name: normalizedHeading,
                 originalName: heading,
+                category: activeCategory,
                 value,
                 unit,
                 referenceRange,
@@ -2096,8 +2405,9 @@ function buildMeasurementExtractionPrompt({
         'Extract bloodwork analyte rows from this report page.',
         'Only include rows that are true lab analytes or derived biomarker results with a reported value.',
         'Do not include demographics, addresses, contact details, page headers/footers, IDs, notes, interpretations, guideline paragraphs, or section labels.',
-        'Use concise standardized English names in `name`.',
+        'Use canonical English measurement names in `name` when possible.',
         'If source text is non-English, preserve the raw source label in `originalName` and translate `name` to English.',
+        'Set optional `category` from the nearest section/panel heading when it is explicitly present in the document.',
         'Use `referenceRange` only as `{ "min"?: number, "max"?: number }`.',
         'For comparator ranges, map `<N` to `{ "max": N }` and `>N` to `{ "min": N }`.',
         'If there is a measurement-specific comment, put it in optional `note`.',
@@ -2125,7 +2435,8 @@ function buildMeasurementNormalizationPrompt({
         'Keep only real blood analytes and derived biomarkers.',
         'Remove any candidate that is administrative text, page metadata, patient identity, addresses, phone/email, comments, interpretations, guideline citations, or narrative explanations.',
         'Drop fragmentary/incomplete labels (for example words cut from sentence fragments) unless you can confidently normalize them into a standard analyte.',
-        'The final `name` must be in English. Keep `originalName` as source-language label when translation occurs.',
+        'The final `name` must be canonical English where possible. Keep `originalName` as source-language label when translation occurs.',
+        'Return one canonical English `category` per measurement. Prefer explicit section/panel headings from the report text, otherwise infer from analyte meaning.',
         'Use `referenceRange` only as `{ "min"?: number, "max"?: number }`; never emit `lower`, `upper`, or `text`.',
         'For comparator ranges, map `<N` to `{ "max": N }` and `>N` to `{ "min": N }`.',
         'Preserve numeric/string values, units, range bounds, flags, and optional `note` exactly unless clearly malformed.',
@@ -2147,7 +2458,9 @@ function buildGlossaryValidationPrompt({
     sourcePath: string;
     existingGlossaryEntries: Array<{
         canonicalName: string;
+        canonicalCategory: string;
         aliases: string[];
+        categoryAliases: string[];
     }>;
     unknownMeasurements: Array<{ index: number; measurement: BloodworkMeasurement }>;
 }): string {
@@ -2155,6 +2468,7 @@ function buildGlossaryValidationPrompt({
         index: item.index,
         name: item.measurement.name,
         originalName: item.measurement.originalName,
+        category: item.measurement.category,
         value: item.measurement.value,
         unit: item.measurement.unit,
         referenceRange: item.measurement.referenceRange,
@@ -2169,13 +2483,15 @@ function buildGlossaryValidationPrompt({
         'alias: candidate refers to an existing canonical analyte in the provided glossary names.',
         'new_valid: candidate is a real analyte but not yet in glossary.',
         'invalid: candidate is parsing noise, narrative text, metadata, or uncertain.',
-        'Strict rule: canonicalName and aliases must be English-only terms using ASCII letters/digits/punctuation.',
+        'Strict rule: canonicalName, aliases, canonicalCategory, and categoryAliases must be English-only terms using ASCII letters/digits/punctuation.',
         'If the candidate is non-English or uncertain, choose invalid.',
         'For alias, set targetCanonicalName exactly to one of the existing canonical names.',
+        'For alias and new_valid, set canonicalCategory to one concise canonical category name (for example Lipids & Cardiovascular, Thyroid, Hormones).',
         'For new_valid, set canonicalName in English and include optional English aliases.',
-        'Never return non-English canonical names or aliases.',
+        'Use optional categoryAliases only when they are true category synonyms.',
+        'Never return non-English canonical names, aliases, categories, or category aliases.',
         '',
-        'Existing glossary entries (canonical names with aliases):',
+        'Existing glossary entries (canonical names with aliases/categories):',
         JSON.stringify(existingGlossaryEntries, null, 2),
         '',
         'Candidates:',
@@ -2203,7 +2519,9 @@ async function validateUnknownMeasurementsWithGlossaryModel({
     const existingGlossaryEntries = glossary.entries
         .map(entry => ({
             canonicalName: entry.canonicalName,
+            canonicalCategory: entry.canonicalCategory,
             aliases: entry.aliases,
+            categoryAliases: entry.categoryAliases,
         }))
         .sort((left, right) => left.canonicalName.localeCompare(right.canonicalName));
     const prompt = buildGlossaryValidationPrompt({
@@ -2297,6 +2615,10 @@ function createFallbackGlossaryDecision(
         index: 0,
         action: 'new_valid',
         canonicalName,
+        canonicalCategory: resolveCanonicalCategoryForMeasurement({
+            measurementName: canonicalName,
+            category: measurement.category,
+        }),
         aliases: measurement.originalName && isEnglishGlossaryName(measurement.originalName)
             ? [measurement.originalName.trim()]
             : [],
@@ -2329,6 +2651,10 @@ function applyGlossaryDecision({
     acceptedMeasurements: BloodworkMeasurement[];
 }): void {
     const action = normalizeGlossaryDecisionAction(decision.action);
+    const decisionCanonicalCategory = decision.canonicalCategory?.trim()
+        ? normalizeCategoryNameForGlossary(decision.canonicalCategory)
+        : undefined;
+    const decisionCategoryAliases = (decision.categoryAliases ?? []).map(alias => normalizeCategoryNameForGlossary(alias));
 
     if (action === 'invalid') {
         return;
@@ -2352,12 +2678,19 @@ function applyGlossaryDecision({
             ...measurement,
             name: existingEntry.canonicalName,
         });
-        updateGlossaryEntryWithMeasurement({
+        const canonicalCategory = updateGlossaryEntryWithMeasurement({
             entry: existingEntry,
             measurement: aliasedMeasurement,
             extraAliases: decision.aliases,
+            extraCategoryAliases: [
+                ...(decisionCanonicalCategory ? [decisionCanonicalCategory] : []),
+                ...decisionCategoryAliases,
+            ],
         });
-        acceptedMeasurements.push(aliasedMeasurement);
+        acceptedMeasurements.push({
+            ...aliasedMeasurement,
+            category: canonicalCategory,
+        });
         return;
     }
 
@@ -2374,13 +2707,19 @@ function applyGlossaryDecision({
     const measurementWithCanonicalName = standardizeMeasurementUnit({
         ...measurement,
         name: canonicalName,
+        category: resolveCanonicalCategoryForMeasurement({
+            measurementName: canonicalName,
+            category: decisionCanonicalCategory ?? measurement.category,
+        }),
     });
 
+    let canonicalCategory = measurementWithCanonicalName.category;
     if (existingEntry) {
-        updateGlossaryEntryWithMeasurement({
+        canonicalCategory = updateGlossaryEntryWithMeasurement({
             entry: existingEntry,
             measurement: measurementWithCanonicalName,
             extraAliases: decision.aliases,
+            extraCategoryAliases: decisionCategoryAliases,
         });
     } else {
         const entry = createGlossaryEntryFromMeasurement({
@@ -2392,13 +2731,20 @@ function applyGlossaryDecision({
                 upsertAliasIntoGlossaryEntry(entry, alias);
             }
         }
+        for (const alias of decisionCategoryAliases) {
+            upsertCategoryAliasIntoGlossaryEntry(entry, alias);
+        }
+        canonicalCategory = entry.canonicalCategory;
         appendGlossaryEntry({
             glossary,
             lookup,
             entry,
         });
     }
-    acceptedMeasurements.push(measurementWithCanonicalName);
+    acceptedMeasurements.push({
+        ...measurementWithCanonicalName,
+        category: canonicalCategory,
+    });
 }
 
 async function applyGlossaryValidationToMeasurements({
@@ -2450,11 +2796,14 @@ async function applyGlossaryValidationToMeasurements({
                 ...normalizedMeasurement,
                 name: knownEntry.canonicalName,
             };
-            updateGlossaryEntryWithMeasurement({
+            const canonicalCategory = updateGlossaryEntryWithMeasurement({
                 entry: knownEntry,
                 measurement: resolvedMeasurement,
             });
-            accepted.push(resolvedMeasurement);
+            accepted.push({
+                ...resolvedMeasurement,
+                category: canonicalCategory,
+            });
             continue;
         }
 
@@ -2924,16 +3273,18 @@ async function extractMeasurementsFromPages({
             continue;
         }
 
-        const tableLikeLines = extractTableLikeLines(pageText);
-        if (tableLikeLines.length === 0) {
+        const tableLikeRows = extractTableLikeRows(pageText);
+        if (tableLikeRows.length === 0) {
             continue;
         }
 
-        extractedMeasurements.push(...parseMeasurementsFromTableLikeLines(tableLikeLines));
+        extractedMeasurements.push(...parseMeasurementsFromTableLikeRows(tableLikeRows));
 
         const prompt = buildMeasurementExtractionPrompt({
             sourcePath,
-            pageText: tableLikeLines.join('\n'),
+            pageText: tableLikeRows
+                .map(row => (row.category ? `[Category: ${row.category}] ${row.line}` : row.line))
+                .join('\n'),
             pageNumber: pageIndex + 1,
         });
 
