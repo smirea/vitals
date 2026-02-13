@@ -23,6 +23,8 @@ import {
     UNCATEGORIZED_CATEGORY_LABEL,
 } from './utils';
 
+const FAVORITES_CATEGORY_LABEL = 'Favorites';
+
 export function getOrderedLabs(labs: BloodworkLab[]): BloodworkLab[] {
     return [...labs].sort((left, right) => right.date.localeCompare(left.date));
 }
@@ -205,16 +207,21 @@ export function getTableSources({
 export function getTableRows({
     filteredMeasurementRows,
     groupByCategory,
+    starredMeasurementSet,
 }: {
     filteredMeasurementRows: VitalsRowModel[];
     groupByCategory: boolean;
+    starredMeasurementSet: Set<string>;
 }): VitalsDisplayRow[] {
     if (!groupByCategory) {
         return filteredMeasurementRows;
     }
 
+    const favoriteRows = filteredMeasurementRows.filter(row => starredMeasurementSet.has(row.key));
+    const nonFavoriteRows = filteredMeasurementRows.filter(row => !starredMeasurementSet.has(row.key));
+
     const grouped = new Map<string, VitalsRowModel[]>();
-    filteredMeasurementRows.forEach(row => {
+    nonFavoriteRows.forEach(row => {
         const existing = grouped.get(row.category);
         if (existing) {
             existing.push(row);
@@ -224,7 +231,19 @@ export function getTableRows({
     });
 
     const categories = Array.from(grouped.keys()).sort((left, right) => left.localeCompare(right));
-    return categories.flatMap(category => {
+    const rows: VitalsDisplayRow[] = [];
+
+    if (favoriteRows.length > 0) {
+        const favoriteHeader: VitalsCategoryRow = {
+            key: `category:${FAVORITES_CATEGORY_LABEL.toLowerCase()}`,
+            rowType: 'category',
+            category: FAVORITES_CATEGORY_LABEL,
+            categoryCount: favoriteRows.length,
+        };
+        rows.push(favoriteHeader, ...favoriteRows);
+    }
+
+    categories.forEach(category => {
         const items = grouped.get(category) ?? [];
         const header: VitalsCategoryRow = {
             key: `category:${category.toLowerCase()}`,
@@ -232,13 +251,37 @@ export function getTableRows({
             category,
             categoryCount: items.length,
         };
-        return [header, ...items];
+        rows.push(header, ...items);
     });
+
+    return rows;
 }
 
-export function getMeasurementKeysByCategory(filteredMeasurementRows: VitalsRowModel[]): Map<string, string[]> {
+export function getMeasurementKeysByCategory({
+    filteredMeasurementRows,
+    groupByCategory,
+    starredMeasurementSet,
+}: {
+    filteredMeasurementRows: VitalsRowModel[];
+    groupByCategory: boolean;
+    starredMeasurementSet: Set<string>;
+}): Map<string, string[]> {
     const grouped = new Map<string, string[]>();
+
+    if (groupByCategory) {
+        const favoriteKeys = filteredMeasurementRows
+            .filter(row => starredMeasurementSet.has(row.key))
+            .map(row => row.key);
+
+        if (favoriteKeys.length > 0) {
+            grouped.set(FAVORITES_CATEGORY_LABEL, favoriteKeys);
+        }
+    }
+
     filteredMeasurementRows.forEach(row => {
+        if (groupByCategory && starredMeasurementSet.has(row.key)) {
+            return;
+        }
         const existing = grouped.get(row.category);
         if (existing) {
             existing.push(row.key);

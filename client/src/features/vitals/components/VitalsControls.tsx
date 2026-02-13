@@ -54,21 +54,21 @@ export function VitalsControls({
 
             <div className='relative flex h-8 min-w-0 items-center'>
                 <span
-                    className='pointer-events-none absolute text-[11px] uppercase tracking-[0.04em] text-slate-600'
+                    className='pointer-events-none absolute whitespace-nowrap text-left text-[11px] uppercase tracking-[0.04em] text-slate-600'
                     style={{
                         left: `${startHandlePercent}%`,
-                        top: shouldStackLabels ? '-26px' : '-20px',
-                        transform: 'translateX(-50%)',
+                        top: shouldStackLabels ? '30px' : '24px',
+                        transform: 'translateX(0)',
                     }}
                 >
                     {startDateLabel}
                 </span>
                 <span
-                    className='pointer-events-none absolute text-[11px] uppercase tracking-[0.04em] text-slate-600'
+                    className='pointer-events-none absolute whitespace-nowrap text-right text-[11px] uppercase tracking-[0.04em] text-slate-600'
                     style={{
                         left: `${endHandlePercent}%`,
-                        top: '-20px',
-                        transform: 'translateX(-50%)',
+                        top: '24px',
+                        transform: 'translateX(-100%)',
                     }}
                 >
                     {endDateLabel}

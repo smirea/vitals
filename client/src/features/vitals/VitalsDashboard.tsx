@@ -244,11 +244,16 @@ export function VitalsDashboard() {
     const tableRows = useMemo(() => getTableRows({
         filteredMeasurementRows: tableMeasurementRows,
         groupByCategory,
-    }), [groupByCategory, tableMeasurementRows]);
+        starredMeasurementSet,
+    }), [groupByCategory, starredMeasurementSet, tableMeasurementRows]);
 
     const measurementKeysByCategory = useMemo(
-        () => getMeasurementKeysByCategory(tableMeasurementRows),
-        [tableMeasurementRows],
+        () => getMeasurementKeysByCategory({
+            filteredMeasurementRows: tableMeasurementRows,
+            groupByCategory,
+            starredMeasurementSet,
+        }),
+        [groupByCategory, starredMeasurementSet, tableMeasurementRows],
     );
 
     const categorySelectionByName = useMemo(() => getCategorySelectionByName({

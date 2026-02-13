@@ -45,7 +45,7 @@ Pick the next most important feature to work on, implement it fully and test it 
 - Unknown glossary names go through a second-pass validator prompt that enforces english-only canonical names and aliases before entries are accepted.
 - Importer standardizes measurement units for key analytes; when a numeric unit conversion is applied it preserves pre-conversion data in `measurement.original` (`value`, `unit`, `referenceRange`).
 - Importer consolidates bloodwork JSON files within a 7-day window into the latest-dated file, records contributing files in `mergedFrom`, and stores superseded measurement readings in `measurement.duplicateValues`.
-- Starred dashboard measurements are saved under `localStorage` key `vitals.starred.measurements`; starred names are bold and sorted to the top of the table.
+- Starred dashboard measurements are saved under `localStorage` key `vitals.starred.measurements`; starred names are bold and sorted to the top of the table, and when grouping is enabled they are hoisted into a top `Favorites` category.
 - Dashboard table cells now render reference ranges visually with a track, min/max bounds, and the observed value marker when numeric range data is available.
 - Client dashboard rendering was refactored into `client/src/features/vitals/*` with a custom lightweight table (no Ant Table render path) and shared `types.ts`, `model.ts`, and `utils.ts` modules.
 - Dashboard styling moved away from Emotion/styled to Tailwind utility classes plus `client/src/features/vitals/vitals.css` for shared table/range visuals.
