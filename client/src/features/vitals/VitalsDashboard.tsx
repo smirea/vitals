@@ -46,8 +46,10 @@ import {
     MIN_CHART_PANE_WIDTH,
     OVERVIEW_COLUMN_WIDTH,
     readStoredGroupByCategory,
+    readStoredSelectedRowKeys,
     readStoredStarredMeasurementKeys,
     RESIZER_WIDTH,
+    SELECTED_ROWS_STORAGE_KEY,
     SELECTION_COLUMN_WIDTH,
     SOURCE_COLUMN_WIDTH,
     STARRED_MEASUREMENTS_STORAGE_KEY,
@@ -82,7 +84,7 @@ export function VitalsDashboard() {
     const [isLoading, setIsLoading] = useState(true);
     const [loadError, setLoadError] = useState<string | null>(null);
     const [measurementFilter, setMeasurementFilter] = useState('');
-    const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
+    const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>(() => readStoredSelectedRowKeys());
     const [starredMeasurementKeys, setStarredMeasurementKeys] = useState<string[]>(() => readStoredStarredMeasurementKeys());
     const [dateRangeStart, setDateRangeStart] = useState('');
     const [dateRangeEnd, setDateRangeEnd] = useState('');
@@ -185,6 +187,11 @@ export function VitalsDashboard() {
     }, [groupByCategory]);
 
     useEffect(() => {
+        if (typeof window === 'undefined') return;
+        window.localStorage.setItem(SELECTED_ROWS_STORAGE_KEY, JSON.stringify(selectedRowKeys));
+    }, [selectedRowKeys]);
+
+    useEffect(() => {
         if (allMeasurementRows.length === 0) {
             return;
         }
@@ -207,6 +214,9 @@ export function VitalsDashboard() {
     }), [filteredMeasurementRows, visibleSources]);
 
     useEffect(() => {
+        if (allMeasurementRows.length === 0) {
+            return;
+        }
         setSelectedRowKeys(previous => {
             const next = getPrunedSelectedRowKeys({
                 selectedRowKeys: previous,

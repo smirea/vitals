@@ -54,6 +54,7 @@ Pick the next most important feature to work on, implement it fully and test it 
 - Dashboard date filtering now uses a double-handle slider constrained to available lab dates, replacing freeform date inputs/reset.
 - Dashboard now hides empty measurement rows and empty date columns in the main table, and prunes trend x-axis dates/selected-values table columns that have no datapoints.
 - Star toggling no longer jumps table scroll position, and starred keys are no longer cleared during initial load before labs are available.
+- Selected dashboard rows are now persisted in `localStorage` and restored on refresh (`vitals.selected.rows`), with invalid selections pruned once measurement data is loaded.
 - Added visible-table CSV export from dashboard controls; exported file includes measurement/category/overview and currently visible date columns.
 - Fixed sticky header backgrounds for measurement/overview columns, enabled wrapped measurement names, and removed desktop outer padding to use full viewport space.
 

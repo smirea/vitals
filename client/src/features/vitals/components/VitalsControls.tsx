@@ -36,6 +36,9 @@ export function VitalsControls({
     const endIndex = Math.min(maxIndex, Math.max(0, dateRangeValue[1] ?? 0));
     const startDateLabel = sliderDates[startIndex] ? formatPrettyDate(sliderDates[startIndex]) : '--';
     const endDateLabel = sliderDates[endIndex] ? formatPrettyDate(sliderDates[endIndex]) : '--';
+    const startHandlePercent = maxIndex > 0 ? (startIndex / maxIndex) * 100 : 0;
+    const endHandlePercent = maxIndex > 0 ? (endIndex / maxIndex) * 100 : 0;
+    const shouldStackLabels = Math.abs(startHandlePercent - endHandlePercent) < 10;
 
     return (
         <div className={`grid items-center gap-2 border-b border-slate-300 p-2 ${isMobile ? 'grid-cols-1' : 'grid-cols-[minmax(240px,1fr)_minmax(320px,1.35fr)_auto_auto]'}`}>
@@ -49,11 +52,27 @@ export function VitalsControls({
                 />
             </label>
 
-            <div className='flex min-w-0 flex-col gap-1'>
-                <div className='inline-flex items-center justify-between text-[11px] uppercase tracking-[0.04em] text-slate-600'>
-                    <span>{startDateLabel}</span>
-                    <span>{endDateLabel}</span>
-                </div>
+            <div className='relative flex h-8 min-w-0 items-center'>
+                <span
+                    className='pointer-events-none absolute text-[11px] uppercase tracking-[0.04em] text-slate-600'
+                    style={{
+                        left: `${startHandlePercent}%`,
+                        top: shouldStackLabels ? '-26px' : '-20px',
+                        transform: 'translateX(-50%)',
+                    }}
+                >
+                    {startDateLabel}
+                </span>
+                <span
+                    className='pointer-events-none absolute text-[11px] uppercase tracking-[0.04em] text-slate-600'
+                    style={{
+                        left: `${endHandlePercent}%`,
+                        top: '-20px',
+                        transform: 'translateX(-50%)',
+                    }}
+                >
+                    {endDateLabel}
+                </span>
                 <Slider
                     range
                     min={0}
@@ -66,6 +85,7 @@ export function VitalsControls({
                         onDateRangeSliderChange([value[0], value[1]]);
                     }}
                     tooltip={{ formatter: value => (value === undefined ? '' : formatPrettyDate(sliderDates[value] ?? '')) }}
+                    style={{ margin: 0, width: '100%' }}
                     styles={{
                         rail: { background: '#cbd5e1' },
                         track: { background: '#334155' },

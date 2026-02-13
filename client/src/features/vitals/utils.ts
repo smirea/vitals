@@ -13,6 +13,7 @@ export const MEASUREMENT_COLUMN_WIDTH = 250;
 export const OVERVIEW_COLUMN_WIDTH = 94;
 export const SOURCE_COLUMN_WIDTH = 164;
 export const STARRED_MEASUREMENTS_STORAGE_KEY = 'vitals.starred.measurements';
+export const SELECTED_ROWS_STORAGE_KEY = 'vitals.selected.rows';
 export const GROUP_BY_CATEGORY_STORAGE_KEY = 'vitals.group-by-category';
 export const UNCATEGORIZED_CATEGORY_LABEL = 'Uncategorized';
 export const CHART_PALETTE = ['#0f172a', '#2563eb', '#0f766e', '#15803d', '#7c3aed', '#ca8a04'];
@@ -41,6 +42,31 @@ export function readStoredStarredMeasurementKeys(): string[] {
         const raw = window.localStorage.getItem(STARRED_MEASUREMENTS_STORAGE_KEY);
         if (!raw) return [];
         return normalizeStarredMeasurementKeys(JSON.parse(raw));
+    } catch {
+        return [];
+    }
+}
+
+export function normalizeSelectedRowKeys(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    const unique = new Set<string>();
+
+    value.forEach(item => {
+        if (typeof item !== 'string') return;
+        const normalized = item.trim().toLowerCase();
+        if (!normalized) return;
+        unique.add(normalized);
+    });
+
+    return Array.from(unique);
+}
+
+export function readStoredSelectedRowKeys(): string[] {
+    if (typeof window === 'undefined') return [];
+    try {
+        const raw = window.localStorage.getItem(SELECTED_ROWS_STORAGE_KEY);
+        if (!raw) return [];
+        return normalizeSelectedRowKeys(JSON.parse(raw));
     } catch {
         return [];
     }

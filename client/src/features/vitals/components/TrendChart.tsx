@@ -142,11 +142,16 @@ export const TrendChart = memo(function TrendChart({
                                                 const displayLabel = item.unitLabel
                                                     ? `${item.label} (${item.unitLabel})`
                                                     : item.label;
+                                                const displayValue = cell?.display ?? '--';
+                                                const rangeLabel = cell?.rangeCaption?.trim();
+                                                const valueWithRange = rangeLabel
+                                                    ? `${displayValue} (${rangeLabel})`
+                                                    : displayValue;
                                                 return (
                                                     <div key={`${label}-${item.id}`} className='flex items-center gap-2 py-[2px]'>
                                                         <span className='h-[10px] w-[10px] rounded-full' style={{ background: item.color }} />
                                                         <span className='min-w-0 flex-1 text-xs text-slate-700'>{displayLabel}</span>
-                                                        <span className='ml-auto text-xs font-semibold text-slate-900'>{cell?.display ?? '--'}</span>
+                                                        <span className='ml-auto text-xs font-semibold text-slate-900'>{valueWithRange}</span>
                                                     </div>
                                                 );
                                             })}

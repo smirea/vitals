@@ -53,13 +53,14 @@
     min-width: var(--source-col-width);
     width: var(--source-col-width);
     border: 1px solid #e2e8f0;
-    background: #ffffff;
+    background: var(--vitals-row-bg, #ffffff);
     padding: 7px 8px;
     vertical-align: top;
     font-size: 14px;
 }
 
 .vitals-row-selected > .vitals-cell {
+    --vitals-row-bg: #f1f5f9;
     background: #f1f5f9;
 }
 
@@ -94,7 +95,7 @@
 .vitals-cell.vitals-col-select,
 .vitals-cell.vitals-col-measurement,
 .vitals-cell.vitals-col-overview {
-    background: inherit;
+    background: var(--vitals-row-bg, #ffffff);
 }
 
 .vitals-head.vitals-col-select,
@@ -105,11 +106,13 @@
 }
 
 .vitals-category-row > .vitals-cell {
+    --vitals-row-bg: #dbeafe;
     border-color: #cbd5e1;
     background: #dbeafe;
 }
 
 .vitals-category-row:hover > .vitals-cell {
+    --vitals-row-bg: #bfdbfe;
     background: #bfdbfe;
 }
 
