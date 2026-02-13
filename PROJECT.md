@@ -45,3 +45,13 @@ Pick the next most important feature to work on, implement it fully and test it 
 - Importer standardizes measurement units for key analytes; when a numeric unit conversion is applied it preserves pre-conversion data in `measurement.original` (`value`, `unit`, `referenceRange`).
 - Starred dashboard measurements are saved under `localStorage` key `vitals.starred.measurements`; starred names are bold and sorted to the top of the table.
 - Dashboard table cells now render reference ranges visually with a track, min/max bounds, and the observed value marker when numeric range data is available.
+
+## Active iteration requirements (2026-02-13)
+
+- [x] Improve client performance by memoizing expensive computations, stabilizing callbacks, and validating hook dependencies without changing UX.
+- [x] Fix table selection column clipping and header/body column alignment issues.
+- [x] Fix chart logic so selected measurements render contiguous trend lines across available points; keep y-axis normalized by each measurement's reference range; reserve red for out-of-range points while preserving measurement colors otherwise.
+- [x] Show a tooltip on table row hover with all known reference ranges across dates for that measurement.
+- [x] Make "Group by category" default to enabled and persist that preference in local storage.
+- [x] Add category-level checkbox selection so selecting a category selects all measurements in that category.
+- [x] Add an overview tally column next to measurement name showing counts for in-range, out-of-range, and missing values across visible bloodworks.
