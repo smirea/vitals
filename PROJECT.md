@@ -47,10 +47,18 @@ Pick the next most important feature to work on, implement it fully and test it 
 - Importer consolidates bloodwork JSON files within a 7-day window into the latest-dated file, records contributing files in `mergedFrom`, and stores superseded measurement readings in `measurement.duplicateValues`.
 - Starred dashboard measurements are saved under `localStorage` key `vitals.starred.measurements`; starred names are bold and sorted to the top of the table.
 - Dashboard table cells now render reference ranges visually with a track, min/max bounds, and the observed value marker when numeric range data is available.
+- Client dashboard rendering was refactored into `client/src/features/vitals/*` with a custom lightweight table (no Ant Table render path) and shared `types.ts`, `model.ts`, and `utils.ts` modules.
+- Dashboard styling moved away from Emotion/styled to Tailwind utility classes plus `client/src/features/vitals/vitals.css` for shared table/range visuals.
+- Added `bun run perf:client:dev` (`scripts/client-perf.ts`) to run repeatable dev-mode interaction benchmarks and enforce a configurable threshold.
+- Latest dev benchmark on current dataset (10 runs): median select `83.5ms`, unselect `25ms`, regroup `64.5ms`, short filter `141.5ms`, clear filter `134ms` (threshold `250ms`, PASS).
 
 ## Active iteration requirements (2026-02-13)
 
 - [x] Improve client performance by memoizing expensive computations, stabilizing callbacks, and validating hook dependencies without changing UX.
+- [x] Replace the Ant Table-based render path with a custom lightweight table while keeping full feature parity and synchronous table+chart updates.
+- [x] Move client styling away from Emotion/styled to Tailwind/CSS and remove Emotion from Vite/react config and dependencies.
+- [x] Split the dashboard into separate feature modules/components for separation of concerns and easier maintenance.
+- [x] Add and verify a reproducible dev perf harness with a sub-250ms median gate for key interactions.
 - [x] Fix table selection column clipping and header/body column alignment issues.
 - [x] Fix chart logic so selected measurements render contiguous trend lines across available points; keep y-axis normalized by each measurement's reference range; reserve red for out-of-range points while preserving measurement colors otherwise.
 - [x] Show a tooltip on table row hover with all known reference ranges across dates for that measurement.
