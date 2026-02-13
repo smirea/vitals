@@ -2,7 +2,7 @@ import fs from 'fs';
 import { spawnSync } from 'child_process';
 import path from 'path';
 
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { generateObject, generateText } from 'ai';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
@@ -17,6 +17,8 @@ import {
     slugifyForPath,
     type BloodworkMeasurement,
     type BloodworkLab,
+    type BloodworkMeasurementDuplicateValue,
+    type BloodworkMergedSource,
 } from './bloodwork-schema.ts';
 import { createScript } from './createScript.ts';
 import {
@@ -32,6 +34,7 @@ const DEFAULT_GLOSSARY_VALIDATOR_MODEL_IDS = ['google/gemini-3-flash-preview'];
 const DEFAULT_TO_IMPORT_DIRECTORY = PROJECT_TO_IMPORT_DIR;
 const DEFAULT_OUTPUT_DIRECTORY = PROJECT_DATA_DIR;
 const DEFAULT_GLOSSARY_PATH = PROJECT_GLOSSARY_PATH;
+const MERGE_WINDOW_DAYS = 7;
 const EXTRACTED_TEXT_LIMIT = 45_000;
 const MODEL_MAX_OUTPUT_TOKENS = 1_400;
 const METADATA_MAX_OUTPUT_TOKENS = 280;
@@ -48,12 +51,44 @@ type CliOptions = {
     continueOnError: boolean;
     skipUpload: boolean;
     modelIds: string[];
+    mergeExistingOnly: boolean;
 };
 
 type ImportResult = {
     outputPath: string;
     s3Key: string | null;
     modelId: string;
+};
+
+type BloodworkDataFile = {
+    path: string;
+    fileName: string;
+    lab: BloodworkLab;
+};
+
+type ConsolidatedMeasurementSelection = {
+    measurement: BloodworkMeasurement;
+    source: BloodworkDataFile;
+    duplicateValues: BloodworkMeasurementDuplicateValue[];
+};
+
+type ConsolidationGroupSummary = {
+    targetFileName: string;
+    latestDate: string;
+    sourceFileNames: string[];
+    sourceDates: string[];
+};
+
+type ConsolidationSummary = {
+    groupsProcessed: number;
+    mergedGroups: number;
+    filesBefore: number;
+    filesAfter: number;
+    writtenFiles: string[];
+    removedFiles: string[];
+    uploadedKeys: string[];
+    deletedKeys: string[];
+    groups: ConsolidationGroupSummary[];
 };
 
 type ExtractedPdfText = {
@@ -441,9 +476,11 @@ const HELP_TEXT = [
     'Usage:',
     '  bun scripts/bloodwork-import.ts <path-to-pdf> [--skip-upload] [--model <openrouter-model-id>]',
     '  bun scripts/bloodwork-import.ts --all [--continue-on-error] [--skip-upload] [--model <openrouter-model-id>]',
+    '  bun scripts/bloodwork-import.ts --merge-existing [--skip-upload]',
     '',
     'Flags:',
     '  --all                 Import every .pdf file from data/to-import',
+    '  --merge-existing      Merge existing bloodwork_*.json files by date proximity (<= 7 days)',
     '  --continue-on-error   Continue processing other files when --all is used',
     '  --skip-upload         Skip S3 upload (useful for local validation)',
     '  --model <id>          Override model id (can be repeated)',
@@ -451,6 +488,7 @@ const HELP_TEXT = [
 
 function parseCliOptions(argv: string[]): CliOptions {
     let importAll = false;
+    let mergeExistingOnly = false;
     let continueOnError = false;
     let skipUpload = false;
     const modelIds: string[] = [];
@@ -460,6 +498,10 @@ function parseCliOptions(argv: string[]): CliOptions {
         const token = argv[index];
         if (token === '--all') {
             importAll = true;
+            continue;
+        }
+        if (token === '--merge-existing') {
+            mergeExistingOnly = true;
             continue;
         }
         if (token === '--continue-on-error') {
@@ -497,8 +539,20 @@ function parseCliOptions(argv: string[]): CliOptions {
         throw new Error(`Do not pass a file path when using --all\n\n${HELP_TEXT}`);
     }
 
-    if (!importAll && positional.length !== 1) {
-        throw new Error(`Expected exactly one PDF path or --all\n\n${HELP_TEXT}`);
+    if (mergeExistingOnly && (importAll || positional.length > 0)) {
+        throw new Error(`--merge-existing cannot be combined with PDF inputs or --all\n\n${HELP_TEXT}`);
+    }
+
+    if (mergeExistingOnly && continueOnError) {
+        throw new Error(`--continue-on-error is only valid for PDF import mode\n\n${HELP_TEXT}`);
+    }
+
+    if (mergeExistingOnly && modelIds.length > 0) {
+        throw new Error(`--model is not used with --merge-existing\n\n${HELP_TEXT}`);
+    }
+
+    if (!mergeExistingOnly && !importAll && positional.length !== 1) {
+        throw new Error(`Expected exactly one PDF path, --all, or --merge-existing\n\n${HELP_TEXT}`);
     }
 
     if (!importAll && continueOnError) {
@@ -507,10 +561,11 @@ function parseCliOptions(argv: string[]): CliOptions {
 
     return {
         importAll,
-        inputPdfPath: importAll ? null : positional[0],
+        inputPdfPath: importAll || mergeExistingOnly ? null : positional[0],
         continueOnError,
         skipUpload,
         modelIds,
+        mergeExistingOnly,
     };
 }
 
@@ -3480,6 +3535,607 @@ function resolveOutputFileName({
     return baseFileName.replace(/\.json$/i, `_${sourceSlug}.json`);
 }
 
+function dateDifferenceInDays(leftDate: string, rightDate: string): number {
+    const [leftYear, leftMonth, leftDay] = leftDate.split('-').map(part => Number.parseInt(part, 10));
+    const [rightYear, rightMonth, rightDay] = rightDate.split('-').map(part => Number.parseInt(part, 10));
+    const leftTimestamp = Date.UTC(leftYear!, (leftMonth ?? 1) - 1, leftDay!);
+    const rightTimestamp = Date.UTC(rightYear!, (rightMonth ?? 1) - 1, rightDay!);
+    return Math.abs(Math.round((leftTimestamp - rightTimestamp) / (24 * 60 * 60 * 1000)));
+}
+
+function cloneReferenceRange(
+    referenceRange: BloodworkMeasurement['referenceRange'],
+): BloodworkMeasurement['referenceRange'] {
+    if (!referenceRange) {
+        return undefined;
+    }
+    const nextRange: NonNullable<BloodworkMeasurement['referenceRange']> = {};
+    if (referenceRange.min !== undefined) {
+        nextRange.min = referenceRange.min;
+    }
+    if (referenceRange.max !== undefined) {
+        nextRange.max = referenceRange.max;
+    }
+    if (nextRange.min === undefined && nextRange.max === undefined) {
+        return undefined;
+    }
+    return nextRange;
+}
+
+function cloneMeasurementOriginal(
+    original: BloodworkMeasurement['original'],
+): BloodworkMeasurement['original'] {
+    if (!original) {
+        return undefined;
+    }
+    const nextOriginal: NonNullable<BloodworkMeasurement['original']> = {};
+    if (original.value !== undefined) {
+        nextOriginal.value = original.value;
+    }
+    if (original.unit !== undefined) {
+        nextOriginal.unit = original.unit;
+    }
+    const originalRange = cloneReferenceRange(original.referenceRange);
+    if (originalRange) {
+        nextOriginal.referenceRange = originalRange;
+    }
+    if (
+        nextOriginal.value === undefined &&
+        nextOriginal.unit === undefined &&
+        nextOriginal.referenceRange === undefined
+    ) {
+        return undefined;
+    }
+    return nextOriginal;
+}
+
+function cloneDuplicateValue(
+    value: BloodworkMeasurementDuplicateValue,
+): BloodworkMeasurementDuplicateValue {
+    const cloned: BloodworkMeasurementDuplicateValue = {
+        date: value.date,
+    };
+    if (value.value !== undefined) {
+        cloned.value = value.value;
+    }
+    if (value.unit !== undefined) {
+        cloned.unit = value.unit;
+    }
+    const range = cloneReferenceRange(value.referenceRange);
+    if (range) {
+        cloned.referenceRange = range;
+    }
+    if (value.flag !== undefined) {
+        cloned.flag = value.flag;
+    }
+    if (value.note !== undefined) {
+        cloned.note = value.note;
+    }
+    if (value.sourceFile !== undefined) {
+        cloned.sourceFile = value.sourceFile;
+    }
+    if (value.sourceLabName !== undefined) {
+        cloned.sourceLabName = value.sourceLabName;
+    }
+    if (value.importLocation !== undefined) {
+        cloned.importLocation = value.importLocation;
+    }
+    return cloned;
+}
+
+function cloneMeasurement(measurement: BloodworkMeasurement): BloodworkMeasurement {
+    const cloned: BloodworkMeasurement = {
+        name: measurement.name,
+    };
+    if (measurement.originalName !== undefined) {
+        cloned.originalName = measurement.originalName;
+    }
+    if (measurement.category !== undefined) {
+        cloned.category = measurement.category;
+    }
+    if (measurement.value !== undefined) {
+        cloned.value = measurement.value;
+    }
+    if (measurement.unit !== undefined) {
+        cloned.unit = measurement.unit;
+    }
+    const range = cloneReferenceRange(measurement.referenceRange);
+    if (range) {
+        cloned.referenceRange = range;
+    }
+    const original = cloneMeasurementOriginal(measurement.original);
+    if (original) {
+        cloned.original = original;
+    }
+    if (measurement.flag !== undefined) {
+        cloned.flag = measurement.flag;
+    }
+    if (measurement.note !== undefined) {
+        cloned.note = measurement.note;
+    }
+    if (measurement.notes !== undefined) {
+        cloned.notes = measurement.notes;
+    }
+    if (measurement.duplicateValues && measurement.duplicateValues.length > 0) {
+        cloned.duplicateValues = measurement.duplicateValues.map(cloneDuplicateValue);
+    }
+    return cloned;
+}
+
+function buildDuplicateValueKey(value: BloodworkMeasurementDuplicateValue): string {
+    const rawValue = value.value;
+    const valuePart =
+        rawValue === undefined || rawValue === null
+            ? ''
+            : typeof rawValue === 'number'
+                ? rawValue.toString()
+                : rawValue.trim().toLowerCase();
+    const rangePart = value.referenceRange
+        ? [
+            value.referenceRange.min?.toString() ?? '',
+            value.referenceRange.max?.toString() ?? '',
+        ].join('|')
+        : '';
+    return [
+        value.date,
+        valuePart,
+        value.unit?.trim().toLowerCase() ?? '',
+        rangePart,
+        value.flag ?? '',
+        value.note?.trim().toLowerCase() ?? '',
+        value.sourceFile?.trim().toLowerCase() ?? '',
+        value.sourceLabName?.trim().toLowerCase() ?? '',
+        value.importLocation?.trim().toLowerCase() ?? '',
+    ].join('|');
+}
+
+function dedupeDuplicateValues(values: BloodworkMeasurementDuplicateValue[]): BloodworkMeasurementDuplicateValue[] {
+    const deduped = new Map<string, BloodworkMeasurementDuplicateValue>();
+    for (const value of values) {
+        const key = buildDuplicateValueKey(value);
+        if (!deduped.has(key)) {
+            deduped.set(key, cloneDuplicateValue(value));
+        }
+    }
+    return Array.from(deduped.values()).sort((left, right) => {
+        const dateCompare = left.date.localeCompare(right.date);
+        if (dateCompare !== 0) {
+            return dateCompare;
+        }
+        const sourceCompare = (left.sourceFile ?? '').localeCompare(right.sourceFile ?? '');
+        if (sourceCompare !== 0) {
+            return sourceCompare;
+        }
+        return buildDuplicateValueKey(left).localeCompare(buildDuplicateValueKey(right));
+    });
+}
+
+function buildDuplicateValueFromMeasurement({
+    measurement,
+    source,
+}: {
+    measurement: BloodworkMeasurement;
+    source: BloodworkDataFile;
+}): BloodworkMeasurementDuplicateValue {
+    const duplicateValue: BloodworkMeasurementDuplicateValue = {
+        date: source.lab.date,
+    };
+    if (measurement.value !== undefined) {
+        duplicateValue.value = measurement.value;
+    }
+    if (measurement.unit !== undefined) {
+        duplicateValue.unit = measurement.unit;
+    }
+    const range = cloneReferenceRange(measurement.referenceRange);
+    if (range) {
+        duplicateValue.referenceRange = range;
+    }
+    if (measurement.flag !== undefined) {
+        duplicateValue.flag = measurement.flag;
+    }
+    const measurementNote = measurement.note?.trim() || measurement.notes?.trim();
+    if (measurementNote) {
+        duplicateValue.note = measurementNote;
+    }
+    duplicateValue.sourceFile = source.fileName;
+    duplicateValue.sourceLabName = source.lab.labName;
+    if (source.lab.importLocation) {
+        duplicateValue.importLocation = source.lab.importLocation;
+    }
+    return duplicateValue;
+}
+
+function buildMergedFromKey(entry: BloodworkMergedSource): string {
+    return [
+        entry.fileName.trim().toLowerCase(),
+        entry.date,
+        entry.labName.trim().toLowerCase(),
+        entry.importLocation?.trim().toLowerCase() ?? '',
+    ].join('|');
+}
+
+function dedupeMergedFromEntries(entries: BloodworkMergedSource[]): BloodworkMergedSource[] {
+    const deduped = new Map<string, BloodworkMergedSource>();
+    for (const entry of entries) {
+        const key = buildMergedFromKey(entry);
+        if (!deduped.has(key)) {
+            deduped.set(key, {
+                fileName: entry.fileName,
+                date: entry.date,
+                labName: entry.labName,
+                importLocation: entry.importLocation,
+                measurementCount: entry.measurementCount,
+            });
+        }
+    }
+    return Array.from(deduped.values()).sort((left, right) => {
+        const dateCompare = left.date.localeCompare(right.date);
+        if (dateCompare !== 0) {
+            return dateCompare;
+        }
+        return left.fileName.localeCompare(right.fileName);
+    });
+}
+
+function buildMergedSourceFromFile(source: BloodworkDataFile): BloodworkMergedSource {
+    return {
+        fileName: source.fileName,
+        date: source.lab.date,
+        labName: source.lab.labName,
+        importLocation: source.lab.importLocation,
+        measurementCount: source.lab.measurements.length,
+    };
+}
+
+function collectMergedFromEntries(group: BloodworkDataFile[]): BloodworkMergedSource[] {
+    const entries: BloodworkMergedSource[] = [];
+    for (const source of group) {
+        if (source.lab.mergedFrom && source.lab.mergedFrom.length > 0) {
+            entries.push(...source.lab.mergedFrom.map(entry => ({
+                fileName: entry.fileName,
+                date: entry.date,
+                labName: entry.labName,
+                importLocation: entry.importLocation,
+                measurementCount: entry.measurementCount,
+            })));
+            continue;
+        }
+        entries.push(buildMergedSourceFromFile(source));
+    }
+    return dedupeMergedFromEntries(entries);
+}
+
+function compareSourceFreshness(left: BloodworkDataFile, right: BloodworkDataFile): number {
+    const dateCompare = left.lab.date.localeCompare(right.lab.date);
+    if (dateCompare !== 0) {
+        return dateCompare;
+    }
+    const measurementCountCompare = left.lab.measurements.length - right.lab.measurements.length;
+    if (measurementCountCompare !== 0) {
+        return measurementCountCompare;
+    }
+    return left.fileName.localeCompare(right.fileName);
+}
+
+function pickLatestDefinedText(values: Array<string | undefined>): string | undefined {
+    for (let index = values.length - 1; index >= 0; index--) {
+        const value = values[index]?.trim();
+        if (value) {
+            return value;
+        }
+    }
+    return undefined;
+}
+
+function pickLatestDefinedNumber(values: Array<number | undefined>): number | undefined {
+    for (let index = values.length - 1; index >= 0; index--) {
+        const value = values[index];
+        if (value !== undefined) {
+            return value;
+        }
+    }
+    return undefined;
+}
+
+function pickLatestDefinedBoolean(values: Array<boolean | undefined>): boolean | undefined {
+    for (let index = values.length - 1; index >= 0; index--) {
+        const value = values[index];
+        if (value !== undefined) {
+            return value;
+        }
+    }
+    return undefined;
+}
+
+function mergeNotes(group: BloodworkDataFile[]): string | undefined {
+    const byNormalizedValue = new Map<string, string>();
+    for (const source of group) {
+        const note = source.lab.notes?.trim();
+        if (!note) {
+            continue;
+        }
+        const key = note.toLowerCase();
+        if (!byNormalizedValue.has(key)) {
+            byNormalizedValue.set(key, note);
+        }
+    }
+    if (byNormalizedValue.size === 0) {
+        return undefined;
+    }
+    return Array.from(byNormalizedValue.values()).join('\n\n');
+}
+
+function mergeMeasurementsForGroup(group: BloodworkDataFile[]): BloodworkMeasurement[] {
+    const selected = new Map<string, ConsolidatedMeasurementSelection>();
+
+    for (const source of group) {
+        for (const sourceMeasurement of source.lab.measurements) {
+            const measurement = cloneMeasurement(sourceMeasurement);
+            const measurementKey = buildMeasurementNameKey(measurement.name);
+            if (!measurementKey) {
+                continue;
+            }
+
+            const incomingDuplicateValues = measurement.duplicateValues?.map(cloneDuplicateValue) ?? [];
+            delete measurement.duplicateValues;
+
+            const existing = selected.get(measurementKey);
+            if (!existing) {
+                selected.set(measurementKey, {
+                    measurement,
+                    source,
+                    duplicateValues: dedupeDuplicateValues(incomingDuplicateValues),
+                });
+                continue;
+            }
+
+            const mergedDuplicateValues = dedupeDuplicateValues([
+                ...existing.duplicateValues,
+                buildDuplicateValueFromMeasurement({
+                    measurement: existing.measurement,
+                    source: existing.source,
+                }),
+                ...incomingDuplicateValues,
+            ]);
+
+            selected.set(measurementKey, {
+                measurement,
+                source,
+                duplicateValues: mergedDuplicateValues,
+            });
+        }
+    }
+
+    const mergedMeasurements = Array.from(selected.values())
+        .map(({ measurement, duplicateValues }) => {
+            if (duplicateValues.length === 0) {
+                return measurement;
+            }
+            return {
+                ...measurement,
+                duplicateValues,
+            };
+        })
+        .sort((left, right) => left.name.localeCompare(right.name));
+
+    return mergeUniqueMeasurements(mergedMeasurements);
+}
+
+function listBloodworkDataFiles(outputDirectory: string): BloodworkDataFile[] {
+    if (!fs.existsSync(outputDirectory)) {
+        return [];
+    }
+
+    const files: BloodworkDataFile[] = [];
+    for (const entry of fs.readdirSync(outputDirectory, { withFileTypes: true })) {
+        if (!entry.isFile() || !/^bloodwork_.*\.json$/i.test(entry.name)) {
+            continue;
+        }
+
+        const filePath = path.join(outputDirectory, entry.name);
+        const raw = JSON.parse(fs.readFileSync(filePath, 'utf8')) as unknown;
+        const parsed = bloodworkLabSchema.parse(raw);
+        files.push({
+            path: filePath,
+            fileName: entry.name,
+            lab: parsed,
+        });
+    }
+
+    return files.sort((left, right) => left.fileName.localeCompare(right.fileName));
+}
+
+function groupBloodworkDataFilesByDateWindow(files: BloodworkDataFile[]): BloodworkDataFile[][] {
+    if (files.length === 0) {
+        return [];
+    }
+
+    const sorted = [...files].sort((left, right) => {
+        const dateCompare = right.lab.date.localeCompare(left.lab.date);
+        if (dateCompare !== 0) {
+            return dateCompare;
+        }
+        return right.fileName.localeCompare(left.fileName);
+    });
+
+    const groups: BloodworkDataFile[][] = [];
+    let currentGroup: BloodworkDataFile[] = [];
+    let currentGroupLatestDate: string | null = null;
+
+    for (const file of sorted) {
+        if (!currentGroupLatestDate) {
+            currentGroup = [file];
+            currentGroupLatestDate = file.lab.date;
+            continue;
+        }
+
+        if (dateDifferenceInDays(currentGroupLatestDate, file.lab.date) <= MERGE_WINDOW_DAYS) {
+            currentGroup.push(file);
+            continue;
+        }
+
+        groups.push(currentGroup);
+        currentGroup = [file];
+        currentGroupLatestDate = file.lab.date;
+    }
+
+    if (currentGroup.length > 0) {
+        groups.push(currentGroup);
+    }
+
+    return groups.map(group =>
+        group.sort((left, right) => {
+            const dateCompare = left.lab.date.localeCompare(right.lab.date);
+            if (dateCompare !== 0) {
+                return dateCompare;
+            }
+            return left.fileName.localeCompare(right.fileName);
+        }));
+}
+
+function mergeBloodworkDataFileGroup(group: BloodworkDataFile[]): {
+    targetFileName: string;
+    lab: BloodworkLab;
+} {
+    if (group.length === 0) {
+        throw new Error('Cannot merge an empty bloodwork group');
+    }
+
+    const orderedGroup = [...group].sort((left, right) => {
+        const dateCompare = left.lab.date.localeCompare(right.lab.date);
+        if (dateCompare !== 0) {
+            return dateCompare;
+        }
+        return left.fileName.localeCompare(right.fileName);
+    });
+
+    let primary = orderedGroup[0]!;
+    for (const source of orderedGroup.slice(1)) {
+        if (compareSourceFreshness(source, primary) > 0) {
+            primary = source;
+        }
+    }
+
+    const mergedFrom = collectMergedFromEntries(orderedGroup);
+    const mergedLab = bloodworkLabSchema.parse({
+        date: primary.lab.date,
+        labName: primary.lab.labName,
+        location: primary.lab.location ?? pickLatestDefinedText(orderedGroup.map(item => item.lab.location)),
+        importLocation: primary.lab.importLocation ?? pickLatestDefinedText(orderedGroup.map(item => item.lab.importLocation)),
+        importLocationIsInferred:
+            primary.lab.importLocationIsInferred
+                ?? pickLatestDefinedBoolean(orderedGroup.map(item => item.lab.importLocationIsInferred)),
+        weightKg: primary.lab.weightKg ?? pickLatestDefinedNumber(orderedGroup.map(item => item.lab.weightKg)),
+        measurements: mergeMeasurementsForGroup(orderedGroup),
+        mergedFrom: mergedFrom.length > 1 ? mergedFrom : undefined,
+        notes: mergeNotes(orderedGroup),
+    });
+
+    return {
+        targetFileName: buildBloodworkFileName(mergedLab),
+        lab: mergedLab,
+    };
+}
+
+async function consolidateBloodworkDataFiles({
+    outputDirectory,
+    s3Client,
+    s3Bucket,
+    s3Prefix,
+}: {
+    outputDirectory: string;
+    s3Client: S3Client | null;
+    s3Bucket: string;
+    s3Prefix: string;
+}): Promise<ConsolidationSummary> {
+    const sourceFiles = listBloodworkDataFiles(outputDirectory);
+    const groups = groupBloodworkDataFilesByDateWindow(sourceFiles);
+    const summary: ConsolidationSummary = {
+        groupsProcessed: groups.length,
+        mergedGroups: 0,
+        filesBefore: sourceFiles.length,
+        filesAfter: sourceFiles.length,
+        writtenFiles: [],
+        removedFiles: [],
+        uploadedKeys: [],
+        deletedKeys: [],
+        groups: [],
+    };
+
+    if (groups.length === 0) {
+        return summary;
+    }
+
+    const uploads = new Map<string, string>();
+    const deletedFileNames = new Set<string>();
+
+    for (const group of groups) {
+        const { targetFileName, lab } = mergeBloodworkDataFileGroup(group);
+        const targetPath = path.join(outputDirectory, targetFileName);
+        const jsonPayload = `${JSON.stringify(lab, null, 4)}\n`;
+
+        const currentPayload = fs.existsSync(targetPath)
+            ? fs.readFileSync(targetPath, 'utf8')
+            : null;
+        if (currentPayload !== jsonPayload) {
+            fs.writeFileSync(targetPath, jsonPayload, 'utf8');
+            summary.writtenFiles.push(targetPath);
+            uploads.set(targetFileName, jsonPayload);
+        }
+
+        if (group.length > 1) {
+            summary.mergedGroups += 1;
+        }
+        summary.groups.push({
+            targetFileName,
+            latestDate: lab.date,
+            sourceFileNames: group.map(item => item.fileName),
+            sourceDates: group.map(item => item.lab.date),
+        });
+
+        for (const source of group) {
+            if (source.fileName === targetFileName) {
+                continue;
+            }
+            if (!fs.existsSync(source.path)) {
+                continue;
+            }
+            fs.unlinkSync(source.path);
+            summary.removedFiles.push(source.path);
+            deletedFileNames.add(source.fileName);
+        }
+    }
+
+    if (s3Client) {
+        for (const [fileName, jsonPayload] of uploads.entries()) {
+            const key = buildS3KeyFromFileName(fileName, s3Prefix);
+            await s3Client.send(
+                new PutObjectCommand({
+                    Bucket: s3Bucket,
+                    Key: key,
+                    Body: jsonPayload,
+                    ContentType: 'application/json; charset=utf-8',
+                }),
+            );
+            summary.uploadedKeys.push(key);
+        }
+
+        for (const removedFileName of deletedFileNames) {
+            const key = buildS3KeyFromFileName(removedFileName, s3Prefix);
+            await s3Client.send(
+                new DeleteObjectCommand({
+                    Bucket: s3Bucket,
+                    Key: key,
+                }),
+            );
+            summary.deletedKeys.push(key);
+        }
+    }
+
+    summary.filesAfter = listBloodworkDataFiles(outputDirectory).length;
+    return summary;
+}
+
 function buildS3KeyFromFileName(fileName: string, prefix: string): string {
     const normalizedPrefix = prefix.replace(/^\/+|\/+$/g, '');
     return normalizedPrefix ? `${normalizedPrefix}/${fileName}` : fileName;
@@ -3604,14 +4260,48 @@ function createS3ClientIfNeeded(options: {
 
 async function runBloodworkImporter(argv: string[] = process.argv.slice(2)): Promise<void> {
     const options = parseCliOptions(argv);
+    const { s3Client, s3Bucket, s3Prefix } = createS3ClientIfNeeded({
+        skipUpload: options.skipUpload,
+    });
+
+    if (options.mergeExistingOnly) {
+        const consolidation = await consolidateBloodworkDataFiles({
+            outputDirectory: DEFAULT_OUTPUT_DIRECTORY,
+            s3Client,
+            s3Bucket,
+            s3Prefix,
+        });
+
+        console.info(`Consolidated ${consolidation.filesBefore} file(s) into ${consolidation.filesAfter} file(s)`);
+        console.info(`Merged groups: ${consolidation.mergedGroups}/${consolidation.groupsProcessed}`);
+        if (consolidation.groups.length > 0) {
+            for (const group of consolidation.groups) {
+                if (group.sourceFileNames.length < 2) {
+                    continue;
+                }
+                console.info(
+                    [
+                        `Merged ${group.sourceFileNames.length} files into ${group.targetFileName}`,
+                        `latest date ${group.latestDate}`,
+                        `sources: ${group.sourceFileNames.join(', ')}`,
+                    ].join(' | '),
+                );
+            }
+        }
+        if (consolidation.uploadedKeys.length > 0) {
+            console.info(`Uploaded ${consolidation.uploadedKeys.length} consolidated file(s)`);
+        }
+        if (consolidation.deletedKeys.length > 0) {
+            console.info(`Deleted ${consolidation.deletedKeys.length} stale S3 object(s)`);
+        }
+        return;
+    }
+
     const openRouterApiKey = requireEnv('OPENROUTER_API_KEY');
     const modelIds = resolveModelIds(options.modelIds);
     const files = resolveInputFiles(options);
     const glossaryPath = process.env.VITALS_BLOODWORK_GLOSSARY_PATH?.trim() || DEFAULT_GLOSSARY_PATH;
     const glossary = loadBloodworkGlossary(glossaryPath);
-    const { s3Client, s3Bucket, s3Prefix } = createS3ClientIfNeeded({
-        skipUpload: options.skipUpload,
-    });
 
     console.info(`Importing ${files.length} file(s)`);
     console.info(`Model candidates: ${modelIds.join(', ')}`);
@@ -3660,6 +4350,36 @@ async function runBloodworkImporter(argv: string[] = process.argv.slice(2)): Pro
         const failedFiles = failures.map(item => item.file).join('\n');
         throw new Error(`Import failures:\n${failedFiles}`);
     }
+
+    const consolidation = await consolidateBloodworkDataFiles({
+        outputDirectory: DEFAULT_OUTPUT_DIRECTORY,
+        s3Client,
+        s3Bucket,
+        s3Prefix,
+    });
+    console.info(
+        `Consolidated ${consolidation.filesBefore} file(s) into ${consolidation.filesAfter} file(s)`,
+    );
+    if (consolidation.mergedGroups > 0) {
+        for (const group of consolidation.groups) {
+            if (group.sourceFileNames.length < 2) {
+                continue;
+            }
+            console.info(
+                [
+                    `Merged ${group.sourceFileNames.length} files into ${group.targetFileName}`,
+                    `latest date ${group.latestDate}`,
+                    `sources: ${group.sourceFileNames.join(', ')}`,
+                ].join(' | '),
+            );
+        }
+    }
+    if (consolidation.uploadedKeys.length > 0) {
+        console.info(`Uploaded ${consolidation.uploadedKeys.length} consolidated file(s)`);
+    }
+    if (consolidation.deletedKeys.length > 0) {
+        console.info(`Deleted ${consolidation.deletedKeys.length} stale S3 object(s)`);
+    }
 }
 
 export {
@@ -3669,6 +4389,8 @@ export {
     normalizeModelOutput,
     filterLikelyMeasurements,
     standardizeMeasurementUnits,
+    groupBloodworkDataFilesByDateWindow,
+    mergeBloodworkDataFileGroup,
     isEnglishGlossaryName,
     normalizeGlossaryDecisionAction,
     resolveModelIds,

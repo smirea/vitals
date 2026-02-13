@@ -135,6 +135,18 @@ export const bloodworkReferenceRangeSchema = z
         { message: 'referenceRange must contain at least one bound' },
     );
 
+export const bloodworkMeasurementDuplicateValueSchema = z.object({
+    date: z.string().trim().min(1).transform(normalizeIsoDate),
+    value: z.union([z.number().finite(), z.string().trim().min(1)]).optional(),
+    unit: z.string().trim().min(1).optional(),
+    referenceRange: bloodworkReferenceRangeSchema.optional(),
+    flag: bloodworkMeasurementFlagSchema.optional(),
+    note: z.string().trim().min(1).optional(),
+    sourceFile: z.string().trim().min(1).optional(),
+    sourceLabName: z.string().trim().min(1).optional(),
+    importLocation: z.string().trim().min(1).optional(),
+});
+
 export const bloodworkMeasurementSchema = z.object({
     name: z.string().trim().min(1),
     originalName: z.string().trim().min(1).optional(),
@@ -147,9 +159,18 @@ export const bloodworkMeasurementSchema = z.object({
         unit: z.string().trim().min(1).optional(),
         referenceRange: bloodworkReferenceRangeSchema.optional(),
     }).optional(),
+    duplicateValues: z.array(bloodworkMeasurementDuplicateValueSchema).min(1).optional(),
     flag: bloodworkMeasurementFlagSchema.optional(),
     note: z.string().trim().min(1).optional(),
     notes: z.string().trim().min(1).optional(),
+});
+
+export const bloodworkMergedSourceSchema = z.object({
+    fileName: z.string().trim().min(1),
+    date: z.string().trim().min(1).transform(normalizeIsoDate),
+    labName: z.string().trim().min(1),
+    importLocation: z.string().trim().min(1).optional(),
+    measurementCount: z.number().int().nonnegative().optional(),
 });
 
 export const bloodworkLabSchema = z.object({
@@ -160,11 +181,14 @@ export const bloodworkLabSchema = z.object({
     importLocationIsInferred: z.boolean().optional(),
     weightKg: z.number().positive().finite().optional(),
     measurements: z.array(bloodworkMeasurementSchema).min(1),
+    mergedFrom: z.array(bloodworkMergedSourceSchema).min(1).optional(),
     notes: z.string().trim().min(1).optional(),
 });
 
 export type BloodworkMeasurement = z.infer<typeof bloodworkMeasurementSchema>;
 export type BloodworkLab = z.infer<typeof bloodworkLabSchema>;
+export type BloodworkMeasurementDuplicateValue = z.infer<typeof bloodworkMeasurementDuplicateValueSchema>;
+export type BloodworkMergedSource = z.infer<typeof bloodworkMergedSourceSchema>;
 
 export function slugifyForPath(value: string): string {
     const stripped = value

@@ -38,6 +38,30 @@ describe('bloodworkLabSchema', () => {
         expect(payload.date).toBe('2025-08-29');
         expect(payload.measurements).toHaveLength(1);
     });
+
+    test('accepts merged provenance metadata', () => {
+        const payload = bloodworkLabSchema.parse({
+            date: '2025-08-29',
+            labName: 'Muenchen Lab',
+            measurements: [{
+                name: 'Hemoglobin',
+                value: 14.1,
+            }],
+            mergedFrom: [{
+                fileName: 'bloodwork_2025-08-27_muenchen-lab.json',
+                date: '27.08.2025',
+                labName: 'Muenchen Lab',
+                measurementCount: 12,
+            }],
+        });
+
+        expect(payload.mergedFrom).toEqual([{
+            fileName: 'bloodwork_2025-08-27_muenchen-lab.json',
+            date: '2025-08-27',
+            labName: 'Muenchen Lab',
+            measurementCount: 12,
+        }]);
+    });
 });
 
 describe('bloodworkReferenceRangeSchema', () => {
@@ -109,6 +133,35 @@ describe('measurement note support', () => {
                 max: 5.5,
             },
         });
+    });
+
+    test('accepts duplicate measurement value history', () => {
+        const payload = bloodworkLabSchema.parse({
+            date: '2025-08-29',
+            labName: 'Muenchen Lab',
+            measurements: [{
+                name: 'Glucose',
+                value: 102,
+                unit: 'mg/dL',
+                duplicateValues: [
+                    {
+                        date: '2025/08/27',
+                        value: 99,
+                        unit: 'mg/dL',
+                        sourceFile: 'bloodwork_2025-08-27_muenchen-lab.json',
+                    },
+                ],
+            }],
+        });
+
+        expect(payload.measurements[0]?.duplicateValues).toEqual([
+            {
+                date: '2025-08-27',
+                value: 99,
+                unit: 'mg/dL',
+                sourceFile: 'bloodwork_2025-08-27_muenchen-lab.json',
+            },
+        ]);
     });
 });
 

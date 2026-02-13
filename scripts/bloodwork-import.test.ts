@@ -3,12 +3,17 @@ import { describe, expect, test } from 'bun:test';
 import {
     assertPdfSignature,
     filterLikelyMeasurements,
+    groupBloodworkDataFilesByDateWindow,
     isEnglishGlossaryName,
+    mergeBloodworkDataFileGroup,
     normalizeGlossaryDecisionAction,
     parseCliOptions,
     resolveModelIds,
     standardizeMeasurementUnits,
 } from './bloodwork-import.ts';
+import { bloodworkLabSchema } from './bloodwork-schema.ts';
+
+type MergeInputFile = Parameters<typeof groupBloodworkDataFilesByDateWindow>[0][number];
 
 describe('parseCliOptions', () => {
     test('parses single file mode', () => {
@@ -25,10 +30,20 @@ describe('parseCliOptions', () => {
         expect(options.modelIds).toEqual(['google/gemini-3-flash']);
     });
 
+    test('parses merge-existing mode', () => {
+        const options = parseCliOptions(['--merge-existing', '--skip-upload']);
+        expect(options.mergeExistingOnly).toBe(true);
+        expect(options.importAll).toBe(false);
+        expect(options.inputPdfPath).toBeNull();
+        expect(options.skipUpload).toBe(true);
+    });
+
     test('rejects invalid combinations', () => {
         expect(() => parseCliOptions(['--all', 'file.pdf'])).toThrow();
         expect(() => parseCliOptions(['--continue-on-error', 'file.pdf'])).toThrow();
         expect(() => parseCliOptions([])).toThrow();
+        expect(() => parseCliOptions(['--merge-existing', '--all'])).toThrow();
+        expect(() => parseCliOptions(['--merge-existing', '--model', 'google/gemini-3-flash'])).toThrow();
     });
 });
 
@@ -195,5 +210,135 @@ describe('standardizeMeasurementUnits', () => {
         expect(measurement?.unit).toBe('mmol/L');
         expect(measurement?.value).toBe('Negative');
         expect(measurement?.original).toBeUndefined();
+    });
+});
+
+function makeMergeInputFile(input: {
+    fileName: string;
+    date: string;
+    labName: string;
+    measurements: Array<Record<string, unknown>>;
+    notes?: string;
+}): MergeInputFile {
+    return {
+        path: `/tmp/${input.fileName}`,
+        fileName: input.fileName,
+        lab: bloodworkLabSchema.parse({
+            date: input.date,
+            labName: input.labName,
+            importLocation: input.fileName,
+            measurements: input.measurements,
+            notes: input.notes,
+        }),
+    };
+}
+
+describe('groupBloodworkDataFilesByDateWindow', () => {
+    test('groups by proximity to latest date in each cluster', () => {
+        const groups = groupBloodworkDataFilesByDateWindow([
+            makeMergeInputFile({
+                fileName: 'bloodwork_2026-01-20_lab-a.json',
+                date: '2026-01-20',
+                labName: 'Lab A',
+                measurements: [{ name: 'Glucose', value: 95 }],
+            }),
+            makeMergeInputFile({
+                fileName: 'bloodwork_2026-01-14_lab-b.json',
+                date: '2026-01-14',
+                labName: 'Lab B',
+                measurements: [{ name: 'Glucose', value: 92 }],
+            }),
+            makeMergeInputFile({
+                fileName: 'bloodwork_2026-01-12_lab-c.json',
+                date: '2026-01-12',
+                labName: 'Lab C',
+                measurements: [{ name: 'Glucose', value: 90 }],
+            }),
+        ]);
+
+        expect(groups).toHaveLength(2);
+        expect(groups[0]?.map(item => item.fileName)).toEqual([
+            'bloodwork_2026-01-14_lab-b.json',
+            'bloodwork_2026-01-20_lab-a.json',
+        ]);
+        expect(groups[1]?.map(item => item.fileName)).toEqual([
+            'bloodwork_2026-01-12_lab-c.json',
+        ]);
+    });
+});
+
+describe('mergeBloodworkDataFileGroup', () => {
+    test('keeps latest measurement values and records replaced values as duplicate history', () => {
+        const group = [
+            makeMergeInputFile({
+                fileName: 'bloodwork_2026-01-14_lab-a.json',
+                date: '2026-01-14',
+                labName: 'Lab A',
+                measurements: [
+                    {
+                        name: 'Glucose',
+                        value: 90,
+                        unit: 'mg/dL',
+                    },
+                    {
+                        name: 'Hemoglobin',
+                        value: 14.1,
+                        unit: 'g/dL',
+                    },
+                ],
+                notes: 'Older run',
+            }),
+            makeMergeInputFile({
+                fileName: 'bloodwork_2026-01-20_lab-b.json',
+                date: '2026-01-20',
+                labName: 'Lab B',
+                measurements: [
+                    {
+                        name: 'Glucose',
+                        value: 96,
+                        unit: 'mg/dL',
+                        duplicateValues: [{
+                            date: '2026-01-19',
+                            value: 94,
+                            unit: 'mg/dL',
+                        }],
+                    },
+                    {
+                        name: 'Hemoglobin',
+                        value: 13.8,
+                        unit: 'g/dL',
+                    },
+                ],
+                notes: 'Latest run',
+            }),
+        ];
+
+        const merged = mergeBloodworkDataFileGroup(group);
+
+        expect(merged.targetFileName).toBe('bloodwork_2026-01-20_lab-b.json');
+        expect(merged.lab.date).toBe('2026-01-20');
+        expect(merged.lab.labName).toBe('Lab B');
+        expect(merged.lab.mergedFrom?.map(entry => entry.fileName)).toEqual([
+            'bloodwork_2026-01-14_lab-a.json',
+            'bloodwork_2026-01-20_lab-b.json',
+        ]);
+
+        const glucose = merged.lab.measurements.find(item => item.name === 'Glucose');
+        expect(glucose?.value).toBe(96);
+        expect(glucose?.duplicateValues).toEqual([
+            {
+                date: '2026-01-14',
+                value: 90,
+                unit: 'mg/dL',
+                sourceFile: 'bloodwork_2026-01-14_lab-a.json',
+                sourceLabName: 'Lab A',
+                importLocation: 'bloodwork_2026-01-14_lab-a.json',
+            },
+            {
+                date: '2026-01-19',
+                value: 94,
+                unit: 'mg/dL',
+            },
+        ]);
     });
 });

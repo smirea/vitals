@@ -11,6 +11,7 @@ Pick the next most important feature to work on, implement it fully and test it 
     - [x] `scripts/bloodwork-import.ts` accepts a pdf as input, uses AI (gemini 3 flash via ai sdk + openrouter) to convert it to a standardized json template that includes date, location, lab name, import location (optional, flag), weight and the table of all standardized measurements. for each measurement capture value, ranges, flags, notes etc. store all the parsed data as `data/bloodwork_{date}_{lab}.json` pretty json 4 spaces
     - [x] account for the bloodwork being in different languages and vastly different formats output must be standardized and in engligh
     - [x] when processing the data, also standardize the units, I want all the values to be the same for the same measurements. if a unit needs conversion, store an "original" value on it for reference.
+    - [x] merge bloodwork files with dates within 7 days into the latest date file, keep provenance of merged sources, and preserve replaced measurement values in `duplicateValues`
     - [x] all data must also be uploaded to s3 in `stefan-life/vitals/bloodwork_{date}_{lab}.json` bucket location
     - [x] all my existing labs are in `data/to-import`, use them for testing and to get a sense of various potential formats. create a standard `BloodworkLab` zod type and use that as the basis for the various tools and enforce the json be in that shape. a lot of the properties will have to be optional most likely
     - [x] once everything is working and tested, import all data from `data/to-import`
@@ -43,6 +44,7 @@ Pick the next most important feature to work on, implement it fully and test it 
 - Importer now maintains `server/src/bloodwork-glossary.json` with canonical measurement names, aliases, and known ranges; glossary updates happen automatically during import runs.
 - Unknown glossary names go through a second-pass validator prompt that enforces english-only canonical names and aliases before entries are accepted.
 - Importer standardizes measurement units for key analytes; when a numeric unit conversion is applied it preserves pre-conversion data in `measurement.original` (`value`, `unit`, `referenceRange`).
+- Importer consolidates bloodwork JSON files within a 7-day window into the latest-dated file, records contributing files in `mergedFrom`, and stores superseded measurement readings in `measurement.duplicateValues`.
 - Starred dashboard measurements are saved under `localStorage` key `vitals.starred.measurements`; starred names are bold and sorted to the top of the table.
 - Dashboard table cells now render reference ranges visually with a track, min/max bounds, and the observed value marker when numeric range data is available.
 
