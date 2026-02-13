@@ -1,3 +1,5 @@
+see `PROJECT.md` for detailed info. when asked to implement new features, update the project file if needed
+
 # Stack
 - Tooling: Bun + TypeScript
 - Server: Bun.serve API
