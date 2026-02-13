@@ -10,10 +10,28 @@ export type BloodworkMeasurement = {
     };
     flag?: 'low' | 'high' | 'normal' | 'abnormal' | 'critical' | 'unknown';
     note?: string;
+    reviewStatus?: 'accepted' | 'needs_review';
+    confidence?: number;
+    provenance?: Array<{
+        extractor: 'layout_text' | 'textract' | 'llm_normalizer';
+        page: number;
+        rawName?: string;
+        rawValue?: string;
+        rawUnit?: string;
+        rawRange?: string;
+        confidence?: number;
+    }>;
+    conflict?: {
+        reason: string;
+        candidateCount: number;
+    };
 };
 
 export type BloodworkLab = {
     date: string;
+    collectionDate?: string;
+    reportedDate?: string;
+    receivedDate?: string;
     labName: string;
     location?: string;
     importLocation?: string;
@@ -21,6 +39,10 @@ export type BloodworkLab = {
     weightKg?: number;
     measurements: BloodworkMeasurement[];
     notes?: string;
+    reviewSummary?: {
+        unresolvedCount: number;
+        reportFile?: string;
+    };
 };
 
 export type ApiResponse = {

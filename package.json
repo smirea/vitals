@@ -6,6 +6,7 @@
         "test": "bun test",
         "perf:client:dev": "bun run scripts/client-perf.ts --url http://localhost:3000 --runs 10 --threshold 250",
         "bloodwork:import": "bun run --env-file .env --env-file .env.local scripts/bloodwork-import.ts",
+        "bloodwork:backfill": "bun run --env-file .env --env-file .env.local scripts/bloodwork-import.ts --all --continue-on-error --review-report-dir data/review",
         "data:sync": "bun run --env-file .env --env-file .env.local scripts/download-data.ts",
         "server:dev": "bun run --elide-lines 0 --no-clear-screen --install fallback --env-file .env --env-file .env.local --filter server dev",
         "client:dev": "bun run --elide-lines 0 --no-clear-screen --install fallback --env-file .env --env-file .env.local --filter client dev",
@@ -14,6 +15,7 @@
     "dependencies": {
         "@ant-design/icons": "^6.1.0",
         "@aws-sdk/client-s3": "^3.988.0",
+        "@aws-sdk/client-textract": "^3.988.0",
         "@openrouter/ai-sdk-provider": "^2.2.3",
         "@phosphor-icons/react": "^2.1.10",
         "@tailwindcss/vite": "^4.1.18",

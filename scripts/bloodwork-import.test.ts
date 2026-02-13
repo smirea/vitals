@@ -2,12 +2,16 @@ import { describe, expect, test } from 'bun:test';
 
 import {
     assertPdfSignature,
+    extractDateCandidatesFromText,
     filterLikelyMeasurements,
     groupBloodworkDataFilesByDateWindow,
     isEnglishGlossaryName,
     mergeBloodworkDataFileGroup,
     normalizeGlossaryDecisionAction,
+    parseNumericValueToken,
     parseCliOptions,
+    resolveCanonicalLabDate,
+    resolveMeasurementCandidates,
     resolveModelIds,
     standardizeMeasurementUnits,
 } from './bloodwork-import.ts';
@@ -38,12 +42,37 @@ describe('parseCliOptions', () => {
         expect(options.skipUpload).toBe(true);
     });
 
+    test('parses review workflow flags', () => {
+        const options = parseCliOptions([
+            'data/to-import/example.pdf',
+            '--allow-unresolved',
+            '--review-report-dir',
+            'tmp/review',
+            '--textract-fallback',
+        ]);
+        expect(options.allowUnresolved).toBe(true);
+        expect(options.enableTextractFallback).toBe(true);
+        expect(options.reviewReportDir.endsWith('tmp/review')).toBe(true);
+    });
+
+    test('parses approve-review mode', () => {
+        const options = parseCliOptions([
+            '--approve-review',
+            'data/review/report.json',
+            '--skip-upload',
+        ]);
+        expect(options.approveReviewPath?.endsWith('data/review/report.json')).toBe(true);
+        expect(options.inputPdfPath).toBeNull();
+        expect(options.skipUpload).toBe(true);
+    });
+
     test('rejects invalid combinations', () => {
         expect(() => parseCliOptions(['--all', 'file.pdf'])).toThrow();
         expect(() => parseCliOptions(['--continue-on-error', 'file.pdf'])).toThrow();
         expect(() => parseCliOptions([])).toThrow();
         expect(() => parseCliOptions(['--merge-existing', '--all'])).toThrow();
         expect(() => parseCliOptions(['--merge-existing', '--model', 'google/gemini-3-flash'])).toThrow();
+        expect(() => parseCliOptions(['--approve-review', 'report.json', '--all'])).toThrow();
     });
 });
 
@@ -210,6 +239,98 @@ describe('standardizeMeasurementUnits', () => {
         expect(measurement?.unit).toBe('mmol/L');
         expect(measurement?.value).toBe('Negative');
         expect(measurement?.original).toBeUndefined();
+    });
+});
+
+describe('parseNumericValueToken', () => {
+    test('rejects partial numeric fragments', () => {
+        expect(parseNumericValueToken('1 90')).toBe('1 90');
+        expect(parseNumericValueToken('abc 123')).toBe('abc 123');
+    });
+
+    test('accepts strict numeric tokens', () => {
+        expect(parseNumericValueToken('190')).toBe(190);
+        expect(parseNumericValueToken('190.5')).toBe(190.5);
+    });
+});
+
+describe('extractDateCandidatesFromText + resolveCanonicalLabDate', () => {
+    test('prefers collection date when present', () => {
+        const text = [
+            'Date/Time Collected Date Entered Reported',
+            '2017-11-02 2017-11-03 2017-11-03',
+            'Received on 11/03/2017',
+        ].join('\n');
+        const dates = extractDateCandidatesFromText(text);
+        expect(dates.collectionDate).toBe('2017-11-02');
+        expect(dates.reportedDate).toBe('2017-11-03');
+        expect(dates.receivedDate).toBe('2017-11-03');
+        expect(resolveCanonicalLabDate({
+            collectionDate: dates.collectionDate,
+            reportedDate: dates.reportedDate,
+            receivedDate: dates.receivedDate,
+            fallbackDate: '2017-11-09',
+        })).toBe('2017-11-02');
+    });
+});
+
+describe('resolveMeasurementCandidates', () => {
+    test('selects higher confidence chol/hdl candidate and keeps alternate in duplicateValues', () => {
+        const result = resolveMeasurementCandidates({
+            candidates: [
+                {
+                    name: 'Cholesterol/HDL Ratio',
+                    value: 2,
+                    referenceRange: {
+                        max: 100,
+                    },
+                },
+                {
+                    name: 'Cholesterol/HDL Ratio',
+                    value: 6.4,
+                    unit: 'calc',
+                    referenceRange: {
+                        max: 5,
+                    },
+                },
+            ],
+            measurementDate: '2017-11-02',
+            glossaryLookup: new Map(),
+        });
+
+        expect(result.measurements).toHaveLength(1);
+        expect(result.measurements[0]?.value).toBe(6.4);
+        expect(result.measurements[0]?.duplicateValues?.[0]?.value).toBe(2);
+    });
+
+    test('marks low-margin ties as needs_review', () => {
+        const result = resolveMeasurementCandidates({
+            candidates: [
+                {
+                    name: 'WBC',
+                    value: 7.2,
+                    unit: 'Thous/mcL',
+                    referenceRange: {
+                        min: 3.8,
+                        max: 10.8,
+                    },
+                },
+                {
+                    name: 'WBC',
+                    value: 7.1,
+                    unit: 'Thous/mcL',
+                    referenceRange: {
+                        min: 3.8,
+                        max: 10.8,
+                    },
+                },
+            ],
+            measurementDate: '2026-01-20',
+            glossaryLookup: new Map(),
+        });
+
+        expect(result.measurements[0]?.reviewStatus).toBe('needs_review');
+        expect(result.conflicts.length).toBeGreaterThan(0);
     });
 });
 

@@ -74,6 +74,11 @@ export const bloodworkMeasurementFlagSchema = z.enum([
     'unknown',
 ]);
 
+export const bloodworkMeasurementReviewStatusSchema = z.enum([
+    'accepted',
+    'needs_review',
+]);
+
 function parseRangeNumber(raw: string): number | undefined {
     const parsed = Number.parseFloat(raw.replace(/[<>]/g, '').replace(',', '.').trim());
     return Number.isFinite(parsed) ? parsed : undefined;
@@ -147,6 +152,25 @@ export const bloodworkMeasurementDuplicateValueSchema = z.object({
     importLocation: z.string().trim().min(1).optional(),
 });
 
+export const bloodworkMeasurementProvenanceSchema = z.object({
+    extractor: z.enum([
+        'layout_text',
+        'textract',
+        'llm_normalizer',
+    ]),
+    page: z.number().int().positive(),
+    rawName: z.string().trim().min(1).optional(),
+    rawValue: z.string().trim().min(1).optional(),
+    rawUnit: z.string().trim().min(1).optional(),
+    rawRange: z.string().trim().min(1).optional(),
+    confidence: z.number().finite().min(0).max(1).optional(),
+});
+
+export const bloodworkMeasurementConflictSchema = z.object({
+    reason: z.string().trim().min(1),
+    candidateCount: z.number().int().nonnegative(),
+});
+
 export const bloodworkMeasurementSchema = z.object({
     name: z.string().trim().min(1),
     originalName: z.string().trim().min(1).optional(),
@@ -163,6 +187,10 @@ export const bloodworkMeasurementSchema = z.object({
     flag: bloodworkMeasurementFlagSchema.optional(),
     note: z.string().trim().min(1).optional(),
     notes: z.string().trim().min(1).optional(),
+    reviewStatus: bloodworkMeasurementReviewStatusSchema.optional(),
+    confidence: z.number().finite().min(0).max(1).optional(),
+    provenance: z.array(bloodworkMeasurementProvenanceSchema).min(1).optional(),
+    conflict: bloodworkMeasurementConflictSchema.optional(),
 });
 
 export const bloodworkMergedSourceSchema = z.object({
@@ -175,6 +203,9 @@ export const bloodworkMergedSourceSchema = z.object({
 
 export const bloodworkLabSchema = z.object({
     date: z.string().trim().min(1).transform(normalizeIsoDate),
+    collectionDate: z.string().trim().min(1).transform(normalizeIsoDate).optional(),
+    reportedDate: z.string().trim().min(1).transform(normalizeIsoDate).optional(),
+    receivedDate: z.string().trim().min(1).transform(normalizeIsoDate).optional(),
     labName: z.string().trim().min(1),
     location: z.string().trim().min(1).optional(),
     importLocation: z.string().trim().min(1).optional(),
@@ -183,12 +214,17 @@ export const bloodworkLabSchema = z.object({
     measurements: z.array(bloodworkMeasurementSchema).min(1),
     mergedFrom: z.array(bloodworkMergedSourceSchema).min(1).optional(),
     notes: z.string().trim().min(1).optional(),
+    reviewSummary: z.object({
+        unresolvedCount: z.number().int().nonnegative(),
+        reportFile: z.string().trim().min(1).optional(),
+    }).optional(),
 });
 
 export type BloodworkMeasurement = z.infer<typeof bloodworkMeasurementSchema>;
 export type BloodworkLab = z.infer<typeof bloodworkLabSchema>;
 export type BloodworkMeasurementDuplicateValue = z.infer<typeof bloodworkMeasurementDuplicateValueSchema>;
 export type BloodworkMergedSource = z.infer<typeof bloodworkMergedSourceSchema>;
+export type BloodworkMeasurementProvenance = z.infer<typeof bloodworkMeasurementProvenanceSchema>;
 
 export function slugifyForPath(value: string): string {
     const stripped = value

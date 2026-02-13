@@ -2,6 +2,7 @@ import fs from 'fs';
 import { spawnSync } from 'child_process';
 import path from 'path';
 
+import { AnalyzeDocumentCommand, TextractClient } from '@aws-sdk/client-textract';
 import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { generateObject, generateText } from 'ai';
@@ -34,6 +35,7 @@ const DEFAULT_GLOSSARY_VALIDATOR_MODEL_IDS = ['google/gemini-3-flash-preview'];
 const DEFAULT_TO_IMPORT_DIRECTORY = PROJECT_TO_IMPORT_DIR;
 const DEFAULT_OUTPUT_DIRECTORY = PROJECT_DATA_DIR;
 const DEFAULT_GLOSSARY_PATH = PROJECT_GLOSSARY_PATH;
+const DEFAULT_REVIEW_REPORT_DIRECTORY = path.join(PROJECT_DATA_DIR, 'review');
 const MERGE_WINDOW_DAYS = 7;
 const EXTRACTED_TEXT_LIMIT = 45_000;
 const MODEL_MAX_OUTPUT_TOKENS = 1_400;
@@ -44,6 +46,9 @@ const MODEL_REQUEST_TIMEOUT_MS = 30_000;
 const MAX_MEASUREMENTS_PER_PAGE = 120;
 const MAX_NORMALIZATION_CANDIDATES = 320;
 const MAX_GLOSSARY_DECISIONS = 64;
+const RESOLUTION_MIN_CONFIDENCE = 0.85;
+const RESOLUTION_MIN_MARGIN = 0.1;
+const TEXTRACT_MIN_LAYOUT_CANDIDATES = 8;
 
 type CliOptions = {
     importAll: boolean;
@@ -52,12 +57,18 @@ type CliOptions = {
     skipUpload: boolean;
     modelIds: string[];
     mergeExistingOnly: boolean;
+    allowUnresolved: boolean;
+    reviewReportDir: string;
+    approveReviewPath: string | null;
+    enableTextractFallback: boolean;
 };
 
 type ImportResult = {
-    outputPath: string;
+    outputPath: string | null;
     s3Key: string | null;
     modelId: string;
+    reviewReportPath?: string;
+    unresolvedCount?: number;
 };
 
 type BloodworkDataFile = {
@@ -94,6 +105,43 @@ type ConsolidationSummary = {
 type ExtractedPdfText = {
     fullText: string;
     pageTexts: string[];
+};
+
+type ScoredMeasurementCandidate = {
+    measurement: BloodworkMeasurement;
+    score: number;
+    scoreBreakdown: string[];
+};
+
+type MeasurementConflictCandidate = {
+    score: number;
+    scoreBreakdown: string[];
+    measurement: BloodworkMeasurement;
+};
+
+type MeasurementConflict = {
+    measurementNameKey: string;
+    measurementName: string;
+    reason: string;
+    candidateCount: number;
+    recommendedCandidateIndex: number;
+    selectedCandidateIndex?: number;
+    candidates: MeasurementConflictCandidate[];
+};
+
+type MeasurementResolutionResult = {
+    measurements: BloodworkMeasurement[];
+    conflicts: MeasurementConflict[];
+};
+
+type ReviewReport = {
+    version: 1;
+    generatedAt: string;
+    sourcePdfPath: string;
+    suggestedOutputFileName: string;
+    unresolvedCount: number;
+    conflicts: MeasurementConflict[];
+    labDraft: BloodworkLab;
 };
 
 const NON_MEASUREMENT_NAME_EXACT = new Set([
@@ -394,7 +442,10 @@ const GLOSSARY_FALLBACK_REJECT_PATTERN =
     /\b(?:page|result|desired|desirable|reference|range|guideline|comment|note|customer|service|therapy|study|specificity|sensitivity|mirea|patient|account|code|source|marker|axis|cbc)\b/i;
 
 const bloodworkMetadataSchema = z.object({
-    date: z.string().trim().min(1).transform(normalizeIsoDate),
+    date: z.string().trim().min(1).transform(normalizeIsoDate).optional(),
+    collectionDate: z.string().trim().min(1).transform(normalizeIsoDate).optional(),
+    reportedDate: z.string().trim().min(1).transform(normalizeIsoDate).optional(),
+    receivedDate: z.string().trim().min(1).transform(normalizeIsoDate).optional(),
     labName: z.string().trim().min(1),
     location: z.string().trim().min(1).optional(),
     importLocation: z.string().trim().min(1).optional(),
@@ -449,6 +500,32 @@ const glossaryValidationBatchSchema = z.object({
     decisions: z.array(glossaryValidationDecisionSchema).max(MAX_GLOSSARY_DECISIONS),
 });
 
+const reviewConflictCandidateSchema = z.object({
+    score: z.number().finite().min(0).max(1),
+    scoreBreakdown: z.array(z.string().trim().min(1)),
+    measurement: bloodworkMeasurementSchema,
+});
+
+const reviewConflictSchema = z.object({
+    measurementNameKey: z.string().trim().min(1),
+    measurementName: z.string().trim().min(1),
+    reason: z.string().trim().min(1),
+    candidateCount: z.number().int().nonnegative(),
+    recommendedCandidateIndex: z.number().int().nonnegative(),
+    selectedCandidateIndex: z.number().int().nonnegative().optional(),
+    candidates: z.array(reviewConflictCandidateSchema).min(1),
+});
+
+const reviewReportSchema = z.object({
+    version: z.literal(1),
+    generatedAt: z.string().trim().min(1),
+    sourcePdfPath: z.string().trim().min(1),
+    suggestedOutputFileName: z.string().trim().min(1),
+    unresolvedCount: z.number().int().nonnegative(),
+    conflicts: z.array(reviewConflictSchema),
+    labDraft: bloodworkLabSchema,
+});
+
 type BloodworkGlossary = z.infer<typeof bloodworkGlossarySchema>;
 type BloodworkGlossaryEntry = z.infer<typeof bloodworkGlossaryEntrySchema>;
 type GlossaryDecisionAction = 'alias' | 'new_valid' | 'invalid';
@@ -474,16 +551,21 @@ const GLOSSARY_NEW_VALID_ACTION_KEYS = new Set([
 
 const HELP_TEXT = [
     'Usage:',
-    '  bun scripts/bloodwork-import.ts <path-to-pdf> [--skip-upload] [--model <openrouter-model-id>]',
-    '  bun scripts/bloodwork-import.ts --all [--continue-on-error] [--skip-upload] [--model <openrouter-model-id>]',
+    '  bun scripts/bloodwork-import.ts <path-to-pdf> [--skip-upload] [--model <openrouter-model-id>] [--allow-unresolved]',
+    '  bun scripts/bloodwork-import.ts --all [--continue-on-error] [--skip-upload] [--model <openrouter-model-id>] [--allow-unresolved]',
     '  bun scripts/bloodwork-import.ts --merge-existing [--skip-upload]',
+    '  bun scripts/bloodwork-import.ts --approve-review <path-to-review-report.json> [--skip-upload]',
     '',
     'Flags:',
     '  --all                 Import every .pdf file from data/to-import',
     '  --merge-existing      Merge existing bloodwork_*.json files by date proximity (<= 7 days)',
+    '  --approve-review      Apply decisions from a review report and finalize the lab JSON',
     '  --continue-on-error   Continue processing other files when --all is used',
     '  --skip-upload         Skip S3 upload (useful for local validation)',
     '  --model <id>          Override model id (can be repeated)',
+    '  --allow-unresolved    Write output even when unresolved conflicts were found',
+    '  --review-report-dir   Directory for generated unresolved review reports (default: data/review)',
+    '  --textract-fallback   Enable AWS Textract fallback when local extraction confidence is low',
 ].join('\n');
 
 function parseCliOptions(argv: string[]): CliOptions {
@@ -491,6 +573,10 @@ function parseCliOptions(argv: string[]): CliOptions {
     let mergeExistingOnly = false;
     let continueOnError = false;
     let skipUpload = false;
+    let allowUnresolved = false;
+    let reviewReportDir = DEFAULT_REVIEW_REPORT_DIRECTORY;
+    let approveReviewPath: string | null = null;
+    let enableTextractFallback = false;
     const modelIds: string[] = [];
     const positional: string[] = [];
 
@@ -510,6 +596,48 @@ function parseCliOptions(argv: string[]): CliOptions {
         }
         if (token === '--skip-upload') {
             skipUpload = true;
+            continue;
+        }
+        if (token === '--allow-unresolved') {
+            allowUnresolved = true;
+            continue;
+        }
+        if (token === '--textract-fallback') {
+            enableTextractFallback = true;
+            continue;
+        }
+        if (token === '--approve-review') {
+            const reportPath = argv[index + 1];
+            if (!reportPath || reportPath.startsWith('--')) {
+                throw new Error(`Missing report path after --approve-review\n\n${HELP_TEXT}`);
+            }
+            approveReviewPath = reportPath;
+            index++;
+            continue;
+        }
+        if (token.startsWith('--approve-review=')) {
+            const reportPath = token.slice('--approve-review='.length).trim();
+            if (!reportPath) {
+                throw new Error(`Missing report path in ${token}\n\n${HELP_TEXT}`);
+            }
+            approveReviewPath = reportPath;
+            continue;
+        }
+        if (token === '--review-report-dir') {
+            const directory = argv[index + 1];
+            if (!directory || directory.startsWith('--')) {
+                throw new Error(`Missing directory after --review-report-dir\n\n${HELP_TEXT}`);
+            }
+            reviewReportDir = directory;
+            index++;
+            continue;
+        }
+        if (token.startsWith('--review-report-dir=')) {
+            const directory = token.slice('--review-report-dir='.length).trim();
+            if (!directory) {
+                throw new Error(`Missing directory in ${token}\n\n${HELP_TEXT}`);
+            }
+            reviewReportDir = directory;
             continue;
         }
         if (token === '--model') {
@@ -535,6 +663,22 @@ function parseCliOptions(argv: string[]): CliOptions {
         positional.push(token);
     }
 
+    if (approveReviewPath && (importAll || mergeExistingOnly || positional.length > 0)) {
+        throw new Error(`--approve-review cannot be combined with PDF inputs, --all, or --merge-existing\n\n${HELP_TEXT}`);
+    }
+
+    if (approveReviewPath && continueOnError) {
+        throw new Error(`--continue-on-error is not used with --approve-review\n\n${HELP_TEXT}`);
+    }
+
+    if (approveReviewPath && modelIds.length > 0) {
+        throw new Error(`--model is not used with --approve-review\n\n${HELP_TEXT}`);
+    }
+
+    if (approveReviewPath && allowUnresolved) {
+        throw new Error(`--allow-unresolved is not used with --approve-review\n\n${HELP_TEXT}`);
+    }
+
     if (importAll && positional.length > 0) {
         throw new Error(`Do not pass a file path when using --all\n\n${HELP_TEXT}`);
     }
@@ -551,7 +695,7 @@ function parseCliOptions(argv: string[]): CliOptions {
         throw new Error(`--model is not used with --merge-existing\n\n${HELP_TEXT}`);
     }
 
-    if (!mergeExistingOnly && !importAll && positional.length !== 1) {
+    if (!approveReviewPath && !mergeExistingOnly && !importAll && positional.length !== 1) {
         throw new Error(`Expected exactly one PDF path, --all, or --merge-existing\n\n${HELP_TEXT}`);
     }
 
@@ -561,11 +705,15 @@ function parseCliOptions(argv: string[]): CliOptions {
 
     return {
         importAll,
-        inputPdfPath: importAll || mergeExistingOnly ? null : positional[0],
+        inputPdfPath: importAll || mergeExistingOnly || approveReviewPath ? null : positional[0]!,
         continueOnError,
         skipUpload,
         modelIds,
         mergeExistingOnly,
+        allowUnresolved,
+        reviewReportDir: path.resolve(process.cwd(), reviewReportDir),
+        approveReviewPath: approveReviewPath ? path.resolve(process.cwd(), approveReviewPath) : null,
+        enableTextractFallback,
     };
 }
 
@@ -780,12 +928,121 @@ function buildMetadataPrompt(sourcePath: string, extractedText: string): string 
         `Source file: ${sourcePath}`,
         '',
         'Extract only report-level metadata from this bloodwork report.',
-        'Return date (YYYY-MM-DD), labName, optional location, optional weightKg, optional notes.',
+        'Return labName, optional location, optional weightKg, optional notes.',
+        'Return optional dates: collectionDate, reportedDate, receivedDate, and optional date.',
+        'Set date to collectionDate when available; otherwise reportedDate; otherwise receivedDate.',
         'Do not include measurements in this step.',
         '',
         'Extracted text (may be partial):',
         extractedSegment,
     ].join('\n');
+}
+
+function normalizeDateToken(
+    value: string | undefined,
+    options?: {
+        preferMonthFirst?: boolean;
+    },
+): string | undefined {
+    if (!value) {
+        return undefined;
+    }
+    if (options?.preferMonthFirst) {
+        const monthFirst = value.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        if (monthFirst) {
+            const month = Number.parseInt(monthFirst[1]!, 10);
+            const day = Number.parseInt(monthFirst[2]!, 10);
+            const year = Number.parseInt(monthFirst[3]!, 10);
+            if (
+                Number.isFinite(year) &&
+                Number.isFinite(month) &&
+                Number.isFinite(day) &&
+                month >= 1 &&
+                month <= 12 &&
+                day >= 1 &&
+                day <= 31
+            ) {
+                return `${year.toString().padStart(4, '0')}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+            }
+        }
+    }
+    try {
+        return normalizeIsoDate(value);
+    } catch {
+        return undefined;
+    }
+}
+
+function extractDateCandidatesFromText(text: string): {
+    collectionDate?: string;
+    reportedDate?: string;
+    receivedDate?: string;
+} {
+    const normalizedText = text.replace(/\r/g, '\n');
+    let collectionDate: string | undefined;
+    let reportedDate: string | undefined;
+    let receivedDate: string | undefined;
+
+    const tableLikeDateMatch = normalizedText.match(
+        /(?:date\/time[\s\S]{0,120})?collected[\s\S]{0,120}?reported[\s\S]{0,180}?(\d{4}-\d{2}-\d{2}|\d{1,2}[./-]\d{1,2}[./-]\d{4})\s+(\d{4}-\d{2}-\d{2}|\d{1,2}[./-]\d{1,2}[./-]\d{4})\s+(\d{4}-\d{2}-\d{2}|\d{1,2}[./-]\d{1,2}[./-]\d{4})/i,
+    );
+    if (tableLikeDateMatch) {
+        collectionDate = normalizeDateToken(tableLikeDateMatch[1]);
+        reportedDate = normalizeDateToken(tableLikeDateMatch[3]);
+    }
+
+    const linePatterns: Array<{
+        regex: RegExp;
+        assign: (value: string) => void;
+    }> = [
+        {
+            regex: /\b(?:date\/time\s+)?collected\b[^\n]*?(\d{4}-\d{2}-\d{2}|\d{1,2}[./-]\d{1,2}[./-]\d{4})/i,
+            assign: value => {
+                collectionDate = collectionDate ?? normalizeDateToken(value);
+            },
+        },
+        {
+            regex: /\b(?:date\/time\s+)?reported\b[^\n]*?(\d{4}-\d{2}-\d{2}|\d{1,2}[./-]\d{1,2}[./-]\d{4})/i,
+            assign: value => {
+                reportedDate = reportedDate ?? normalizeDateToken(value);
+            },
+        },
+        {
+            regex: /\b(?:received on|received)\b[^\n]*?(\d{4}-\d{2}-\d{2}|\d{1,2}[./-]\d{1,2}[./-]\d{4})/i,
+            assign: value => {
+                receivedDate = receivedDate ?? normalizeDateToken(value, {
+                    preferMonthFirst: true,
+                });
+            },
+        },
+    ];
+
+    for (const pattern of linePatterns) {
+        const match = normalizedText.match(pattern.regex);
+        if (match?.[1]) {
+            pattern.assign(match[1]);
+        }
+    }
+
+    return {
+        collectionDate,
+        reportedDate,
+        receivedDate,
+    };
+}
+
+function resolveCanonicalLabDate({
+    collectionDate,
+    reportedDate,
+    receivedDate,
+    fallbackDate,
+}: {
+    collectionDate?: string;
+    reportedDate?: string;
+    receivedDate?: string;
+    fallbackDate: string;
+}): string {
+    return collectionDate || reportedDate || receivedDate || fallbackDate;
 }
 
 function normalizeTextForMatch(value: string): string {
@@ -2201,6 +2458,9 @@ function parseNumericValueToken(raw: string): number | string {
     if (/^[<>]/.test(trimmed)) {
         return trimmed;
     }
+    if (!/^-?\d+(?:[.,]\d+)?$/.test(trimmed)) {
+        return trimmed;
+    }
     const parsed = Number.parseFloat(trimmed.replace(',', '.'));
     if (Number.isFinite(parsed)) {
         return parsed;
@@ -2270,11 +2530,6 @@ function parseMeasurementFromTableLine({
             const exactValue = part.match(/^[<>]?\d+(?:[.,]\d+)?$/);
             if (exactValue) {
                 value = parseNumericValueToken(exactValue[0]);
-                continue;
-            }
-            const inlineValue = part.match(/[<>]?\d+(?:[.,]\d+)?/);
-            if (inlineValue && part.length <= 18) {
-                value = parseNumericValueToken(inlineValue[0]);
                 continue;
             }
         }
@@ -2412,12 +2667,6 @@ function extractCardStyleMeasurements(pageTexts: string[]): BloodworkMeasurement
                         referenceRange = parsedRange;
                         continue;
                     }
-                }
-
-                const numericMatch = nextLine.match(/[<>]?\d+(?:[.,]\d+)?/);
-                if (numericMatch) {
-                    value = parseNumericValueToken(numericMatch[0]);
-                    break;
                 }
             }
 
@@ -2944,22 +3193,305 @@ function mergeUniqueMeasurements(measurements: BloodworkMeasurement[]): Bloodwor
     return Array.from(unique.values());
 }
 
-function buildMeasurementNameKey(name: string): string {
-    return normalizeTextForMatch(name).replace(/[^a-z0-9]+/g, ' ').trim();
+function clampScore(value: number): number {
+    if (value < 0) return 0;
+    if (value > 1) return 1;
+    return value;
 }
 
-function mergeMeasurementsByPreferredName(
-    preferred: BloodworkMeasurement[],
-    fallback: BloodworkMeasurement[],
-): BloodworkMeasurement[] {
-    const merged = new Map<string, BloodworkMeasurement>();
-    for (const measurement of fallback) {
-        merged.set(buildMeasurementNameKey(measurement.name), measurement);
+function dedupeProvenanceEntries(measurement: BloodworkMeasurement): BloodworkMeasurement['provenance'] {
+    if (!measurement.provenance || measurement.provenance.length === 0) {
+        return undefined;
     }
-    for (const measurement of preferred) {
-        merged.set(buildMeasurementNameKey(measurement.name), measurement);
+    const unique = new Map<string, NonNullable<BloodworkMeasurement['provenance']>[number]>();
+    for (const entry of measurement.provenance) {
+        const key = [
+            entry.extractor,
+            entry.page,
+            entry.rawName ?? '',
+            entry.rawValue ?? '',
+            entry.rawUnit ?? '',
+            entry.rawRange ?? '',
+            entry.confidence?.toString() ?? '',
+        ].join('|');
+        if (!unique.has(key)) {
+            unique.set(key, entry);
+        }
     }
-    return mergeUniqueMeasurements(Array.from(merged.values()));
+    return Array.from(unique.values());
+}
+
+function buildDuplicateValueFromCandidate({
+    measurement,
+    date,
+}: {
+    measurement: BloodworkMeasurement;
+    date: string;
+}): BloodworkMeasurementDuplicateValue {
+    const duplicateValue: BloodworkMeasurementDuplicateValue = {
+        date,
+    };
+    if (measurement.value !== undefined) {
+        duplicateValue.value = measurement.value;
+    }
+    if (measurement.unit) {
+        duplicateValue.unit = measurement.unit;
+    }
+    if (measurement.referenceRange) {
+        duplicateValue.referenceRange = cloneReferenceRange(measurement.referenceRange);
+    }
+    if (measurement.flag) {
+        duplicateValue.flag = measurement.flag;
+    }
+    if (measurement.note) {
+        duplicateValue.note = measurement.note;
+    }
+    return duplicateValue;
+}
+
+function hasHighSeverityCandidateContradiction(
+    left: BloodworkMeasurement,
+    right: BloodworkMeasurement,
+): boolean {
+    const leftComparable = parseComparableNumericValue(left.value);
+    const rightComparable = parseComparableNumericValue(right.value);
+    const leftUnit = left.unit ? normalizeUnitKey(left.unit) : '';
+    const rightUnit = right.unit ? normalizeUnitKey(right.unit) : '';
+    const unitsComparable = !leftUnit || !rightUnit || leftUnit === rightUnit;
+
+    if (leftComparable && rightComparable && unitsComparable) {
+        const leftAbs = Math.abs(leftComparable.numericValue);
+        const rightAbs = Math.abs(rightComparable.numericValue);
+        const max = Math.max(leftAbs, rightAbs);
+        const min = Math.min(leftAbs, rightAbs);
+        if (max > 0 && min > 0 && max / min >= 2) {
+            return true;
+        }
+    }
+
+    if (leftUnit && rightUnit && leftUnit !== rightUnit && UNIT_TOKEN_PATTERN.test(left.unit || '') && UNIT_TOKEN_PATTERN.test(right.unit || '')) {
+        return true;
+    }
+
+    if (left.referenceRange && right.referenceRange) {
+        const leftMin = left.referenceRange.min;
+        const leftMax = left.referenceRange.max;
+        const rightMin = right.referenceRange.min;
+        const rightMax = right.referenceRange.max;
+        if (leftMin !== undefined && leftMax !== undefined && rightMin !== undefined && rightMax !== undefined) {
+            const overlaps = leftMin <= rightMax && rightMin <= leftMax;
+            if (!overlaps) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+function scoreMeasurementCandidate({
+    measurement,
+    glossaryLookup,
+}: {
+    measurement: BloodworkMeasurement;
+    glossaryLookup: Map<string, BloodworkGlossaryEntry>;
+}): ScoredMeasurementCandidate {
+    let score = 0;
+    const scoreBreakdown: string[] = [];
+    const normalizedName = normalizeTextForMatch(measurement.name);
+    const glossaryEntry = glossaryLookup.get(normalizeGlossaryNameKey(measurement.name));
+
+    if (LIKELY_ANALYTE_NAME_PATTERN.test(normalizedName)) {
+        score += 0.22;
+        scoreBreakdown.push('name:likely-analyte(+0.22)');
+    } else {
+        score += 0.05;
+        scoreBreakdown.push('name:weak(+0.05)');
+    }
+
+    const numericValue = parseComparableNumericValue(measurement.value);
+    if (numericValue) {
+        score += 0.2;
+        scoreBreakdown.push('value:numeric(+0.20)');
+    } else if (typeof measurement.value === 'string' && QUALITATIVE_RESULT_PATTERN.test(measurement.value)) {
+        score += 0.12;
+        scoreBreakdown.push('value:qualitative(+0.12)');
+    }
+
+    const hasUnit = Boolean(measurement.unit);
+    const unitLooksValid = Boolean(measurement.unit && UNIT_TOKEN_PATTERN.test(measurement.unit));
+    if (unitLooksValid) {
+        score += 0.16;
+        scoreBreakdown.push('unit:recognized(+0.16)');
+    } else if (hasUnit) {
+        score += 0.03;
+        scoreBreakdown.push('unit:present-weak(+0.03)');
+    }
+
+    if (measurement.referenceRange) {
+        score += 0.14;
+        scoreBreakdown.push('range:present(+0.14)');
+    }
+
+    if (measurement.flag) {
+        score += 0.04;
+        scoreBreakdown.push('flag:present(+0.04)');
+    }
+
+    const provenanceConfidence = measurement.provenance
+        ?.map(item => item.confidence)
+        .find(value => value !== undefined);
+    if (provenanceConfidence !== undefined) {
+        score += provenanceConfidence * 0.12;
+        scoreBreakdown.push(`provenance:${provenanceConfidence.toFixed(2)}(+${(provenanceConfidence * 0.12).toFixed(2)})`);
+    }
+
+    if (glossaryEntry) {
+        score += 0.07;
+        scoreBreakdown.push('glossary:name-match(+0.07)');
+        if (measurement.unit && glossaryEntry.unitHints.some(unitHint => normalizeUnitKey(unitHint) === normalizeUnitKey(measurement.unit!))) {
+            score += 0.06;
+            scoreBreakdown.push('glossary:unit-match(+0.06)');
+        }
+    }
+
+    if (
+        numericValue &&
+        numericValue.numericValue >= 1 &&
+        numericValue.numericValue <= 5 &&
+        !measurement.unit &&
+        !measurement.referenceRange &&
+        /\b(?:cholesterol|a1c|hemoglobin a1c|ratio)\b/i.test(normalizedName)
+    ) {
+        score -= 0.25;
+        scoreBreakdown.push('penalty:suspicious-low-without-structure(-0.25)');
+    }
+
+    return {
+        measurement,
+        score: clampScore(score),
+        scoreBreakdown,
+    };
+}
+
+function resolveMeasurementCandidates({
+    candidates,
+    measurementDate,
+    glossaryLookup,
+}: {
+    candidates: BloodworkMeasurement[];
+    measurementDate: string;
+    glossaryLookup: Map<string, BloodworkGlossaryEntry>;
+}): MeasurementResolutionResult {
+    const grouped = new Map<string, BloodworkMeasurement[]>();
+    for (const candidate of candidates) {
+        const key = buildMeasurementNameKey(candidate.name);
+        if (!key) {
+            continue;
+        }
+        const existing = grouped.get(key) ?? [];
+        existing.push(candidate);
+        grouped.set(key, existing);
+    }
+
+    const resolved: BloodworkMeasurement[] = [];
+    const conflicts: MeasurementConflict[] = [];
+
+    for (const [measurementNameKey, groupedCandidates] of grouped.entries()) {
+        const dedupedByMeasurementKey = new Map<string, BloodworkMeasurement>();
+        for (const candidate of groupedCandidates) {
+            const key = buildMeasurementKey(candidate);
+            if (!dedupedByMeasurementKey.has(key)) {
+                dedupedByMeasurementKey.set(key, candidate);
+            }
+        }
+
+        const scoredCandidates = Array.from(dedupedByMeasurementKey.values())
+            .map(measurement => scoreMeasurementCandidate({
+                measurement,
+                glossaryLookup,
+            }))
+            .sort((left, right) => {
+                const scoreCompare = right.score - left.score;
+                if (scoreCompare !== 0) {
+                    return scoreCompare;
+                }
+                return buildMeasurementKey(left.measurement).localeCompare(buildMeasurementKey(right.measurement));
+            });
+
+        const topCandidate = scoredCandidates[0];
+        if (!topCandidate) {
+            continue;
+        }
+
+        const secondCandidate = scoredCandidates[1];
+        const margin = secondCandidate ? topCandidate.score - secondCandidate.score : 1;
+        const hasContradiction = secondCandidate
+            ? hasHighSeverityCandidateContradiction(topCandidate.measurement, secondCandidate.measurement)
+            : false;
+
+        const conflictReasons: string[] = [];
+        if (topCandidate.score < RESOLUTION_MIN_CONFIDENCE) {
+            conflictReasons.push(`top-score-below-threshold:${topCandidate.score.toFixed(2)}`);
+        }
+        if (secondCandidate && margin < RESOLUTION_MIN_MARGIN) {
+            conflictReasons.push(`score-margin-below-threshold:${margin.toFixed(2)}`);
+        }
+        if (hasContradiction) {
+            conflictReasons.push('high-severity-contradiction');
+        }
+        const needsReview = conflictReasons.length > 0;
+
+        const selectedMeasurement = cloneMeasurement(topCandidate.measurement);
+        selectedMeasurement.confidence = Number.parseFloat(topCandidate.score.toFixed(4));
+        selectedMeasurement.reviewStatus = needsReview ? 'needs_review' : 'accepted';
+        selectedMeasurement.provenance = dedupeProvenanceEntries(selectedMeasurement);
+
+        const mergedDuplicateValues = dedupeDuplicateValues([
+            ...(selectedMeasurement.duplicateValues?.map(cloneDuplicateValue) ?? []),
+            ...scoredCandidates.slice(1).map(candidate => buildDuplicateValueFromCandidate({
+                measurement: candidate.measurement,
+                date: measurementDate,
+            })),
+        ]);
+        if (mergedDuplicateValues.length > 0) {
+            selectedMeasurement.duplicateValues = mergedDuplicateValues;
+        } else {
+            delete selectedMeasurement.duplicateValues;
+        }
+
+        if (needsReview) {
+            selectedMeasurement.conflict = {
+                reason: conflictReasons.join('; '),
+                candidateCount: scoredCandidates.length,
+            };
+            conflicts.push({
+                measurementNameKey,
+                measurementName: selectedMeasurement.name,
+                reason: conflictReasons.join('; '),
+                candidateCount: scoredCandidates.length,
+                recommendedCandidateIndex: 0,
+                candidates: scoredCandidates.map(candidate => ({
+                    score: Number.parseFloat(candidate.score.toFixed(4)),
+                    scoreBreakdown: candidate.scoreBreakdown,
+                    measurement: cloneMeasurement(candidate.measurement),
+                })),
+            });
+        } else {
+            delete selectedMeasurement.conflict;
+        }
+
+        resolved.push(selectedMeasurement);
+    }
+
+    return {
+        measurements: resolved.sort((left, right) => left.name.localeCompare(right.name)),
+        conflicts,
+    };
+}
+
+function buildMeasurementNameKey(name: string): string {
+    return normalizeTextForMatch(name).replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
 function titleCase(value: string): string {
@@ -3333,7 +3865,23 @@ async function extractMeasurementsFromPages({
             continue;
         }
 
-        extractedMeasurements.push(...parseMeasurementsFromTableLikeRows(tableLikeRows));
+        extractedMeasurements.push(...parseMeasurementsFromTableLikeRows(tableLikeRows).map(measurement => ({
+            ...measurement,
+            provenance: dedupeProvenanceEntries({
+                ...measurement,
+                provenance: [{
+                    extractor: 'layout_text',
+                    page: pageIndex + 1,
+                    rawName: measurement.originalName || measurement.name,
+                    rawValue: measurement.value !== undefined ? String(measurement.value) : undefined,
+                    rawUnit: measurement.unit,
+                    rawRange: measurement.referenceRange
+                        ? [measurement.referenceRange.min ?? '', measurement.referenceRange.max ?? ''].join('..')
+                        : undefined,
+                    confidence: 0.82,
+                }],
+            }),
+        })));
 
         const prompt = buildMeasurementExtractionPrompt({
             sourcePath,
@@ -3353,13 +3901,105 @@ async function extractMeasurementsFromPages({
                 contextLabel: `${sourcePath} (measurements page ${pageIndex + 1})`,
                 textFallbackArrayKey: 'measurements',
             });
-            extractedMeasurements.push(...result.object.measurements);
+            extractedMeasurements.push(...result.object.measurements.map(measurement => ({
+                ...measurement,
+                provenance: dedupeProvenanceEntries({
+                    ...measurement,
+                    provenance: [
+                        ...(measurement.provenance ?? []),
+                        {
+                            extractor: 'llm_normalizer',
+                            page: pageIndex + 1,
+                            rawName: measurement.originalName || measurement.name,
+                            rawValue: measurement.value !== undefined ? String(measurement.value) : undefined,
+                            rawUnit: measurement.unit,
+                            rawRange: measurement.referenceRange
+                                ? [measurement.referenceRange.min ?? '', measurement.referenceRange.max ?? ''].join('..')
+                                : undefined,
+                            confidence: 0.66,
+                        },
+                    ],
+                }),
+            })));
         } catch {
             continue;
         }
     }
 
     return mergeUniqueMeasurements(extractedMeasurements);
+}
+
+function buildNameLookupKeys(measurement: BloodworkMeasurement): string[] {
+    const keys = new Set<string>();
+    const nameKey = buildMeasurementNameKey(measurement.name);
+    if (nameKey) {
+        keys.add(nameKey);
+    }
+    if (measurement.originalName) {
+        const originalNameKey = buildMeasurementNameKey(measurement.originalName);
+        if (originalNameKey) {
+            keys.add(originalNameKey);
+        }
+    }
+    return Array.from(keys.values());
+}
+
+function findSourceCandidateForNormalizedMeasurement({
+    normalizedMeasurement,
+    sourceCandidates,
+}: {
+    normalizedMeasurement: BloodworkMeasurement;
+    sourceCandidates: BloodworkMeasurement[];
+}): BloodworkMeasurement | null {
+    const normalizedKeys = buildNameLookupKeys(normalizedMeasurement);
+    for (const key of normalizedKeys) {
+        const exact = sourceCandidates.find(candidate => buildNameLookupKeys(candidate).includes(key));
+        if (exact) {
+            return exact;
+        }
+    }
+
+    const normalizedName = normalizeTextForMatch(normalizedMeasurement.name);
+    if (!normalizedName) {
+        return null;
+    }
+    for (const candidate of sourceCandidates) {
+        const candidateName = normalizeTextForMatch(candidate.name);
+        if (candidateName.includes(normalizedName) || normalizedName.includes(candidateName)) {
+            return candidate;
+        }
+    }
+    return null;
+}
+
+function projectStructuredFieldsFromSourceCandidate({
+    normalizedMeasurement,
+    sourceCandidate,
+}: {
+    normalizedMeasurement: BloodworkMeasurement;
+    sourceCandidate: BloodworkMeasurement | null;
+}): BloodworkMeasurement {
+    if (!sourceCandidate) {
+        return normalizedMeasurement;
+    }
+
+    return {
+        ...normalizedMeasurement,
+        value: sourceCandidate.value,
+        unit: sourceCandidate.unit,
+        referenceRange: sourceCandidate.referenceRange
+            ? cloneReferenceRange(sourceCandidate.referenceRange)
+            : undefined,
+        flag: sourceCandidate.flag ?? normalizedMeasurement.flag,
+        note: normalizedMeasurement.note ?? sourceCandidate.note,
+        provenance: dedupeProvenanceEntries({
+            ...normalizedMeasurement,
+            provenance: [
+                ...(sourceCandidate.provenance ?? []),
+                ...(normalizedMeasurement.provenance ?? []),
+            ],
+        }),
+    };
 }
 
 async function normalizeMeasurementsWithModel({
@@ -3396,10 +4036,233 @@ async function normalizeMeasurementsWithModel({
             contextLabel: `${sourcePath} (normalization)`,
             textFallbackArrayKey: 'measurements',
         });
-        return filterLikelyMeasurements(result.object.measurements);
+        return filterLikelyMeasurements(result.object.measurements.map(measurement =>
+            projectStructuredFieldsFromSourceCandidate({
+                normalizedMeasurement: measurement,
+                sourceCandidate: findSourceCandidateForNormalizedMeasurement({
+                    normalizedMeasurement: measurement,
+                    sourceCandidates: filteredCandidates,
+                }),
+            })));
     } catch {
         return filteredCandidates;
     }
+}
+
+function extractTableLikeRowsFromPositionedTokenLines(
+    tokenLines: Array<Array<{ x: number; token: string }>>,
+): TableLikeRow[] {
+    const selected = new Map<string, TableLikeRow>();
+    let activeCategory: string | undefined;
+    let pendingNamePrefix: string | undefined;
+
+    for (const tokens of tokenLines) {
+        if (tokens.length === 0) {
+            continue;
+        }
+        const sortedTokens = [...tokens].sort((left, right) => left.x - right.x);
+        const segments: string[] = [];
+        let currentSegment = '';
+        let previousX: number | null = null;
+        for (const token of sortedTokens) {
+            const gap = previousX === null ? 0 : token.x - previousX;
+            if (previousX !== null && gap >= 26) {
+                const trimmed = currentSegment.replace(/\s+/g, ' ').trim();
+                if (trimmed) {
+                    segments.push(trimmed);
+                }
+                currentSegment = token.token;
+            } else {
+                currentSegment = currentSegment ? `${currentSegment} ${token.token}` : token.token;
+            }
+            previousX = token.x;
+        }
+        const finalSegment = currentSegment.replace(/\s+/g, ' ').trim();
+        if (finalSegment) {
+            segments.push(finalSegment);
+        }
+        if (segments.length === 0) {
+            continue;
+        }
+
+        const wholeLine = segments.join(' ').trim();
+        if (!wholeLine || wholeLine.length > 220) {
+            continue;
+        }
+        if (isLikelyCategoryHeading(wholeLine)) {
+            activeCategory = normalizeCategoryNameForGlossary(wholeLine);
+            pendingNamePrefix = undefined;
+            continue;
+        }
+
+        const hasAnyValue = segments.slice(1).some(segment => VALUE_TOKEN_PATTERN.test(segment));
+        if (!hasAnyValue && segments.length === 1) {
+            const maybePrefix = segments[0];
+            if (
+                maybePrefix.length <= 80 &&
+                !/\d/.test(maybePrefix) &&
+                LIKELY_ANALYTE_NAME_PATTERN.test(normalizeTextForMatch(maybePrefix))
+            ) {
+                pendingNamePrefix = maybePrefix;
+            }
+            continue;
+        }
+
+        if (segments.length < 2) {
+            continue;
+        }
+
+        let namePart = segments[0]!;
+        if (pendingNamePrefix) {
+            namePart = `${pendingNamePrefix} ${namePart}`.replace(/\s+/g, ' ').trim();
+            pendingNamePrefix = undefined;
+        }
+        if (!namePart || namePart.length > 120) {
+            continue;
+        }
+        const tail = segments.slice(1).join(' ');
+        if (!VALUE_TOKEN_PATTERN.test(tail)) {
+            continue;
+        }
+
+        const line = [namePart, ...segments.slice(1)].join(' | ');
+        const dedupeKey = `${line}|${normalizeCategoryNameKey(activeCategory || '')}`;
+        if (!selected.has(dedupeKey)) {
+            selected.set(dedupeKey, {
+                line,
+                category: activeCategory,
+            });
+        }
+    }
+
+    return Array.from(selected.values());
+}
+
+async function extractLayoutMeasurementsFromPdfBytes(pdfBytes: Uint8Array): Promise<BloodworkMeasurement[]> {
+    const document = await getDocument({ data: pdfBytes }).promise;
+    const measurements: BloodworkMeasurement[] = [];
+
+    for (let pageIndex = 1; pageIndex <= document.numPages; pageIndex++) {
+        const page = await document.getPage(pageIndex);
+        const textContent = await page.getTextContent();
+        const lines = new Map<number, Array<{ x: number; token: string }>>();
+
+        for (const item of textContent.items) {
+            if (!('str' in item)) continue;
+            const token = item.str.trim();
+            if (!token) continue;
+            const transform = 'transform' in item && Array.isArray(item.transform) ? item.transform : null;
+            const x = transform ? Number(transform[4]) : Number.NaN;
+            const y = transform ? Number(transform[5]) : Number.NaN;
+            if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+            const existingY = Array.from(lines.keys()).find(lineY => Math.abs(lineY - y) <= 1.8);
+            const lineY = existingY ?? y;
+            const line = lines.get(lineY) ?? [];
+            line.push({ x, token });
+            lines.set(lineY, line);
+        }
+
+        const tokenLines = Array.from(lines.entries())
+            .sort((left, right) => right[0] - left[0])
+            .map(([, lineTokens]) => lineTokens.sort((left, right) => left.x - right.x));
+        const rows = extractTableLikeRowsFromPositionedTokenLines(tokenLines);
+        const parsed = parseMeasurementsFromTableLikeRows(rows).map(measurement => ({
+            ...measurement,
+            provenance: dedupeProvenanceEntries({
+                ...measurement,
+                provenance: [{
+                    extractor: 'layout_text',
+                    page: pageIndex,
+                    rawName: measurement.originalName || measurement.name,
+                    rawValue: measurement.value !== undefined ? String(measurement.value) : undefined,
+                    rawUnit: measurement.unit,
+                    rawRange: measurement.referenceRange
+                        ? [measurement.referenceRange.min ?? '', measurement.referenceRange.max ?? ''].join('..')
+                        : undefined,
+                    confidence: 0.9,
+                }],
+            }),
+        }));
+        measurements.push(...parsed);
+    }
+
+    return filterLikelyMeasurements(measurements);
+}
+
+async function extractMeasurementsWithTextract({
+    textractClient,
+    pdfBytes,
+}: {
+    textractClient: TextractClient;
+    pdfBytes: Uint8Array;
+}): Promise<BloodworkMeasurement[]> {
+    const response = await textractClient.send(new AnalyzeDocumentCommand({
+        Document: {
+            Bytes: pdfBytes,
+        },
+        FeatureTypes: ['TABLES', 'FORMS'],
+    }));
+    const blocks = response.Blocks ?? [];
+    const lineBlocks = blocks
+        .filter(block => block.BlockType === 'LINE' && block.Text && block.Page)
+        .map(block => ({
+            page: block.Page!,
+            text: block.Text!.trim(),
+            top: block.Geometry?.BoundingBox?.Top ?? 0,
+            confidence: block.Confidence ?? 0,
+        }))
+        .filter(block => block.text.length > 0);
+
+    const pageTexts = new Map<number, Array<{ text: string; top: number; confidence: number }>>();
+    for (const line of lineBlocks) {
+        const existing = pageTexts.get(line.page) ?? [];
+        existing.push(line);
+        pageTexts.set(line.page, existing);
+    }
+
+    const measurements: BloodworkMeasurement[] = [];
+    for (const [page, lines] of pageTexts.entries()) {
+        const sortedLines = lines.sort((left, right) => left.top - right.top);
+        const text = sortedLines.map(item => item.text).join('\n');
+        const parsed = parseMeasurementsFromTableLikeRows(extractTableLikeRows(text));
+        const averageConfidence = sortedLines.reduce((sum, line) => sum + line.confidence, 0) / sortedLines.length / 100;
+        measurements.push(...parsed.map(measurement => ({
+            ...measurement,
+            provenance: dedupeProvenanceEntries({
+                ...measurement,
+                provenance: [{
+                    extractor: 'textract',
+                    page,
+                    rawName: measurement.originalName || measurement.name,
+                    rawValue: measurement.value !== undefined ? String(measurement.value) : undefined,
+                    rawUnit: measurement.unit,
+                    rawRange: measurement.referenceRange
+                        ? [measurement.referenceRange.min ?? '', measurement.referenceRange.max ?? ''].join('..')
+                        : undefined,
+                    confidence: clampScore(averageConfidence),
+                }],
+            }),
+        })));
+    }
+
+    return filterLikelyMeasurements(measurements);
+}
+
+function shouldTriggerTextractFallback({
+    layoutMeasurements,
+    pageTexts,
+}: {
+    layoutMeasurements: BloodworkMeasurement[];
+    pageTexts: string[];
+}): boolean {
+    const pagesWithNumbers = pageTexts.filter(page => /\d/.test(page)).length;
+    if (pagesWithNumbers === 0) {
+        return false;
+    }
+    if (layoutMeasurements.length >= TEXTRACT_MIN_LAYOUT_CANDIDATES) {
+        return false;
+    }
+    return true;
 }
 
 async function generateLabObject({
@@ -3409,6 +4272,8 @@ async function generateLabObject({
     extractedText,
     pageTexts,
     glossary,
+    pdfBytes,
+    textractClient,
 }: {
     openRouterApiKey: string;
     modelIds: string[];
@@ -3416,7 +4281,9 @@ async function generateLabObject({
     extractedText: string;
     pageTexts: string[];
     glossary: BloodworkGlossary;
-}): Promise<{ lab: BloodworkLab; modelId: string }> {
+    pdfBytes: Uint8Array;
+    textractClient: TextractClient | null;
+}): Promise<{ lab: BloodworkLab; modelId: string; conflicts: MeasurementConflict[] }> {
     const provider = createOpenRouter({ apiKey: openRouterApiKey });
     let metadataModelId: string | null = null;
     let metadata: z.infer<typeof bloodworkMetadataSchema>;
@@ -3442,13 +4309,54 @@ async function generateLabObject({
         sourcePath: pdfPath,
         extractedText,
     });
+    const extractedDates = extractDateCandidatesFromText(extractedText);
+    const collectionDate = extractedDates.collectionDate ?? metadata.collectionDate;
+    const reportedDate = extractedDates.reportedDate ?? metadata.reportedDate;
+    const receivedDate = extractedDates.receivedDate ?? metadata.receivedDate;
+    const fallbackDate = metadata.date ?? inferredMetadata.date;
+    if (!fallbackDate) {
+        throw new Error(`Unable to determine canonical date for ${pdfPath}`);
+    }
+    const canonicalDate = resolveCanonicalLabDate({
+        collectionDate,
+        reportedDate,
+        receivedDate,
+        fallbackDate,
+    });
     metadata = {
         ...metadata,
-        date: inferredMetadata.date,
+        date: canonicalDate,
+        collectionDate,
+        reportedDate,
+        receivedDate,
     };
 
+    const candidateMeasurements: BloodworkMeasurement[] = [];
+    try {
+        const layoutMeasurements = await extractLayoutMeasurementsFromPdfBytes(pdfBytes);
+        candidateMeasurements.push(...layoutMeasurements);
+        if (textractClient && shouldTriggerTextractFallback({
+            layoutMeasurements,
+            pageTexts,
+        })) {
+            try {
+                const textractMeasurements = await extractMeasurementsWithTextract({
+                    textractClient,
+                    pdfBytes,
+                });
+                candidateMeasurements.push(...textractMeasurements);
+            } catch {
+                // textract fallback is best-effort and should not fail the import flow.
+            }
+        }
+    } catch {
+        // Keep pipeline resilient and continue with downstream extraction methods.
+    }
+
     const cardStyleMeasurements = filterLikelyMeasurements(extractCardStyleMeasurements(pageTexts));
-    let measurements: BloodworkMeasurement[] = [];
+    candidateMeasurements.push(...cardStyleMeasurements);
+
+    let modelMeasurements: BloodworkMeasurement[] = [];
     try {
         const extractedMeasurements = await extractMeasurementsFromPages({
             provider,
@@ -3456,7 +4364,7 @@ async function generateLabObject({
             sourcePath: pdfPath,
             pageTexts,
         });
-        measurements = await normalizeMeasurementsWithModel({
+        modelMeasurements = await normalizeMeasurementsWithModel({
             provider,
             modelIds,
             sourcePath: pdfPath,
@@ -3464,24 +4372,21 @@ async function generateLabObject({
             candidates: extractedMeasurements,
         });
     } catch {
-        measurements = [];
+        modelMeasurements = [];
     }
+    candidateMeasurements.push(...modelMeasurements);
 
-    if (cardStyleMeasurements.length >= 3) {
-        measurements = mergeMeasurementsByPreferredName(cardStyleMeasurements, measurements);
-    }
-
-    if (measurements.length === 0) {
+    if (candidateMeasurements.length === 0) {
         const heuristicFallback = heuristicExtractMeasurements(pageTexts);
         const narrativeFallback = extractNarrativeResultMeasurements(pageTexts);
-        measurements = filterLikelyMeasurements([
+        candidateMeasurements.push(...filterLikelyMeasurements([
             ...heuristicFallback,
             ...cardStyleMeasurements,
             ...narrativeFallback,
-        ]);
+        ]));
     }
 
-    measurements = standardizeMeasurementUnits(measurements);
+    let measurements = standardizeMeasurementUnits(filterLikelyMeasurements(candidateMeasurements));
 
     measurements = await applyGlossaryValidationToMeasurements({
         provider,
@@ -3492,6 +4397,13 @@ async function generateLabObject({
     });
 
     measurements = standardizeMeasurementUnits(measurements);
+    const glossaryLookup = buildGlossaryLookup(glossary);
+    const resolved = resolveMeasurementCandidates({
+        candidates: measurements,
+        measurementDate: metadata.date || fallbackDate,
+        glossaryLookup,
+    });
+    measurements = resolved.measurements;
 
     if (measurements.length === 0) {
         measurements = [{
@@ -3506,6 +4418,7 @@ async function generateLabObject({
             measurements,
         }),
         modelId: metadataModelId ?? modelIds[0],
+        conflicts: resolved.conflicts,
     };
 }
 
@@ -3865,6 +4778,33 @@ function mergeNotes(group: BloodworkDataFile[]): string | undefined {
     return Array.from(byNormalizedValue.values()).join('\n\n');
 }
 
+function scoreConsolidationMeasurement({
+    measurement,
+}: {
+    measurement: BloodworkMeasurement;
+}): number {
+    let score = measurement.confidence ?? 0;
+    if (measurement.referenceRange) {
+        score += 0.08;
+    }
+    if (measurement.unit && UNIT_TOKEN_PATTERN.test(measurement.unit)) {
+        score += 0.08;
+    }
+    if (measurement.reviewStatus === 'accepted') {
+        score += 0.08;
+    }
+    if (measurement.reviewStatus === 'needs_review') {
+        score -= 0.12;
+    }
+    if (measurement.conflict) {
+        score -= 0.1;
+    }
+    if (typeof measurement.value === 'number' && Number.isFinite(measurement.value)) {
+        score += 0.05;
+    }
+    return score;
+}
+
 function mergeMeasurementsForGroup(group: BloodworkDataFile[]): BloodworkMeasurement[] {
     const selected = new Map<string, ConsolidatedMeasurementSelection>();
 
@@ -3889,18 +4829,33 @@ function mergeMeasurementsForGroup(group: BloodworkDataFile[]): BloodworkMeasure
                 continue;
             }
 
+            const existingScore = scoreConsolidationMeasurement({
+                measurement: existing.measurement,
+            });
+            const incomingScore = scoreConsolidationMeasurement({
+                measurement,
+            });
+            const shouldReplace =
+                incomingScore > existingScore ||
+                (Math.abs(incomingScore - existingScore) <= 1e-9 && compareSourceFreshness(source, existing.source) > 0);
+
             const mergedDuplicateValues = dedupeDuplicateValues([
                 ...existing.duplicateValues,
-                buildDuplicateValueFromMeasurement({
-                    measurement: existing.measurement,
-                    source: existing.source,
-                }),
+                buildDuplicateValueFromMeasurement(shouldReplace
+                    ? {
+                        measurement: existing.measurement,
+                        source: existing.source,
+                    }
+                    : {
+                        measurement,
+                        source,
+                    }),
                 ...incomingDuplicateValues,
             ]);
 
             selected.set(measurementKey, {
-                measurement,
-                source,
+                measurement: shouldReplace ? measurement : existing.measurement,
+                source: shouldReplace ? source : existing.source,
                 duplicateValues: mergedDuplicateValues,
             });
         }
@@ -4171,6 +5126,99 @@ async function maybeUploadToS3({
     return key;
 }
 
+function resolveAwsCredentialsForClients(): {
+    region: string;
+    accessKeyId: string;
+    secretAccessKey: string;
+    sessionToken?: string;
+} {
+    const region = process.env.AWS_REGION?.trim() || process.env.AWS_DEFAULT_REGION?.trim();
+    if (!region) {
+        throw new Error('Missing required environment variable: AWS_REGION (or AWS_DEFAULT_REGION)');
+    }
+    const accessKeyId = requireEnv('AWS_ACCESS_KEY_ID');
+    const secretAccessKey = requireEnv('AWS_SECRET_ACCESS_KEY');
+    const sessionToken = process.env.AWS_SESSION_TOKEN?.trim() || undefined;
+    return {
+        region,
+        accessKeyId,
+        secretAccessKey,
+        sessionToken,
+    };
+}
+
+function buildReviewReportFileName(pdfPath: string): string {
+    const baseName = path.basename(pdfPath, path.extname(pdfPath));
+    return `review_${slugifyForPath(baseName)}_${Date.now()}.json`;
+}
+
+function writeReviewReport({
+    reportDir,
+    pdfPath,
+    suggestedOutputFileName,
+    conflicts,
+    labDraft,
+}: {
+    reportDir: string;
+    pdfPath: string;
+    suggestedOutputFileName: string;
+    conflicts: MeasurementConflict[];
+    labDraft: BloodworkLab;
+}): string {
+    fs.mkdirSync(reportDir, { recursive: true });
+    const reportPath = path.join(reportDir, buildReviewReportFileName(pdfPath));
+    const report: ReviewReport = {
+        version: 1,
+        generatedAt: new Date().toISOString(),
+        sourcePdfPath: pdfPath,
+        suggestedOutputFileName,
+        unresolvedCount: conflicts.length,
+        conflicts,
+        labDraft,
+    };
+    fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 4)}\n`, 'utf8');
+    return reportPath;
+}
+
+function applyReviewReportSelectionsToLab(report: z.infer<typeof reviewReportSchema>): BloodworkLab {
+    const selectedByNameKey = new Map<string, BloodworkMeasurement>();
+    for (const conflict of report.conflicts) {
+        const selectedIndex = conflict.selectedCandidateIndex ?? conflict.recommendedCandidateIndex;
+        const selectedCandidate = conflict.candidates[selectedIndex];
+        if (!selectedCandidate) {
+            throw new Error(
+                `Invalid selected candidate index ${selectedIndex} for ${conflict.measurementName}`,
+            );
+        }
+        const acceptedMeasurement = cloneMeasurement(selectedCandidate.measurement);
+        acceptedMeasurement.reviewStatus = 'accepted';
+        delete acceptedMeasurement.conflict;
+        selectedByNameKey.set(conflict.measurementNameKey, acceptedMeasurement);
+    }
+
+    const nextMeasurements = report.labDraft.measurements.map(measurement => {
+        const key = buildMeasurementNameKey(measurement.name);
+        const selected = selectedByNameKey.get(key);
+        if (!selected) {
+            const clone = cloneMeasurement(measurement);
+            if (clone.reviewStatus === 'needs_review') {
+                clone.reviewStatus = 'accepted';
+            }
+            delete clone.conflict;
+            return clone;
+        }
+        return selected;
+    });
+
+    return bloodworkLabSchema.parse({
+        ...report.labDraft,
+        reviewSummary: {
+            unresolvedCount: 0,
+        },
+        measurements: nextMeasurements,
+    });
+}
+
 async function importSingleFile({
     pdfPath,
     openRouterApiKey,
@@ -4180,6 +5228,9 @@ async function importSingleFile({
     s3Prefix,
     glossary,
     glossaryPath,
+    allowUnresolved,
+    reviewReportDir,
+    textractClient,
 }: {
     pdfPath: string;
     openRouterApiKey: string;
@@ -4189,27 +5240,71 @@ async function importSingleFile({
     s3Prefix: string;
     glossary: BloodworkGlossary;
     glossaryPath: string;
+    allowUnresolved: boolean;
+    reviewReportDir: string;
+    textractClient: TextractClient | null;
 }): Promise<ImportResult> {
     const pdfBytes = new Uint8Array(await Bun.file(pdfPath).arrayBuffer());
     assertPdfSignature(pdfBytes, pdfPath);
+    const glossaryForFile = bloodworkGlossarySchema.parse(structuredClone(glossary));
 
     const extracted = await extractPdfText(pdfPath, pdfBytes);
-    const { lab, modelId } = await generateLabObject({
+    const { lab, modelId, conflicts } = await generateLabObject({
         openRouterApiKey,
         modelIds,
         pdfPath,
         extractedText: extracted.fullText,
         pageTexts: extracted.pageTexts,
-        glossary,
+        glossary: glossaryForFile,
+        pdfBytes,
+        textractClient,
     });
 
-    fs.mkdirSync(DEFAULT_OUTPUT_DIRECTORY, { recursive: true });
     const outputFileName = resolveOutputFileName({
         lab,
         sourcePath: pdfPath,
     });
+    const unresolvedCount = conflicts.length;
+    let reviewReportPath: string | undefined;
+
+    if (unresolvedCount > 0) {
+        reviewReportPath = writeReviewReport({
+            reportDir: reviewReportDir,
+            pdfPath,
+            suggestedOutputFileName: outputFileName,
+            conflicts,
+            labDraft: bloodworkLabSchema.parse({
+                ...lab,
+                reviewSummary: {
+                    unresolvedCount,
+                },
+            }),
+        });
+        if (!allowUnresolved) {
+            throw new Error(
+                [
+                    `Unresolved measurement conflicts detected for ${pdfPath}`,
+                    `Review report: ${reviewReportPath}`,
+                    'Resolve candidate selections and rerun with --approve-review, or pass --allow-unresolved to write anyway.',
+                ].join('\n'),
+            );
+        }
+    }
+
+    const labToWrite = bloodworkLabSchema.parse({
+        ...lab,
+        reviewSummary:
+            unresolvedCount > 0
+                ? {
+                    unresolvedCount,
+                    reportFile: reviewReportPath,
+                }
+                : undefined,
+    });
+
+    fs.mkdirSync(DEFAULT_OUTPUT_DIRECTORY, { recursive: true });
     const outputPath = path.join(DEFAULT_OUTPUT_DIRECTORY, outputFileName);
-    const jsonPayload = JSON.stringify(lab, null, 4);
+    const jsonPayload = JSON.stringify(labToWrite, null, 4);
     await Bun.write(outputPath, jsonPayload);
 
     const s3Key = await maybeUploadToS3({
@@ -4220,9 +5315,79 @@ async function importSingleFile({
         jsonPayload,
     });
 
+    glossary.version = glossaryForFile.version;
+    glossary.updatedAt = glossaryForFile.updatedAt;
+    glossary.entries = glossaryForFile.entries;
     saveBloodworkGlossary(glossaryPath, glossary);
 
-    return { outputPath, s3Key, modelId };
+    return {
+        outputPath,
+        s3Key,
+        modelId,
+        reviewReportPath,
+        unresolvedCount,
+    };
+}
+
+async function approveReviewReport({
+    reviewReportPath,
+    s3Client,
+    s3Bucket,
+    s3Prefix,
+}: {
+    reviewReportPath: string;
+    s3Client: S3Client | null;
+    s3Bucket: string;
+    s3Prefix: string;
+}): Promise<ImportResult> {
+    if (!fs.existsSync(reviewReportPath)) {
+        throw new Error(`Review report file does not exist: ${reviewReportPath}`);
+    }
+
+    const raw = JSON.parse(fs.readFileSync(reviewReportPath, 'utf8')) as unknown;
+    const report = reviewReportSchema.parse(raw);
+    const resolvedLab = applyReviewReportSelectionsToLab(report);
+
+    fs.mkdirSync(DEFAULT_OUTPUT_DIRECTORY, { recursive: true });
+    const outputFileName = resolveOutputFileName({
+        lab: resolvedLab,
+        sourcePath: report.sourcePdfPath,
+    });
+    const outputPath = path.join(DEFAULT_OUTPUT_DIRECTORY, outputFileName);
+    const jsonPayload = JSON.stringify(resolvedLab, null, 4);
+    await Bun.write(outputPath, jsonPayload);
+
+    const s3Key = await maybeUploadToS3({
+        s3Client,
+        s3Bucket,
+        s3Prefix,
+        fileName: outputFileName,
+        jsonPayload,
+    });
+
+    return {
+        outputPath,
+        s3Key,
+        modelId: 'review-approval',
+        unresolvedCount: 0,
+    };
+}
+
+function createTextractClientIfNeeded(options: {
+    enableTextractFallback: boolean;
+}): TextractClient | null {
+    if (!options.enableTextractFallback) {
+        return null;
+    }
+    const credentials = resolveAwsCredentialsForClients();
+    return new TextractClient({
+        region: credentials.region,
+        credentials: {
+            accessKeyId: credentials.accessKeyId,
+            secretAccessKey: credentials.secretAccessKey,
+            sessionToken: credentials.sessionToken,
+        },
+    });
 }
 
 function createS3ClientIfNeeded(options: {
@@ -4235,22 +5400,15 @@ function createS3ClientIfNeeded(options: {
         return { s3Client: null, s3Bucket, s3Prefix };
     }
 
-    const region = process.env.AWS_REGION?.trim() || process.env.AWS_DEFAULT_REGION?.trim();
-    if (!region) {
-        throw new Error('Missing required environment variable: AWS_REGION (or AWS_DEFAULT_REGION)');
-    }
-
-    const accessKeyId = requireEnv('AWS_ACCESS_KEY_ID');
-    const secretAccessKey = requireEnv('AWS_SECRET_ACCESS_KEY');
-    const sessionToken = process.env.AWS_SESSION_TOKEN?.trim();
+    const credentials = resolveAwsCredentialsForClients();
 
     return {
         s3Client: new S3Client({
-            region,
+            region: credentials.region,
             credentials: {
-                accessKeyId,
-                secretAccessKey,
-                sessionToken: sessionToken || undefined,
+                accessKeyId: credentials.accessKeyId,
+                secretAccessKey: credentials.secretAccessKey,
+                sessionToken: credentials.sessionToken,
             },
         }),
         s3Bucket,
@@ -4263,6 +5421,25 @@ async function runBloodworkImporter(argv: string[] = process.argv.slice(2)): Pro
     const { s3Client, s3Bucket, s3Prefix } = createS3ClientIfNeeded({
         skipUpload: options.skipUpload,
     });
+    const textractClient = createTextractClientIfNeeded({
+        enableTextractFallback: options.enableTextractFallback,
+    });
+
+    if (options.approveReviewPath) {
+        const result = await approveReviewReport({
+            reviewReportPath: options.approveReviewPath,
+            s3Client,
+            s3Bucket,
+            s3Prefix,
+        });
+        if (result.outputPath) {
+            console.info(`Wrote ${result.outputPath}`);
+        }
+        if (result.s3Key) {
+            console.info(`Uploaded s3://${s3Bucket}/${result.s3Key}`);
+        }
+        return;
+    }
 
     if (options.mergeExistingOnly) {
         const consolidation = await consolidateBloodworkDataFiles({
@@ -4305,6 +5482,13 @@ async function runBloodworkImporter(argv: string[] = process.argv.slice(2)): Pro
 
     console.info(`Importing ${files.length} file(s)`);
     console.info(`Model candidates: ${modelIds.join(', ')}`);
+    console.info(`Review report directory: ${options.reviewReportDir}`);
+    if (options.allowUnresolved) {
+        console.info('Unresolved conflicts will still be written (--allow-unresolved)');
+    }
+    if (textractClient) {
+        console.info('AWS Textract fallback is enabled (--textract-fallback)');
+    }
     if (options.skipUpload) {
         console.info('S3 upload is disabled for this run (--skip-upload)');
     } else {
@@ -4326,10 +5510,18 @@ async function runBloodworkImporter(argv: string[] = process.argv.slice(2)): Pro
                 s3Prefix,
                 glossary,
                 glossaryPath,
+                allowUnresolved: options.allowUnresolved,
+                reviewReportDir: options.reviewReportDir,
+                textractClient,
             });
 
             successCount += 1;
-            console.info(`Wrote ${result.outputPath}`);
+            if (result.outputPath) {
+                console.info(`Wrote ${result.outputPath}`);
+            }
+            if ((result.unresolvedCount ?? 0) > 0 && result.reviewReportPath) {
+                console.info(`Unresolved conflicts: ${result.unresolvedCount} (review report: ${result.reviewReportPath})`);
+            }
             if (result.s3Key) {
                 console.info(`Uploaded s3://${s3Bucket}/${result.s3Key}`);
             }
@@ -4394,6 +5586,10 @@ export {
     isEnglishGlossaryName,
     normalizeGlossaryDecisionAction,
     resolveModelIds,
+    parseNumericValueToken,
+    extractDateCandidatesFromText,
+    resolveCanonicalLabDate,
+    resolveMeasurementCandidates,
     runBloodworkImporter,
 };
 

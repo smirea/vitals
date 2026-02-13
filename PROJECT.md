@@ -35,6 +35,14 @@ Pick the next most important feature to work on, implement it fully and test it 
     - [x] during import, validate extracted measurement names against glossary and run a second LLM pass for unknown names
     - [x] classify unknown names as alias, valid new entry, or invalid parse and update glossary automatically
     - [x] enforce english-only canonical names/aliases in validator prompts and acceptance rules
+- [x] bloodwork parsing accuracy overhaul with review-gated conflicts
+    - [x] add confidence/review/provenance metadata fields to schema and client types
+    - [x] add collection/reported/received metadata extraction and canonical date precedence (`collectionDate` first)
+    - [x] enforce strict numeric token parsing to avoid partial-number truncation
+    - [x] add score-based candidate resolver with `needs_review` gating and conflict metadata
+    - [x] block canonical writes on unresolved conflicts unless `--allow-unresolved` is provided, and write review reports to `data/review`
+    - [x] add `--approve-review` workflow to finalize unresolved reports
+    - [x] add optional `--textract-fallback` integration for low-confidence extraction fallback
 
 # Notes:
 - Importer defaults to `google/gemini-3-flash-preview` and validates output through the shared `BloodworkLab` schema.
@@ -45,6 +53,10 @@ Pick the next most important feature to work on, implement it fully and test it 
 - Unknown glossary names go through a second-pass validator prompt that enforces english-only canonical names and aliases before entries are accepted.
 - Importer standardizes measurement units for key analytes; when a numeric unit conversion is applied it preserves pre-conversion data in `measurement.original` (`value`, `unit`, `referenceRange`).
 - Importer consolidates bloodwork JSON files within a 7-day window into the latest-dated file, records contributing files in `mergedFrom`, and stores superseded measurement readings in `measurement.duplicateValues`.
+- Importer now resolves conflicting candidate values with a score-based selector and marks ambiguous winners as `reviewStatus: "needs_review"` with conflict metadata and optional review report output.
+- Importer review workflow supports `--review-report-dir`, `--allow-unresolved`, and `--approve-review <report.json>`.
+- Importer now extracts `collectionDate`, `reportedDate`, and `receivedDate` and sets canonical `date` from collection date when present.
+- Optional AWS Textract fallback can be enabled via `--textract-fallback`; credentials are validated on startup when enabled.
 - Starred dashboard measurements are saved under `localStorage` key `vitals.starred.measurements`; starred names are bold and sorted to the top of the table, and when grouping is enabled they are hoisted into a top `Favorites` category.
 - Dashboard table cells now render reference ranges visually with a track, min/max bounds, and the observed value marker when numeric range data is available.
 - Client dashboard rendering was refactored into `client/src/features/vitals/*` with a custom lightweight table (no Ant Table render path) and shared `types.ts`, `model.ts`, and `utils.ts` modules.
