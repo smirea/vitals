@@ -475,13 +475,10 @@ const bloodworkGlossaryEntrySchema = z.object({
     categoryAliases: z.array(z.string().trim().min(1)).default([]),
     knownRanges: z.array(glossaryRangeSchema).default([]),
     unitHints: z.array(z.string().trim().min(1)).default([]),
-    createdAt: z.string().trim().min(1),
-    updatedAt: z.string().trim().min(1),
 });
 
 const bloodworkGlossarySchema = z.object({
     version: z.literal(1),
-    updatedAt: z.string().trim().min(1),
     entries: z.array(bloodworkGlossaryEntrySchema),
 });
 
@@ -1248,10 +1245,6 @@ function normalizeMeasurementForGlossary(measurement: BloodworkMeasurement): Blo
     };
 }
 
-function nowIsoTimestamp(): string {
-    return new Date().toISOString();
-}
-
 function isEnglishGlossaryName(value: string): boolean {
     const trimmed = value.trim();
     if (!trimmed) {
@@ -1306,7 +1299,6 @@ function isHighConfidenceGlossaryFallbackName(name: string): boolean {
 function createEmptyBloodworkGlossary(): BloodworkGlossary {
     return {
         version: 1,
-        updatedAt: nowIsoTimestamp(),
         entries: [],
     };
 }
@@ -1375,8 +1367,6 @@ function normalizeGlossaryEntry(entry: BloodworkGlossaryEntry): BloodworkGlossar
         categoryAliases,
         knownRanges: Array.from(rangesByKey.values()),
         unitHints,
-        createdAt: entry.createdAt || nowIsoTimestamp(),
-        updatedAt: entry.updatedAt || nowIsoTimestamp(),
     };
 }
 
@@ -1423,12 +1413,9 @@ function mergeGlossaryEntries(target: BloodworkGlossaryEntry, source: BloodworkG
         rangesByKey.set(buildGlossaryRangeFingerprint(range), range);
     }
     target.knownRanges = Array.from(rangesByKey.values());
-    target.createdAt = target.createdAt < source.createdAt ? target.createdAt : source.createdAt;
-    target.updatedAt = target.updatedAt > source.updatedAt ? target.updatedAt : source.updatedAt;
 }
 
 function normalizeGlossaryState(glossary: BloodworkGlossary): BloodworkGlossary {
-    const now = nowIsoTimestamp();
     const mergedByCanonicalKey = new Map<string, BloodworkGlossaryEntry>();
 
     for (const entry of glossary.entries) {
@@ -1453,7 +1440,6 @@ function normalizeGlossaryState(glossary: BloodworkGlossary): BloodworkGlossary 
 
     return {
         version: 1,
-        updatedAt: glossary.updatedAt || now,
         entries: normalizedEntries,
     };
 }
@@ -1479,10 +1465,7 @@ function loadBloodworkGlossary(glossaryPath: string): BloodworkGlossary {
 }
 
 function saveBloodworkGlossary(glossaryPath: string, glossary: BloodworkGlossary): void {
-    const normalizedGlossary = normalizeGlossaryState({
-        ...glossary,
-        updatedAt: nowIsoTimestamp(),
-    });
+    const normalizedGlossary = normalizeGlossaryState(glossary);
     fs.mkdirSync(path.dirname(glossaryPath), { recursive: true });
     fs.writeFileSync(glossaryPath, `${JSON.stringify(normalizedGlossary, null, 4)}\n`, 'utf8');
 }
@@ -1616,10 +1599,6 @@ function upsertRangeIntoGlossaryEntry(entry: BloodworkGlossaryEntry, measurement
     }
 }
 
-function touchGlossaryEntry(entry: BloodworkGlossaryEntry): void {
-    entry.updatedAt = nowIsoTimestamp();
-}
-
 function updateGlossaryEntryWithMeasurement({
     entry,
     measurement,
@@ -1645,7 +1624,6 @@ function updateGlossaryEntryWithMeasurement({
     }
     upsertUnitHintIntoGlossaryEntry(entry, measurement.unit);
     upsertRangeIntoGlossaryEntry(entry, measurement);
-    touchGlossaryEntry(entry);
     return canonicalCategory;
 }
 
@@ -1656,7 +1634,6 @@ function createGlossaryEntryFromMeasurement({
     canonicalName: string;
     measurement: BloodworkMeasurement;
 }): BloodworkGlossaryEntry {
-    const timestamp = nowIsoTimestamp();
     const canonicalCategory = resolveCanonicalCategoryForMeasurement({
         measurementName: canonicalName,
         category: measurement.category,
@@ -1668,8 +1645,6 @@ function createGlossaryEntryFromMeasurement({
         categoryAliases: [],
         knownRanges: [],
         unitHints: [],
-        createdAt: timestamp,
-        updatedAt: timestamp,
     };
     updateGlossaryEntryWithMeasurement({
         entry,
@@ -3155,7 +3130,6 @@ async function applyGlossaryValidationToMeasurements({
         }
     }
 
-    glossary.updatedAt = nowIsoTimestamp();
     return mergeUniqueMeasurements(accepted);
 }
 
@@ -5316,7 +5290,6 @@ async function importSingleFile({
     });
 
     glossary.version = glossaryForFile.version;
-    glossary.updatedAt = glossaryForFile.updatedAt;
     glossary.entries = glossaryForFile.entries;
     saveBloodworkGlossary(glossaryPath, glossary);
 
