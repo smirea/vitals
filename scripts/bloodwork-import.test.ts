@@ -370,8 +370,8 @@ describe('groupBloodworkDataFilesByDateWindow', () => {
                 measurements: [{ name: 'Glucose', value: 92 }],
             }),
             makeMergeInputFile({
-                fileName: 'bloodwork_2026-01-12_lab-c.json',
-                date: '2026-01-12',
+                fileName: 'bloodwork_2026-01-03_lab-c.json',
+                date: '2026-01-03',
                 labName: 'Lab C',
                 measurements: [{ name: 'Glucose', value: 90 }],
             }),
@@ -383,7 +383,7 @@ describe('groupBloodworkDataFilesByDateWindow', () => {
             'bloodwork_2026-01-20_lab-a.json',
         ]);
         expect(groups[1]?.map(item => item.fileName)).toEqual([
-            'bloodwork_2026-01-12_lab-c.json',
+            'bloodwork_2026-01-03_lab-c.json',
         ]);
     });
 });

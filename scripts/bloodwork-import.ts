@@ -36,7 +36,7 @@ const DEFAULT_TO_IMPORT_DIRECTORY = PROJECT_TO_IMPORT_DIR;
 const DEFAULT_OUTPUT_DIRECTORY = PROJECT_DATA_DIR;
 const DEFAULT_GLOSSARY_PATH = PROJECT_GLOSSARY_PATH;
 const DEFAULT_REVIEW_REPORT_DIRECTORY = path.join(PROJECT_DATA_DIR, 'review');
-const MERGE_WINDOW_DAYS = 7;
+const MERGE_WINDOW_DAYS = 14;
 const EXTRACTED_TEXT_LIMIT = 45_000;
 const MODEL_MAX_OUTPUT_TOKENS = 1_400;
 const METADATA_MAX_OUTPUT_TOKENS = 280;
@@ -555,7 +555,7 @@ const HELP_TEXT = [
     '',
     'Flags:',
     '  --all                 Import every .pdf file from data/to-import',
-    '  --merge-existing      Merge existing bloodwork_*.json files by date proximity (<= 7 days)',
+    '  --merge-existing      Merge existing bloodwork_*.json files by date proximity (<= 14 days)',
     '  --approve-review      Apply decisions from a review report and finalize the lab JSON',
     '  --continue-on-error   Continue processing other files when --all is used',
     '  --skip-upload         Skip S3 upload (useful for local validation)',
