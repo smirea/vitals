@@ -1,11 +1,308 @@
 .vitals-page {
     display: flex;
     width: 100%;
+    min-height: 100dvh;
     height: 100dvh;
     flex-direction: column;
+    overflow-x: hidden;
+    overflow-y: auto;
+    background: #dfdcd2;
+    color: #383b43;
+}
+
+.vitals-summary-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding: 16px;
+}
+
+.vitals-summary-card {
+    border: 1px solid #c9c5bb;
+    background: #ece9df;
+    padding: 20px 18px;
+}
+
+.vitals-summary-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.vitals-summary-head-tight {
+    align-items: flex-start;
+}
+
+.vitals-summary-head h2 {
+    margin: 0;
+    font-size: 42px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: -0.015em;
+    color: #383b43;
+}
+
+.vitals-summary-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid #c9c5bb;
+    border-radius: 999px;
+    background: #f2efe6;
+    padding: 6px 11px;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    color: #555963;
+}
+
+.vitals-summary-link:hover {
+    border-color: #868a94;
+    color: #383b43;
+}
+
+.vitals-summary-caption {
+    margin: 6px 0 0;
+    font-size: 13px;
+    color: #686d77;
+}
+
+.vitals-summary-caption-chip {
+    border: 1px solid #b5b0a7;
+    border-radius: 999px;
+    background: #f8f6ef;
+    padding: 4px 9px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #656a75;
+}
+
+.vitals-overview-grid {
+    margin-top: 12px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    border-top: 1px solid #cec9be;
+}
+
+.vitals-overview-item {
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid #cec9be;
+    padding: 16px 0;
+}
+
+.vitals-overview-icon {
+    display: grid;
+    place-items: center;
+    color: #464953;
+}
+
+.vitals-overview-body {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.vitals-overview-title-row h3 {
+    margin: 0;
+    font-size: 19px;
+    font-weight: 600;
+    line-height: 1.15;
+    color: #383b43;
+}
+
+.vitals-overview-meter {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+.vitals-overview-track {
+    display: flex;
+    width: 100%;
+    height: 16px;
     overflow: hidden;
-    background: #f1f5f9;
-    color: #0f172a;
+    border-radius: 999px;
+    background: #d9d5cb;
+}
+
+.vitals-overview-segment {
+    height: 100%;
+}
+
+.vitals-overview-segment-in-range {
+    background: #72b98a;
+}
+
+.vitals-overview-segment-out-of-range {
+    background: #bd7a56;
+}
+
+.vitals-overview-segment-unclassified {
+    background: #6e7575;
+}
+
+.vitals-overview-tally {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+}
+
+.vitals-overview-tally-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 15px;
+    font-weight: 500;
+    color: #434750;
+}
+
+.vitals-overview-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+}
+
+.vitals-overview-dot-in-range {
+    background: #72b98a;
+}
+
+.vitals-overview-dot-out-of-range {
+    background: #bd7a56;
+}
+
+.vitals-overview-dot-unclassified {
+    background: #6e7575;
+}
+
+.vitals-overview-total {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding-left: 8px;
+    font-size: 21px;
+    font-weight: 500;
+    color: #3f434d;
+}
+
+.vitals-overview-active-dot {
+    width: 11px;
+    height: 11px;
+    border-radius: 999px;
+    background: #1780ea;
+}
+
+.vitals-changes-empty {
+    margin-top: 12px;
+    border: 1px dashed #b8b3a9;
+    background: #f3f0e8;
+    padding: 14px;
+    font-size: 14px;
+    color: #5b606a;
+}
+
+.vitals-changes-grid {
+    margin-top: 14px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.vitals-change-card {
+    border: 1px solid #cbc6bb;
+    background: #f6f4ec;
+    padding: 12px;
+}
+
+.vitals-change-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.vitals-change-title h3 {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 600;
+    line-height: 1.2;
+    color: #383b43;
+}
+
+.vitals-change-title span {
+    display: inline-block;
+    margin-top: 2px;
+    font-size: 12px;
+    color: #676b74;
+}
+
+.vitals-change-delta {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: 999px;
+    border: 1px solid #bdc4ca;
+    background: #eef2f3;
+    padding: 3px 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #48505a;
+    white-space: nowrap;
+}
+
+.vitals-change-comparison {
+    margin-top: 12px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.vitals-change-side {
+    border: 1px solid #d4d0c7;
+    background: #fcfbf7;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.vitals-change-side-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #777c86;
+}
+
+.vitals-change-date {
+    font-size: 11px;
+    color: #666b75;
+}
+
+.vitals-change-side strong {
+    font-size: 15px;
+    font-weight: 600;
+    color: #343942;
+}
+
+.vitals-change-range {
+    font-size: 11px;
+    color: #676b74;
+}
+
+.vitals-sticky-stage {
+    position: sticky;
+    top: 0;
+    height: 100dvh;
+    min-height: 0;
+    padding: 0 16px 16px;
+    z-index: 4;
 }
 
 .vitals-workspace {
@@ -230,4 +527,59 @@
     border-color: #fcd34d;
     background: #fffbeb;
     color: #b45309;
+}
+
+@media (max-width: 1199px) {
+    .vitals-summary-head h2 {
+        font-size: 36px;
+    }
+
+    .vitals-overview-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .vitals-changes-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 899px) {
+    .vitals-summary-stack {
+        gap: 14px;
+        padding: 10px;
+    }
+
+    .vitals-summary-card {
+        padding: 14px 12px;
+    }
+
+    .vitals-summary-head h2 {
+        font-size: 32px;
+    }
+
+    .vitals-overview-item {
+        grid-template-columns: 42px minmax(0, 1fr) auto;
+        gap: 10px;
+        padding: 14px 0;
+    }
+
+    .vitals-overview-icon {
+        font-size: 14px;
+    }
+
+    .vitals-overview-title-row h3 {
+        font-size: 17px;
+    }
+
+    .vitals-overview-total {
+        font-size: 18px;
+    }
+
+    .vitals-sticky-stage {
+        padding: 0 10px 10px;
+    }
+
+    .vitals-change-comparison {
+        grid-template-columns: 1fr;
+    }
 }

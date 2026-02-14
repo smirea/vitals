@@ -104,6 +104,32 @@ export type MeasurementOverviewTally = {
     outOfRange: number;
 };
 
+export type CategoryOverviewModel = {
+    category: string;
+    inRangeCount: number;
+    outOfRangeCount: number;
+    unclassifiedCount: number;
+    totalCount: number;
+};
+
+export type MeasurementChangeDirection = 'up' | 'down' | 'flat';
+
+export type MeasurementChangeModel = {
+    key: string;
+    measurement: string;
+    category: string;
+    latestSource: SourceColumn;
+    previousSource: SourceColumn;
+    latestCell: MeasurementCell;
+    previousCell: MeasurementCell;
+    latestOutOfRange: boolean;
+    previousOutOfRange: boolean;
+    direction: MeasurementChangeDirection;
+    delta: number | null;
+    deltaRatio: number | null;
+    significance: number;
+};
+
 export type ChartSeriesModel = {
     id: string;
     chartKey: string;
@@ -140,4 +166,6 @@ export type VitalsViewModel = {
     measurementOverviewByKey: Map<string, MeasurementOverviewTally>;
     measurementRangesTooltipByKey: Map<string, string>;
     chartSeries: ChartSeriesModel[];
+    categoryOverview: CategoryOverviewModel[];
+    meaningfulChanges: MeasurementChangeModel[];
 };

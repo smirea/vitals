@@ -70,6 +70,8 @@ Pick the next most important feature to work on, implement it fully and test it 
 - Added visible-table CSV export from dashboard controls; exported file includes measurement/category/overview and currently visible date columns.
 - Fixed sticky header backgrounds for measurement/overview columns, enabled wrapped measurement names, and removed desktop outer padding to use full viewport space.
 - Lab date headers now show a flag/count badge for out-of-range measurements; clicking badges applies additive out-of-range row filters for selected labs and highlights those columns.
+- Dashboard now includes a pre-table category overview section (latest measurement in a 6-month lookback) and a “Changes” section comparing each measurement’s latest value with its prior result (including before/after dates and ranges).
+- Main table workspace now enters a sticky fullscreen stage after scrolling past the summary sections, preserving the existing table/trend layout behavior once in view.
 - Selected out-of-range lab column filters are now persisted and restored from localStorage across reloads.
 
 ## Active iteration requirements (2026-02-13)
@@ -90,3 +92,4 @@ Pick the next most important feature to work on, implement it fully and test it 
 - [x] Keep star interactions from resetting table scroll and preserve starred state across refreshes.
 - [x] Add download-to-CSV for the currently visible dashboard data.
 - [x] Fix first-selection split-view flicker and sticky header/background wrapping regressions.
+- [x] Add category overview + meaningful changes sections above the table and make the table stage sticky fullscreen on scroll.

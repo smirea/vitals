@@ -12,16 +12,20 @@ import {
 import { ChartLineUp } from '@phosphor-icons/react';
 import { Alert, Empty, Spin } from 'antd';
 
+import { CategoriesOverview } from './components/CategoriesOverview';
+import { RecentChanges } from './components/RecentChanges';
 import { VitalsControls } from './components/VitalsControls';
 import { TrendChart } from './components/TrendChart';
 import { VitalsTable } from './components/VitalsTable';
 import {
     getAllMeasurementRows,
+    getCategoryOverview,
     getCategorySelectionByName,
     getChartSeries,
     getChartSources,
     getDateBounds,
     getFilteredMeasurementRows,
+    getMeaningfulMeasurementChanges,
     getMeasurementKeysByCategory,
     getOutOfRangeMeasurementCountBySourceId,
     getMeasurementOverviewByKey,
@@ -98,6 +102,7 @@ export function VitalsDashboard() {
     const [isResizing, setIsResizing] = useState(false);
 
     const workspaceRef = useRef<HTMLDivElement | null>(null);
+    const tableStageRef = useRef<HTMLElement | null>(null);
     const deferredMeasurementFilter = useDeferredValue(measurementFilter);
     const starredMeasurementSet = useMemo(() => new Set(starredMeasurementKeys), [starredMeasurementKeys]);
 
@@ -322,6 +327,17 @@ export function VitalsDashboard() {
         chartSources,
     }), [chartSources, selectedRows]);
 
+    const categoryOverview = useMemo(() => getCategoryOverview({
+        allMeasurementRows,
+        sources,
+        lookbackMonths: 6,
+    }), [allMeasurementRows, sources]);
+
+    const meaningfulChanges = useMemo(() => getMeaningfulMeasurementChanges({
+        allMeasurementRows,
+        sources,
+    }), [allMeasurementRows, sources]);
+
     const onMeasurementFilterChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
         setMeasurementFilter(event.target.value);
     }, []);
@@ -430,6 +446,13 @@ export function VitalsDashboard() {
                 ? previous.filter(item => item !== sourceId)
                 : [...previous, sourceId]
         ));
+    }, []);
+
+    const onViewAllCategories = useCallback(() => {
+        tableStageRef.current?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start',
+        });
     }, []);
 
     const hasAnyData = labs.length > 0;
@@ -594,72 +617,79 @@ export function VitalsDashboard() {
                 </section>
             ) : (
                 <>
-                    <section
-                        ref={workspaceRef}
-                        className='vitals-workspace'
-                        style={{
-                            gridTemplateColumns: showSplitLayout
-                                ? `${Math.round(resolvedTablePaneWidth)}px ${RESIZER_WIDTH}px minmax(${MIN_CHART_PANE_WIDTH}px, 1fr)`
-                                : '1fr',
-                        }}
-                    >
-                        <section className='flex min-h-0 min-w-0 flex-col border border-slate-300 bg-white'>
-                            <VitalsControls
-                                isMobile={isMobileViewport}
-                                measurementFilter={measurementFilter}
-                                onMeasurementFilterChange={onMeasurementFilterChange}
-                                availableDates={availableDates}
-                                dateRangeValue={dateRangeSliderValue}
-                                onDateRangeSliderChange={onDateRangeSliderChange}
-                                groupByCategory={groupByCategory}
-                                onGroupByCategoryChange={onGroupByCategoryChange}
-                                onDownloadCsv={onDownloadCsv}
-                                isDownloadCsvDisabled={isDownloadCsvDisabled}
-                            />
+                    <section className='vitals-summary-stack'>
+                        <CategoriesOverview items={categoryOverview} onViewAll={onViewAllCategories} />
+                        <RecentChanges items={meaningfulChanges} />
+                    </section>
 
-                            <VitalsTable
-                                rows={tableRows}
-                                tableSources={tableSources}
-                                outOfRangeSourceFilterIdSet={outOfRangeSourceFilterIdSet}
-                                outOfRangeMeasurementCountBySourceId={outOfRangeMeasurementCountBySourceId}
-                                selectedRowKeySet={selectedRowKeySet}
-                                categorySelectionByName={categorySelectionByName}
-                                starredMeasurementSet={starredMeasurementSet}
-                                measurementOverviewByKey={measurementOverviewByKey}
-                                measurementRangesTooltipByKey={measurementRangesTooltipByKey}
-                                tableScrollX={tableScrollX}
-                                onToggleRow={onToggleRow}
-                                onToggleAllRows={onToggleAllRows}
-                                onToggleCategory={onToggleCategory}
-                                onToggleStar={onToggleStar}
-                                onToggleOutOfRangeSourceFilter={onToggleOutOfRangeSourceFilter}
-                            />
-                        </section>
+                    <section ref={tableStageRef} className='vitals-sticky-stage'>
+                        <section
+                            ref={workspaceRef}
+                            className='vitals-workspace'
+                            style={{
+                                gridTemplateColumns: showSplitLayout
+                                    ? `${Math.round(resolvedTablePaneWidth)}px ${RESIZER_WIDTH}px minmax(${MIN_CHART_PANE_WIDTH}px, 1fr)`
+                                    : '1fr',
+                            }}
+                        >
+                            <section className='flex min-h-0 min-w-0 flex-col border border-slate-300 bg-white'>
+                                <VitalsControls
+                                    isMobile={isMobileViewport}
+                                    measurementFilter={measurementFilter}
+                                    onMeasurementFilterChange={onMeasurementFilterChange}
+                                    availableDates={availableDates}
+                                    dateRangeValue={dateRangeSliderValue}
+                                    onDateRangeSliderChange={onDateRangeSliderChange}
+                                    groupByCategory={groupByCategory}
+                                    onGroupByCategoryChange={onGroupByCategoryChange}
+                                    onDownloadCsv={onDownloadCsv}
+                                    isDownloadCsvDisabled={isDownloadCsvDisabled}
+                                />
 
-                        {showSplitLayout && (
-                            <div
-                                role='separator'
-                                aria-label='Resize table and chart panels'
-                                aria-orientation='vertical'
-                                onMouseDown={event => {
-                                    event.preventDefault();
-                                    setIsResizing(true);
-                                }}
-                                className='relative cursor-col-resize bg-slate-300 hover:bg-slate-400'
-                            >
-                                <span className='absolute bottom-0 left-1/2 top-0 w-[2px] -translate-x-1/2 bg-slate-900/30' />
-                            </div>
-                        )}
-
-                        {showSplitLayout && (
-                            <section className='flex min-h-0 min-w-0 flex-col border border-l-0 border-slate-300 bg-white'>
-                                <div className='inline-flex items-center gap-2 border-b border-slate-300 px-3 py-2.5'>
-                                    <ChartLineUp size={18} weight='duotone' />
-                                    <strong>Trend view</strong>
-                                </div>
-                                {chartContent}
+                                <VitalsTable
+                                    rows={tableRows}
+                                    tableSources={tableSources}
+                                    outOfRangeSourceFilterIdSet={outOfRangeSourceFilterIdSet}
+                                    outOfRangeMeasurementCountBySourceId={outOfRangeMeasurementCountBySourceId}
+                                    selectedRowKeySet={selectedRowKeySet}
+                                    categorySelectionByName={categorySelectionByName}
+                                    starredMeasurementSet={starredMeasurementSet}
+                                    measurementOverviewByKey={measurementOverviewByKey}
+                                    measurementRangesTooltipByKey={measurementRangesTooltipByKey}
+                                    tableScrollX={tableScrollX}
+                                    onToggleRow={onToggleRow}
+                                    onToggleAllRows={onToggleAllRows}
+                                    onToggleCategory={onToggleCategory}
+                                    onToggleStar={onToggleStar}
+                                    onToggleOutOfRangeSourceFilter={onToggleOutOfRangeSourceFilter}
+                                />
                             </section>
-                        )}
+
+                            {showSplitLayout && (
+                                <div
+                                    role='separator'
+                                    aria-label='Resize table and chart panels'
+                                    aria-orientation='vertical'
+                                    onMouseDown={event => {
+                                        event.preventDefault();
+                                        setIsResizing(true);
+                                    }}
+                                    className='relative cursor-col-resize bg-slate-300 hover:bg-slate-400'
+                                >
+                                    <span className='absolute bottom-0 left-1/2 top-0 w-[2px] -translate-x-1/2 bg-slate-900/30' />
+                                </div>
+                            )}
+
+                            {showSplitLayout && (
+                                <section className='flex min-h-0 min-w-0 flex-col border border-l-0 border-slate-300 bg-white'>
+                                    <div className='inline-flex items-center gap-2 border-b border-slate-300 px-3 py-2.5'>
+                                        <ChartLineUp size={18} weight='duotone' />
+                                        <strong>Trend view</strong>
+                                    </div>
+                                    {chartContent}
+                                </section>
+                            )}
+                        </section>
                     </section>
 
                     {hasSelectedRows && isMobileViewport && (
