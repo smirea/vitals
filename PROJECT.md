@@ -69,6 +69,7 @@ Pick the next most important feature to work on, implement it fully and test it 
 - Selected dashboard rows are now persisted in `localStorage` and restored on refresh (`vitals.selected.rows`), with invalid selections pruned once measurement data is loaded.
 - Added visible-table CSV export from dashboard controls; exported file includes measurement/category/overview and currently visible date columns.
 - Fixed sticky header backgrounds for measurement/overview columns, enabled wrapped measurement names, and removed desktop outer padding to use full viewport space.
+- Lab date headers now show a flag/count badge for out-of-range measurements; clicking badges applies additive out-of-range row filters for selected labs and highlights those columns.
 
 ## Active iteration requirements (2026-02-13)
 

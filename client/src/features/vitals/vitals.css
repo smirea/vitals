@@ -49,6 +49,37 @@
     color: #1e293b;
 }
 
+.vitals-source-head {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+}
+
+.vitals-source-filter-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid #cbd5e1;
+    border-radius: 999px;
+    padding: 1px 7px;
+    font-size: 11px;
+    line-height: 1.3;
+    color: #b91c1c;
+    background: #fff1f2;
+}
+
+.vitals-source-filter-toggle:hover {
+    border-color: #fda4af;
+    background: #ffe4e6;
+}
+
+.vitals-source-filter-toggle-active {
+    border-color: #dc2626;
+    color: #ffffff;
+    background: #dc2626;
+}
+
 .vitals-cell {
     min-width: var(--source-col-width);
     width: var(--source-col-width);
@@ -105,6 +136,14 @@
     background: #f8fafc;
 }
 
+.vitals-head.vitals-source-filter-active {
+    background: #fee2e2;
+}
+
+.vitals-cell.vitals-source-filter-active {
+    background: #fff1f2;
+}
+
 .vitals-category-row > .vitals-cell {
     --vitals-row-bg: #dbeafe;
     border-color: #cbd5e1;
@@ -114,6 +153,14 @@
 .vitals-category-row:hover > .vitals-cell {
     --vitals-row-bg: #bfdbfe;
     background: #bfdbfe;
+}
+
+.vitals-category-row > .vitals-cell.vitals-source-filter-active {
+    background: #fecdd3;
+}
+
+.vitals-category-row:hover > .vitals-cell.vitals-source-filter-active {
+    background: #fda4af;
 }
 
 .vitals-cell-value {

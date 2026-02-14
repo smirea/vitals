@@ -41,7 +41,7 @@ export function VitalsControls({
     const shouldStackLabels = Math.abs(startHandlePercent - endHandlePercent) < 10;
 
     return (
-        <div className={`grid items-center gap-2 border-b border-slate-300 p-2 ${isMobile ? 'grid-cols-1' : 'grid-cols-[minmax(240px,1fr)_minmax(320px,1.35fr)_auto_auto]'}`}>
+        <div className={`grid items-center gap-y-2 gap-x-4 border-b border-slate-300 p-2 ${isMobile ? 'grid-cols-1' : 'grid-cols-[minmax(240px,1fr)_minmax(320px,1.35fr)_auto_auto]'}`}>
             <label className='relative flex items-center'>
                 <Drop size={16} className='pointer-events-none absolute left-2 text-slate-600' />
                 <input

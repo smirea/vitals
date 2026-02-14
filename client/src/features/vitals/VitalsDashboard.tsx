@@ -23,10 +23,12 @@ import {
     getDateBounds,
     getFilteredMeasurementRows,
     getMeasurementKeysByCategory,
+    getOutOfRangeMeasurementCountBySourceId,
     getMeasurementOverviewByKey,
     getMeasurementRangesTooltipByKey,
     getOrderedLabs,
     getPrunedSelectedRowKeys,
+    getRowsMatchingOutOfRangeSources,
     getRowsWithVisibleData,
     getSelectedRows,
     getSources,
@@ -89,6 +91,7 @@ export function VitalsDashboard() {
     const [dateRangeStart, setDateRangeStart] = useState('');
     const [dateRangeEnd, setDateRangeEnd] = useState('');
     const [groupByCategory, setGroupByCategory] = useState(() => readStoredGroupByCategory());
+    const [outOfRangeSourceFilterIds, setOutOfRangeSourceFilterIds] = useState<string[]>([]);
     const [tablePaneWidth, setTablePaneWidth] = useState(0);
     const [isResizing, setIsResizing] = useState(false);
 
@@ -213,6 +216,35 @@ export function VitalsDashboard() {
         visibleSources,
     }), [filteredMeasurementRows, visibleSources]);
 
+    const baseTableSources = useMemo(() => getTableSources({
+        filteredMeasurementRows: rowsWithVisibleData,
+        visibleSources,
+    }), [rowsWithVisibleData, visibleSources]);
+
+    const baseTableMeasurementRows = useMemo(() => getRowsWithVisibleData({
+        filteredMeasurementRows: rowsWithVisibleData,
+        visibleSources: baseTableSources,
+    }), [baseTableSources, rowsWithVisibleData]);
+
+    useEffect(() => {
+        const availableSourceIds = new Set(baseTableSources.map(source => source.id));
+        setOutOfRangeSourceFilterIds(previous => {
+            const next = previous.filter(sourceId => availableSourceIds.has(sourceId));
+            return next.length === previous.length ? previous : next;
+        });
+    }, [baseTableSources]);
+
+    const outOfRangeSourceFilterIdSet = useMemo(
+        () => new Set(outOfRangeSourceFilterIds),
+        [outOfRangeSourceFilterIds],
+    );
+
+    const tableMeasurementRows = useMemo(() => getRowsMatchingOutOfRangeSources({
+        filteredMeasurementRows: baseTableMeasurementRows,
+        tableSources: baseTableSources,
+        outOfRangeSourceIdSet: outOfRangeSourceFilterIdSet,
+    }), [baseTableMeasurementRows, baseTableSources, outOfRangeSourceFilterIdSet]);
+
     useEffect(() => {
         if (allMeasurementRows.length === 0) {
             return;
@@ -220,26 +252,23 @@ export function VitalsDashboard() {
         setSelectedRowKeys(previous => {
             const next = getPrunedSelectedRowKeys({
                 selectedRowKeys: previous,
-                filteredMeasurementRows: rowsWithVisibleData,
+                filteredMeasurementRows: tableMeasurementRows,
             });
             return next.length === previous.length ? previous : next;
         });
-    }, [rowsWithVisibleData]);
+    }, [allMeasurementRows.length, tableMeasurementRows]);
 
     const selectedRowKeySet = useMemo(
         () => new Set(selectedRowKeys),
         [selectedRowKeys],
     );
 
-    const tableSources = useMemo(() => getTableSources({
-        filteredMeasurementRows: rowsWithVisibleData,
-        visibleSources,
-    }), [rowsWithVisibleData, visibleSources]);
+    const tableSources = baseTableSources;
 
-    const tableMeasurementRows = useMemo(() => getRowsWithVisibleData({
-        filteredMeasurementRows: rowsWithVisibleData,
-        visibleSources: tableSources,
-    }), [rowsWithVisibleData, tableSources]);
+    const outOfRangeMeasurementCountBySourceId = useMemo(() => getOutOfRangeMeasurementCountBySourceId({
+        filteredMeasurementRows: baseTableMeasurementRows,
+        tableSources: baseTableSources,
+    }), [baseTableMeasurementRows, baseTableSources]);
 
     const tableRows = useMemo(() => getTableRows({
         filteredMeasurementRows: tableMeasurementRows,
@@ -385,6 +414,14 @@ export function VitalsDashboard() {
             previous.includes(measurementKey)
                 ? previous.filter(item => item !== measurementKey)
                 : [...previous, measurementKey]
+        ));
+    }, []);
+
+    const onToggleOutOfRangeSourceFilter = useCallback((sourceId: string) => {
+        setOutOfRangeSourceFilterIds(previous => (
+            previous.includes(sourceId)
+                ? previous.filter(item => item !== sourceId)
+                : [...previous, sourceId]
         ));
     }, []);
 
@@ -576,6 +613,8 @@ export function VitalsDashboard() {
                             <VitalsTable
                                 rows={tableRows}
                                 tableSources={tableSources}
+                                outOfRangeSourceFilterIdSet={outOfRangeSourceFilterIdSet}
+                                outOfRangeMeasurementCountBySourceId={outOfRangeMeasurementCountBySourceId}
                                 selectedRowKeySet={selectedRowKeySet}
                                 categorySelectionByName={categorySelectionByName}
                                 starredMeasurementSet={starredMeasurementSet}
@@ -586,6 +625,7 @@ export function VitalsDashboard() {
                                 onToggleAllRows={onToggleAllRows}
                                 onToggleCategory={onToggleCategory}
                                 onToggleStar={onToggleStar}
+                                onToggleOutOfRangeSourceFilter={onToggleOutOfRangeSourceFilter}
                             />
                         </section>
 

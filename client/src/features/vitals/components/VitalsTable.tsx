@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 
-import { CheckCircle, Star, WarningCircle } from '@phosphor-icons/react';
+import { CheckCircle, Flag, Star, WarningCircle } from '@phosphor-icons/react';
 
 import type {
     CategorySelectionState,
@@ -21,6 +21,8 @@ import {
 type VitalsTableProps = {
     rows: VitalsDisplayRow[];
     tableSources: SourceColumn[];
+    outOfRangeSourceFilterIdSet: Set<string>;
+    outOfRangeMeasurementCountBySourceId: Map<string, number>;
     selectedRowKeySet: Set<string>;
     categorySelectionByName: Map<string, CategorySelectionState>;
     starredMeasurementSet: Set<string>;
@@ -31,6 +33,7 @@ type VitalsTableProps = {
     onToggleAllRows: (checked: boolean) => void;
     onToggleCategory: (category: string, checked: boolean) => void;
     onToggleStar: (measurementKey: string) => void;
+    onToggleOutOfRangeSourceFilter: (sourceId: string) => void;
 };
 
 type SelectionCheckboxProps = {
@@ -118,6 +121,7 @@ const MeasurementValueCell = memo(function MeasurementValueCell({ cell }: { cell
 type MeasurementRowProps = {
     row: VitalsRowModel;
     tableSources: SourceColumn[];
+    highlightedSourceIdSet: Set<string>;
     selected: boolean;
     starred: boolean;
     tooltip: string;
@@ -129,6 +133,7 @@ type MeasurementRowProps = {
 const MeasurementRow = memo(function MeasurementRow({
     row,
     tableSources,
+    highlightedSourceIdSet,
     selected,
     starred,
     tooltip,
@@ -185,7 +190,10 @@ const MeasurementRow = memo(function MeasurementRow({
                 </div>
             </td>
             {tableSources.map(source => (
-                <td key={`${row.key}-${source.id}`} className='vitals-cell'>
+                <td
+                    key={`${row.key}-${source.id}`}
+                    className={`vitals-cell ${highlightedSourceIdSet.has(source.id) ? 'vitals-source-filter-active' : ''}`}
+                >
                     <MeasurementValueCell cell={row.valuesBySourceIndex[source.index]} />
                 </td>
             ))}
@@ -194,6 +202,7 @@ const MeasurementRow = memo(function MeasurementRow({
 }, (prev, next) => (
     prev.row === next.row &&
     prev.tableSources === next.tableSources &&
+    prev.highlightedSourceIdSet === next.highlightedSourceIdSet &&
     prev.selected === next.selected &&
     prev.starred === next.starred &&
     prev.tooltip === next.tooltip &&
@@ -203,6 +212,7 @@ const MeasurementRow = memo(function MeasurementRow({
 type CategoryRowProps = {
     row: VitalsCategoryRow;
     tableSources: SourceColumn[];
+    highlightedSourceIdSet: Set<string>;
     selection: CategorySelectionState;
     onToggleCategory: (category: string, checked: boolean) => void;
 };
@@ -210,6 +220,7 @@ type CategoryRowProps = {
 const CategoryRow = memo(function CategoryRow({
     row,
     tableSources,
+    highlightedSourceIdSet,
     selection,
     onToggleCategory,
 }: CategoryRowProps) {
@@ -234,7 +245,10 @@ const CategoryRow = memo(function CategoryRow({
                 <div className='min-h-[18px]' />
             </td>
             {tableSources.map(source => (
-                <td key={`${row.key}-${source.id}`} className='vitals-cell'>
+                <td
+                    key={`${row.key}-${source.id}`}
+                    className={`vitals-cell ${highlightedSourceIdSet.has(source.id) ? 'vitals-source-filter-active' : ''}`}
+                >
                     <div className='min-h-[18px]' />
                 </td>
             ))}
@@ -243,6 +257,7 @@ const CategoryRow = memo(function CategoryRow({
 }, (prev, next) => (
     prev.row === next.row &&
     prev.tableSources === next.tableSources &&
+    prev.highlightedSourceIdSet === next.highlightedSourceIdSet &&
     prev.selection.checked === next.selection.checked &&
     prev.selection.indeterminate === next.selection.indeterminate &&
     prev.selection.disabled === next.selection.disabled
@@ -251,6 +266,8 @@ const CategoryRow = memo(function CategoryRow({
 export const VitalsTable = memo(function VitalsTable({
     rows,
     tableSources,
+    outOfRangeSourceFilterIdSet,
+    outOfRangeMeasurementCountBySourceId,
     selectedRowKeySet,
     categorySelectionByName,
     starredMeasurementSet,
@@ -261,6 +278,7 @@ export const VitalsTable = memo(function VitalsTable({
     onToggleAllRows,
     onToggleCategory,
     onToggleStar,
+    onToggleOutOfRangeSourceFilter,
 }: VitalsTableProps) {
     const tableShellRef = useRef<HTMLDivElement | null>(null);
     const pendingScrollTopRef = useRef<number | null>(null);
@@ -317,11 +335,28 @@ export const VitalsTable = memo(function VitalsTable({
                             </th>
                             <th className='vitals-head vitals-col-measurement'>Measurement</th>
                             <th className='vitals-head vitals-col-overview'>Overview</th>
-                            {tableSources.map(source => (
-                                <th key={source.id} className='vitals-head'>
-                                    {source.prettyDate}
-                                </th>
-                            ))}
+                            {tableSources.map(source => {
+                                const isFiltered = outOfRangeSourceFilterIdSet.has(source.id);
+                                const outOfRangeCount = outOfRangeMeasurementCountBySourceId.get(source.id) ?? 0;
+
+                                return (
+                                    <th key={source.id} className={`vitals-head ${isFiltered ? 'vitals-source-filter-active' : ''}`}>
+                                        <div className='vitals-source-head'>
+                                            <span>{source.prettyDate}</span>
+                                            <button
+                                                type='button'
+                                                aria-label={`Filter measurements out of range in ${source.prettyDate}`}
+                                                aria-pressed={isFiltered}
+                                                onClick={() => onToggleOutOfRangeSourceFilter(source.id)}
+                                                className={`vitals-source-filter-toggle ${isFiltered ? 'vitals-source-filter-toggle-active' : ''}`}
+                                            >
+                                                <Flag size={12} weight={isFiltered ? 'fill' : 'regular'} />
+                                                <span>{outOfRangeCount}</span>
+                                            </button>
+                                        </div>
+                                    </th>
+                                );
+                            })}
                         </tr>
                     </thead>
                     <tbody>
@@ -332,6 +367,7 @@ export const VitalsTable = memo(function VitalsTable({
                                         key={row.key}
                                         row={row}
                                         tableSources={tableSources}
+                                        highlightedSourceIdSet={outOfRangeSourceFilterIdSet}
                                         selection={categorySelectionByName.get(row.category) ?? {
                                             checked: false,
                                             indeterminate: false,
@@ -347,6 +383,7 @@ export const VitalsTable = memo(function VitalsTable({
                                     key={row.key}
                                     row={row}
                                     tableSources={tableSources}
+                                    highlightedSourceIdSet={outOfRangeSourceFilterIdSet}
                                     selected={selectedRowKeySet.has(row.key)}
                                     starred={starredMeasurementSet.has(row.key)}
                                     tooltip={measurementRangesTooltipByKey.get(row.key) ?? row.measurement}

@@ -394,6 +394,51 @@ export function getMeasurementOverviewByKey({
     return overviewByKey;
 }
 
+export function getOutOfRangeMeasurementCountBySourceId({
+    filteredMeasurementRows,
+    tableSources,
+}: {
+    filteredMeasurementRows: VitalsRowModel[];
+    tableSources: SourceColumn[];
+}): Map<string, number> {
+    const countBySourceId = new Map<string, number>();
+
+    tableSources.forEach(source => {
+        let count = 0;
+        filteredMeasurementRows.forEach(row => {
+            if (isCellOutsideReferenceRange(row.valuesBySourceIndex[source.index])) {
+                count += 1;
+            }
+        });
+        countBySourceId.set(source.id, count);
+    });
+
+    return countBySourceId;
+}
+
+export function getRowsMatchingOutOfRangeSources({
+    filteredMeasurementRows,
+    tableSources,
+    outOfRangeSourceIdSet,
+}: {
+    filteredMeasurementRows: VitalsRowModel[];
+    tableSources: SourceColumn[];
+    outOfRangeSourceIdSet: Set<string>;
+}): VitalsRowModel[] {
+    if (outOfRangeSourceIdSet.size === 0) {
+        return filteredMeasurementRows;
+    }
+
+    const selectedSources = tableSources.filter(source => outOfRangeSourceIdSet.has(source.id));
+    if (selectedSources.length === 0) {
+        return filteredMeasurementRows;
+    }
+
+    return filteredMeasurementRows.filter(row => (
+        selectedSources.some(source => isCellOutsideReferenceRange(row.valuesBySourceIndex[source.index]))
+    ));
+}
+
 export function getChartSeries({
     selectedRows,
     chartSources,
