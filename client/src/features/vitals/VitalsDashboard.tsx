@@ -46,8 +46,10 @@ import {
     GROUP_BY_CATEGORY_STORAGE_KEY,
     MEASUREMENT_COLUMN_WIDTH,
     MIN_CHART_PANE_WIDTH,
+    OUT_OF_RANGE_SOURCE_FILTERS_STORAGE_KEY,
     OVERVIEW_COLUMN_WIDTH,
     readStoredGroupByCategory,
+    readStoredOutOfRangeSourceFilterIds,
     readStoredSelectedRowKeys,
     readStoredStarredMeasurementKeys,
     RESIZER_WIDTH,
@@ -91,7 +93,7 @@ export function VitalsDashboard() {
     const [dateRangeStart, setDateRangeStart] = useState('');
     const [dateRangeEnd, setDateRangeEnd] = useState('');
     const [groupByCategory, setGroupByCategory] = useState(() => readStoredGroupByCategory());
-    const [outOfRangeSourceFilterIds, setOutOfRangeSourceFilterIds] = useState<string[]>([]);
+    const [outOfRangeSourceFilterIds, setOutOfRangeSourceFilterIds] = useState<string[]>(() => readStoredOutOfRangeSourceFilterIds());
     const [tablePaneWidth, setTablePaneWidth] = useState(0);
     const [isResizing, setIsResizing] = useState(false);
 
@@ -193,6 +195,11 @@ export function VitalsDashboard() {
         if (typeof window === 'undefined') return;
         window.localStorage.setItem(SELECTED_ROWS_STORAGE_KEY, JSON.stringify(selectedRowKeys));
     }, [selectedRowKeys]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        window.localStorage.setItem(OUT_OF_RANGE_SOURCE_FILTERS_STORAGE_KEY, JSON.stringify(outOfRangeSourceFilterIds));
+    }, [outOfRangeSourceFilterIds]);
 
     useEffect(() => {
         if (allMeasurementRows.length === 0) {

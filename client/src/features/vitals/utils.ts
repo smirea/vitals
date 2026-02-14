@@ -15,6 +15,7 @@ export const SOURCE_COLUMN_WIDTH = 164;
 export const STARRED_MEASUREMENTS_STORAGE_KEY = 'vitals.starred.measurements';
 export const SELECTED_ROWS_STORAGE_KEY = 'vitals.selected.rows';
 export const GROUP_BY_CATEGORY_STORAGE_KEY = 'vitals.group-by-category';
+export const OUT_OF_RANGE_SOURCE_FILTERS_STORAGE_KEY = 'vitals.out-of-range.source-filters';
 export const UNCATEGORIZED_CATEGORY_LABEL = 'Uncategorized';
 export const CHART_PALETTE = ['#0f172a', '#2563eb', '#0f766e', '#15803d', '#7c3aed', '#ca8a04'];
 
@@ -80,6 +81,31 @@ export function readStoredGroupByCategory(): boolean {
         return raw === 'true';
     } catch {
         return true;
+    }
+}
+
+export function normalizeOutOfRangeSourceFilterIds(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    const unique = new Set<string>();
+
+    value.forEach(item => {
+        if (typeof item !== 'string') return;
+        const normalized = item.trim();
+        if (!normalized) return;
+        unique.add(normalized);
+    });
+
+    return Array.from(unique);
+}
+
+export function readStoredOutOfRangeSourceFilterIds(): string[] {
+    if (typeof window === 'undefined') return [];
+    try {
+        const raw = window.localStorage.getItem(OUT_OF_RANGE_SOURCE_FILTERS_STORAGE_KEY);
+        if (!raw) return [];
+        return normalizeOutOfRangeSourceFilterIds(JSON.parse(raw));
+    } catch {
+        return [];
     }
 }
 
