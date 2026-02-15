@@ -90,3 +90,5 @@ Pick the next most important feature to work on, implement it fully and test it 
 - [x] Keep star interactions from resetting table scroll and preserve starred state across refreshes.
 - [x] Add download-to-CSV for the currently visible dashboard data.
 - [x] Fix first-selection split-view flicker and sticky header/background wrapping regressions.
+- [x] Add a top category overview grid with proportional status pills sized against the largest category and based on each measurement's latest available value across all labs.
+- [x] Add a six-month meaningful changes section that compares each latest-in-window value to its previous available result and ranks significant shifts by severity.

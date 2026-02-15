@@ -95,6 +95,161 @@
     flex: 0 0 auto;
 }
 
+.vitals-meaningful-changes {
+    border-bottom: 1px solid #cbd5e1;
+    padding: 12px;
+    background: #ffffff;
+}
+
+.vitals-meaningful-changes-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.vitals-meaningful-changes-header h2 {
+    margin: 0;
+    font-size: 16px;
+    line-height: 1.2;
+    color: #0f172a;
+}
+
+.vitals-meaningful-changes-header p {
+    margin: 0;
+    font-size: 12px;
+    color: #475569;
+    white-space: nowrap;
+}
+
+.vitals-meaningful-changes-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.vitals-meaningful-change-item {
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    background: #f8fafc;
+    padding: 9px 10px;
+}
+
+.vitals-meaningful-change-title-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.vitals-meaningful-change-titles {
+    min-width: 0;
+}
+
+.vitals-meaningful-change-titles h3 {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.2;
+    color: #1e293b;
+}
+
+.vitals-meaningful-change-titles span {
+    display: inline-block;
+    margin-top: 2px;
+    font-size: 12px;
+    color: #64748b;
+}
+
+.vitals-meaningful-change-direction {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    padding: 2px 8px;
+    font-size: 11px;
+    line-height: 1.2;
+    font-weight: 600;
+}
+
+.vitals-meaningful-change-direction-improved {
+    background: #ecfdf5;
+    border-color: #bbf7d0;
+    color: #166534;
+}
+
+.vitals-meaningful-change-direction-worsened {
+    background: #fff1f2;
+    border-color: #fecdd3;
+    color: #be123c;
+}
+
+.vitals-meaningful-change-direction-changed {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+    color: #334155;
+}
+
+.vitals-meaningful-change-values {
+    margin-top: 8px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    gap: 10px;
+}
+
+.vitals-meaningful-change-values > div {
+    min-width: 0;
+}
+
+.vitals-meaningful-change-values span {
+    display: block;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #64748b;
+}
+
+.vitals-meaningful-change-values strong {
+    display: block;
+    margin-top: 2px;
+    font-size: 13px;
+    line-height: 1.2;
+    color: #0f172a;
+}
+
+.vitals-meaningful-change-values small {
+    display: block;
+    margin-top: 1px;
+    font-size: 11px;
+    color: #64748b;
+}
+
+.vitals-meaningful-change-arrow {
+    align-self: center;
+    color: #475569;
+    font-size: 13px;
+}
+
+.vitals-meaningful-change-meta {
+    margin-top: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.vitals-meaningful-change-reason,
+.vitals-meaningful-change-delta {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    padding: 2px 8px;
+    font-size: 11px;
+    line-height: 1.3;
+    color: #334155;
+}
+
 .vitals-workspace {
     display: grid;
     width: 100%;
@@ -350,5 +505,19 @@
 
     .vitals-category-overview-pills {
         flex-wrap: wrap;
+    }
+
+    .vitals-meaningful-changes-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2px;
+    }
+
+    .vitals-meaningful-changes-header p {
+        white-space: normal;
+    }
+
+    .vitals-meaningful-change-values {
+        gap: 8px;
     }
 }

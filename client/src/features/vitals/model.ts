@@ -3,6 +3,10 @@ import type {
     CategoryOverviewItem,
     CategorySelectionState,
     ChartSeriesModel,
+    MeaningfulChangeDirection,
+    MeaningfulChangeItem,
+    MeasurementCell,
+    MeasurementRangeStatus,
     MeasurementOverviewTally,
     SourceColumn,
     VitalsCategoryRow,
@@ -25,6 +29,7 @@ import {
 } from './utils';
 
 const FAVORITES_CATEGORY_LABEL = 'Favorites';
+const SIX_MONTHS = 6;
 
 export function getOrderedLabs(labs: BloodworkLab[]): BloodworkLab[] {
     return [...labs].sort((left, right) => right.date.localeCompare(left.date));
@@ -463,6 +468,331 @@ export function getCategoryOverviewByLatestAcrossAllLabs({
     return Array.from(overviewByCategory.values())
         .filter(item => item.total > 0)
         .sort((left, right) => left.category.localeCompare(right.category));
+}
+
+function getRangeStatus(cell: MeasurementCell | undefined): MeasurementRangeStatus {
+    if (!cell || cell.numericValue === null) {
+        return 'unclassified';
+    }
+
+    if (cell.rangeMin === null && cell.rangeMax === null) {
+        return 'unclassified';
+    }
+
+    return isCellOutsideReferenceRange(cell) ? 'out-of-range' : 'in-range';
+}
+
+function getNormalizedRangePosition(cell: MeasurementCell | undefined): number | null {
+    if (!cell || cell.numericValue === null || cell.rangeMin === null || cell.rangeMax === null) {
+        return null;
+    }
+
+    const low = Math.min(cell.rangeMin, cell.rangeMax);
+    const high = Math.max(cell.rangeMin, cell.rangeMax);
+    if (!(high > low)) {
+        return null;
+    }
+
+    return (cell.numericValue - low) / (high - low);
+}
+
+function getDistanceOutsideRange(cell: MeasurementCell | undefined): number | null {
+    if (!cell || cell.numericValue === null) {
+        return null;
+    }
+
+    const value = cell.numericValue;
+    const min = cell.rangeMin;
+    const max = cell.rangeMax;
+
+    if (min !== null && value < min) {
+        return min - value;
+    }
+    if (max !== null && value > max) {
+        return value - max;
+    }
+
+    return 0;
+}
+
+function resolveMeaningfulChangeDirection({
+    previousStatus,
+    latestStatus,
+    previousCell,
+    latestCell,
+    previousNormalizedPosition,
+    latestNormalizedPosition,
+}: {
+    previousStatus: MeasurementRangeStatus;
+    latestStatus: MeasurementRangeStatus;
+    previousCell: MeasurementCell | undefined;
+    latestCell: MeasurementCell | undefined;
+    previousNormalizedPosition: number | null;
+    latestNormalizedPosition: number | null;
+}): MeaningfulChangeDirection {
+    if (previousStatus === 'out-of-range' && latestStatus === 'in-range') {
+        return 'improved';
+    }
+    if (previousStatus === 'in-range' && latestStatus === 'out-of-range') {
+        return 'worsened';
+    }
+
+    if (
+        previousStatus === 'in-range' &&
+        latestStatus === 'in-range' &&
+        previousNormalizedPosition !== null &&
+        latestNormalizedPosition !== null
+    ) {
+        const previousDistanceFromCenter = Math.abs(previousNormalizedPosition - 0.5);
+        const latestDistanceFromCenter = Math.abs(latestNormalizedPosition - 0.5);
+        if (latestDistanceFromCenter < previousDistanceFromCenter) {
+            return 'improved';
+        }
+        if (latestDistanceFromCenter > previousDistanceFromCenter) {
+            return 'worsened';
+        }
+    }
+
+    const previousOutsideDistance = getDistanceOutsideRange(previousCell);
+    const latestOutsideDistance = getDistanceOutsideRange(latestCell);
+    if (previousOutsideDistance !== null && latestOutsideDistance !== null) {
+        if (latestOutsideDistance < previousOutsideDistance) {
+            return 'improved';
+        }
+        if (latestOutsideDistance > previousOutsideDistance) {
+            return 'worsened';
+        }
+    }
+
+    if (
+        previousCell?.numericValue !== null &&
+        previousCell?.numericValue !== undefined &&
+        latestCell?.numericValue !== null &&
+        latestCell?.numericValue !== undefined
+    ) {
+        if (latestCell.numericValue < previousCell.numericValue) {
+            return 'improved';
+        }
+        if (latestCell.numericValue > previousCell.numericValue) {
+            return 'worsened';
+        }
+    }
+
+    return 'changed';
+}
+
+function getMeaningfulChangeScore({
+    direction,
+    relativeDeltaPercent,
+    normalizedRangeDeltaPercent,
+    latestStatus,
+    statusTransition,
+}: {
+    direction: MeaningfulChangeDirection;
+    relativeDeltaPercent: number | null;
+    normalizedRangeDeltaPercent: number | null;
+    latestStatus: MeasurementRangeStatus;
+    statusTransition: boolean;
+}): number {
+    let score = 0;
+
+    if (statusTransition) {
+        score += 1000;
+    }
+    if (latestStatus === 'out-of-range') {
+        score += 220;
+    }
+    if (direction === 'worsened') {
+        score += 120;
+    }
+    if (direction === 'improved') {
+        score += 80;
+    }
+    if (relativeDeltaPercent !== null) {
+        score += Math.min(relativeDeltaPercent, 500);
+    }
+    if (normalizedRangeDeltaPercent !== null) {
+        score += normalizedRangeDeltaPercent * 1.4;
+    }
+
+    return score;
+}
+
+export function getSixMonthMeaningfulChanges({
+    allMeasurementRows,
+    sources,
+}: {
+    allMeasurementRows: VitalsRowModel[];
+    sources: SourceColumn[];
+}): MeaningfulChangeItem[] {
+    if (allMeasurementRows.length === 0 || sources.length < 2) {
+        return [];
+    }
+
+    const datedSources = sources
+        .map(source => {
+            const timestamp = Date.parse(source.date);
+            if (!Number.isFinite(timestamp)) {
+                return null;
+            }
+            return { source, timestamp };
+        })
+        .filter((entry): entry is { source: SourceColumn; timestamp: number } => entry !== null)
+        .sort((left, right) => {
+            if (left.timestamp !== right.timestamp) {
+                return right.timestamp - left.timestamp;
+            }
+            return left.source.index - right.source.index;
+        });
+
+    if (datedSources.length < 2) {
+        return [];
+    }
+
+    const latestTimestamp = datedSources[0].timestamp;
+    const sixMonthCutoff = new Date(latestTimestamp);
+    sixMonthCutoff.setUTCMonth(sixMonthCutoff.getUTCMonth() - SIX_MONTHS);
+    const sixMonthCutoffTimestamp = sixMonthCutoff.getTime();
+    const meaningfulChanges: MeaningfulChangeItem[] = [];
+
+    allMeasurementRows.forEach(row => {
+        let latestInWindowIndex = -1;
+        for (let index = 0; index < datedSources.length; index += 1) {
+            const entry = datedSources[index];
+            if (entry.timestamp < sixMonthCutoffTimestamp) {
+                break;
+            }
+            if (hasCellDisplayValue(row.valuesBySourceIndex[entry.source.index])) {
+                latestInWindowIndex = index;
+                break;
+            }
+        }
+
+        if (latestInWindowIndex < 0) {
+            return;
+        }
+
+        let previousIndex = -1;
+        for (let index = latestInWindowIndex + 1; index < datedSources.length; index += 1) {
+            const entry = datedSources[index];
+            if (hasCellDisplayValue(row.valuesBySourceIndex[entry.source.index])) {
+                previousIndex = index;
+                break;
+            }
+        }
+
+        if (previousIndex < 0) {
+            return;
+        }
+
+        const latestEntry = datedSources[latestInWindowIndex];
+        const previousEntry = datedSources[previousIndex];
+        const latestCell = row.valuesBySourceIndex[latestEntry.source.index];
+        const previousCell = row.valuesBySourceIndex[previousEntry.source.index];
+
+        if (!latestCell || !previousCell) {
+            return;
+        }
+
+        const latestStatus = getRangeStatus(latestCell);
+        const previousStatus = getRangeStatus(previousCell);
+
+        const latestNumeric = latestCell.numericValue;
+        const previousNumeric = previousCell.numericValue;
+        const relativeDeltaPercent = (
+            latestNumeric !== null &&
+            previousNumeric !== null
+        )
+            ? (Math.abs(latestNumeric - previousNumeric) / Math.max(Math.abs(previousNumeric), 1e-6)) * 100
+            : null;
+
+        const latestNormalizedPosition = getNormalizedRangePosition(latestCell);
+        const previousNormalizedPosition = getNormalizedRangePosition(previousCell);
+        const normalizedRangeDeltaPercent = (
+            latestNormalizedPosition !== null &&
+            previousNormalizedPosition !== null
+        )
+            ? Math.abs(latestNormalizedPosition - previousNormalizedPosition) * 100
+            : null;
+
+        const movedOutToIn = previousStatus === 'out-of-range' && latestStatus === 'in-range';
+        const movedInToOut = previousStatus === 'in-range' && latestStatus === 'out-of-range';
+        const largeRelativeChange = relativeDeltaPercent !== null && relativeDeltaPercent >= 30;
+        const largeWithinRangeDrift = (
+            previousStatus === 'in-range' &&
+            latestStatus === 'in-range' &&
+            normalizedRangeDeltaPercent !== null &&
+            normalizedRangeDeltaPercent >= 30
+        );
+
+        if (!movedOutToIn && !movedInToOut && !largeRelativeChange && !largeWithinRangeDrift) {
+            return;
+        }
+
+        const reasons: string[] = [];
+        if (movedOutToIn) {
+            reasons.push('Out of range → in range');
+        }
+        if (movedInToOut) {
+            reasons.push('In range → out of range');
+        }
+        if (largeWithinRangeDrift) {
+            reasons.push('Within-range drift ≥ 30%');
+        }
+        if (largeRelativeChange) {
+            reasons.push('Value changed ≥ 30%');
+        }
+
+        const direction = resolveMeaningfulChangeDirection({
+            previousStatus,
+            latestStatus,
+            previousCell,
+            latestCell,
+            previousNormalizedPosition,
+            latestNormalizedPosition,
+        });
+
+        const score = getMeaningfulChangeScore({
+            direction,
+            relativeDeltaPercent,
+            normalizedRangeDeltaPercent,
+            latestStatus,
+            statusTransition: movedOutToIn || movedInToOut,
+        });
+
+        meaningfulChanges.push({
+            key: row.key,
+            measurement: row.measurement,
+            category: row.category,
+            direction,
+            score,
+            reasons,
+            relativeDeltaPercent,
+            normalizedRangeDeltaPercent,
+            latest: {
+                date: latestEntry.source.date,
+                prettyDate: latestEntry.source.prettyDate,
+                display: latestCell.display,
+                status: latestStatus,
+            },
+            previous: {
+                date: previousEntry.source.date,
+                prettyDate: previousEntry.source.prettyDate,
+                display: previousCell.display,
+                status: previousStatus,
+            },
+        });
+    });
+
+    return meaningfulChanges.sort((left, right) => {
+        if (right.score !== left.score) {
+            return right.score - left.score;
+        }
+        if (right.latest.date !== left.latest.date) {
+            return right.latest.date.localeCompare(left.latest.date);
+        }
+        return left.measurement.localeCompare(right.measurement);
+    });
 }
 
 export function getOutOfRangeMeasurementCountBySourceId({

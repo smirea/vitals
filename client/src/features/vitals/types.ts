@@ -112,6 +112,33 @@ export type CategoryOverviewItem = {
     total: number;
 };
 
+export type MeasurementRangeStatus = 'in-range' | 'out-of-range' | 'unclassified';
+
+export type MeaningfulChangeDirection = 'improved' | 'worsened' | 'changed';
+
+export type MeaningfulChangeItem = {
+    key: string;
+    measurement: string;
+    category: string;
+    direction: MeaningfulChangeDirection;
+    score: number;
+    reasons: string[];
+    relativeDeltaPercent: number | null;
+    normalizedRangeDeltaPercent: number | null;
+    latest: {
+        date: string;
+        prettyDate: string;
+        display: string;
+        status: MeasurementRangeStatus;
+    };
+    previous: {
+        date: string;
+        prettyDate: string;
+        display: string;
+        status: MeasurementRangeStatus;
+    };
+};
+
 export type ChartSeriesModel = {
     id: string;
     chartKey: string;
