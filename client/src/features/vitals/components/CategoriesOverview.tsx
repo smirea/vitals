@@ -4,19 +4,13 @@ type CategoriesOverviewProps = {
     items: CategoryOverviewItem[];
 };
 
-function toPercent(value: number, total: number): number {
-    if (total <= 0 || value <= 0) {
-        return 0;
-    }
-    return (value / total) * 100;
-}
+const MAX_PILL_WIDTH_PX = 140;
 
-function toPillWidthPercent(value: number, total: number): number {
-    const percentage = toPercent(value, total);
-    if (percentage <= 0) {
+function toPillWidth(value: number, maxTotal: number): number {
+    if (value <= 0 || maxTotal <= 0) {
         return 0;
     }
-    return Math.max(8, percentage);
+    return Math.max(8, Math.round((value / maxTotal) * MAX_PILL_WIDTH_PX));
 }
 
 export function CategoriesOverview({ items }: CategoriesOverviewProps) {
@@ -24,52 +18,51 @@ export function CategoriesOverview({ items }: CategoriesOverviewProps) {
         return null;
     }
 
+    const maxTotal = Math.max(...items.map(item => item.total), 1);
+
     return (
         <section className='vitals-category-overview'>
-            <div className='vitals-category-overview-head'>
-                <strong>Category Overview</strong>
-                <span>Latest value in last 6 months</span>
-            </div>
-
             <div className='vitals-category-overview-grid'>
-                {items.map(item => (
-                    <article key={item.category} className='vitals-category-overview-item'>
-                        <div className='vitals-category-overview-row'>
-                            <h3>{item.category}</h3>
-                            <span>{item.total}</span>
-                        </div>
+                {items.map(item => {
+                    const statuses = [
+                        {
+                            key: 'in-range',
+                            count: item.inRange,
+                            className: 'vitals-category-overview-pill-in-range',
+                        },
+                        {
+                            key: 'out-of-range',
+                            count: item.outOfRange,
+                            className: 'vitals-category-overview-pill-out-of-range',
+                        },
+                        {
+                            key: 'unclassified',
+                            count: item.unclassified,
+                            className: 'vitals-category-overview-pill-unclassified',
+                        },
+                    ].filter(status => status.count > 0);
 
-                        <div className='vitals-category-overview-pills' role='presentation'>
-                            {item.inRange > 0 && (
-                                <span className='vitals-category-overview-pill-group'>
-                                    <span
-                                        className='vitals-category-overview-pill vitals-category-overview-pill-in-range'
-                                        style={{ width: `${toPillWidthPercent(item.inRange, item.total)}%` }}
-                                    />
-                                    <span className='vitals-category-overview-pill-count'>{item.inRange}</span>
-                                </span>
-                            )}
-                            {item.outOfRange > 0 && (
-                                <span className='vitals-category-overview-pill-group'>
-                                    <span
-                                        className='vitals-category-overview-pill vitals-category-overview-pill-out-of-range'
-                                        style={{ width: `${toPillWidthPercent(item.outOfRange, item.total)}%` }}
-                                    />
-                                    <span className='vitals-category-overview-pill-count'>{item.outOfRange}</span>
-                                </span>
-                            )}
-                            {item.unclassified > 0 && (
-                                <span className='vitals-category-overview-pill-group'>
-                                    <span
-                                        className='vitals-category-overview-pill vitals-category-overview-pill-unclassified'
-                                        style={{ width: `${toPillWidthPercent(item.unclassified, item.total)}%` }}
-                                    />
-                                    <span className='vitals-category-overview-pill-count'>{item.unclassified}</span>
-                                </span>
-                            )}
-                        </div>
-                    </article>
-                ))}
+                    return (
+                        <article key={item.category} className='vitals-category-overview-item'>
+                            <div className='vitals-category-overview-row'>
+                                <h3>{item.category}</h3>
+                                <span>{item.total}</span>
+                            </div>
+
+                            <div className='vitals-category-overview-pills' role='presentation'>
+                                {statuses.map(status => (
+                                    <span key={`${item.category}-${status.key}`} className='vitals-category-overview-pill-group'>
+                                        <span
+                                            className={`vitals-category-overview-pill ${status.className}`}
+                                            style={{ width: `${toPillWidth(status.count, maxTotal)}px` }}
+                                        />
+                                        <span className='vitals-category-overview-pill-count'>{status.count}</span>
+                                    </span>
+                                ))}
+                            </div>
+                        </article>
+                    );
+                })}
             </div>
         </section>
     );

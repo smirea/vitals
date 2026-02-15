@@ -14,30 +14,11 @@
     background: #ffffff;
 }
 
-.vitals-category-overview-head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 10px;
-}
-
-.vitals-category-overview-head strong {
-    font-size: 14px;
-    color: #0f172a;
-}
-
-.vitals-category-overview-head span {
-    font-size: 11px;
-    color: #64748b;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-}
-
 .vitals-category-overview-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
     gap: 10px;
+    max-width: calc((320px * 4) + (10px * 3));
 }
 
 .vitals-category-overview-item {
@@ -71,7 +52,8 @@
     margin-top: 8px;
     display: flex;
     flex-wrap: wrap;
-    gap: 6px 10px;
+    gap: 7px 12px;
+    min-width: 0;
 }
 
 .vitals-category-overview-pill-group {
@@ -82,9 +64,9 @@
 }
 
 .vitals-category-overview-pill {
-    height: 12px;
-    min-width: 18px;
+    height: 13px;
     border-radius: 999px;
+    flex-shrink: 0;
 }
 
 .vitals-category-overview-pill-in-range {
@@ -103,6 +85,7 @@
     font-size: 13px;
     font-weight: 500;
     color: #334155;
+    line-height: 1;
 }
 
 .vitals-workspace {
@@ -329,8 +312,15 @@
     color: #b45309;
 }
 
+@media (min-width: 900px) {
+    .vitals-category-overview-grid {
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    }
+}
+
 @media (max-width: 899px) {
     .vitals-category-overview-grid {
         grid-template-columns: 1fr;
+        max-width: none;
     }
 }
