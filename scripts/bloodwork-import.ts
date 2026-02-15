@@ -4971,14 +4971,28 @@ async function consolidateBloodworkDataFiles({
     s3Client,
     s3Bucket,
     s3Prefix,
+    selectedFileNames,
 }: {
     outputDirectory: string;
     s3Client: S3Client | null;
     s3Bucket: string;
     s3Prefix: string;
+    selectedFileNames?: string[];
 }): Promise<ConsolidationSummary> {
     const sourceFiles = listBloodworkDataFiles(outputDirectory);
-    const groups = groupBloodworkDataFilesByDateWindow(sourceFiles);
+    let groups = groupBloodworkDataFilesByDateWindow(sourceFiles);
+    if (selectedFileNames && selectedFileNames.length > 0) {
+        const selectedNames = Array.from(new Set(
+            selectedFileNames.map(value => value.trim()).filter(value => value.length > 0),
+        ));
+        const byFileName = new Map(sourceFiles.map(file => [file.fileName, file]));
+        const missing = selectedNames.filter(fileName => !byFileName.has(fileName));
+        if (missing.length > 0) {
+            throw new Error(`Selected bloodwork files not found: ${missing.join(', ')}`);
+        }
+        const selectedFiles = selectedNames.map(fileName => byFileName.get(fileName)!);
+        groups = groupBloodworkDataFilesByDateWindow(selectedFiles);
+    }
     const summary: ConsolidationSummary = {
         groupsProcessed: groups.length,
         mergedGroups: 0,
@@ -5563,6 +5577,9 @@ export {
     extractDateCandidatesFromText,
     resolveCanonicalLabDate,
     resolveMeasurementCandidates,
+    listBloodworkDataFiles,
+    consolidateBloodworkDataFiles,
+    createS3ClientIfNeeded,
     runBloodworkImporter,
 };
 
