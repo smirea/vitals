@@ -44,7 +44,7 @@ export function MeaningfulChanges({ items }: MeaningfulChangesProps) {
 
                     return (
                         <article key={item.key} className='vitals-meaningful-change-item'>
-                            <div className='vitals-meaningful-change-title-row'>
+                            <div className='vitals-meaningful-change-top'>
                                 <div className='vitals-meaningful-change-titles'>
                                     <h3>{item.measurement}</h3>
                                     <span>{item.category}</span>
@@ -54,18 +54,16 @@ export function MeaningfulChanges({ items }: MeaningfulChangesProps) {
                                 </span>
                             </div>
 
-                            <div className='vitals-meaningful-change-values'>
-                                <div>
-                                    <span>Before</span>
+                            <div className='vitals-meaningful-change-comparison'>
+                                <span className='vitals-meaningful-change-value'>
                                     <strong>{item.previous.display}</strong>
                                     <small>{item.previous.prettyDate}</small>
-                                </div>
-                                <div className='vitals-meaningful-change-arrow' aria-hidden>→</div>
-                                <div>
-                                    <span>Latest</span>
+                                </span>
+                                <span className='vitals-meaningful-change-arrow' aria-hidden>→</span>
+                                <span className='vitals-meaningful-change-value'>
                                     <strong>{item.latest.display}</strong>
                                     <small>{item.latest.prettyDate}</small>
-                                </div>
+                                </span>
                             </div>
 
                             <div className='vitals-meaningful-change-meta'>
