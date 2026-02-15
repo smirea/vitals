@@ -18,7 +18,7 @@ import { TrendChart } from './components/TrendChart';
 import { VitalsTable } from './components/VitalsTable';
 import {
     getAllMeasurementRows,
-    getCategoryOverviewByLatestInLookback,
+    getCategoryOverviewByLatestAcrossAllLabs,
     getCategorySelectionByName,
     getChartSeries,
     getChartSources,
@@ -324,10 +324,9 @@ export function VitalsDashboard() {
         chartSources,
     }), [chartSources, selectedRows]);
 
-    const categoryOverview = useMemo(() => getCategoryOverviewByLatestInLookback({
+    const categoryOverview = useMemo(() => getCategoryOverviewByLatestAcrossAllLabs({
         allMeasurementRows,
         sources,
-        lookbackMonths: 6,
     }), [allMeasurementRows, sources]);
 
     const onMeasurementFilterChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {

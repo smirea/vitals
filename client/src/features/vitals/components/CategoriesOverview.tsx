@@ -55,7 +55,7 @@ export function CategoriesOverview({ items }: CategoriesOverviewProps) {
                                     <span
                                         key={`${item.category}-${status.key}`}
                                         className='vitals-category-overview-pill-group'
-                                        style={{ width: `${status.sharePercent}%` }}
+                                        style={{ width: `calc(var(--vitals-overview-section-min-width) + ${status.sharePercent}%)` }}
                                     >
                                         <span
                                             className={`vitals-category-overview-pill ${status.className}`}

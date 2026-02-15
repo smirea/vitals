@@ -9,6 +9,8 @@
 }
 
 .vitals-category-overview {
+    --vitals-overview-section-min-width: 16px;
+    --vitals-overview-pill-min-width: 10px;
     border-bottom: 1px solid #cbd5e1;
     padding: 12px;
     background: #ffffff;
@@ -59,8 +61,7 @@
 }
 
 .vitals-category-overview-pill-group {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    display: flex;
     align-items: center;
     gap: 4px;
     min-width: 0;
@@ -70,8 +71,8 @@
 .vitals-category-overview-pill {
     height: 13px;
     border-radius: 999px;
-    width: 100%;
-    min-width: 0;
+    flex: 1 1 auto;
+    min-width: var(--vitals-overview-pill-min-width);
 }
 
 .vitals-category-overview-pill-in-range {

@@ -395,20 +395,18 @@ export function getMeasurementOverviewByKey({
     return overviewByKey;
 }
 
-export function getCategoryOverviewByLatestInLookback({
+export function getCategoryOverviewByLatestAcrossAllLabs({
     allMeasurementRows,
     sources,
-    lookbackMonths,
 }: {
     allMeasurementRows: VitalsRowModel[];
     sources: SourceColumn[];
-    lookbackMonths: number;
 }): CategoryOverviewItem[] {
-    if (lookbackMonths <= 0 || sources.length === 0 || allMeasurementRows.length === 0) {
+    if (sources.length === 0 || allMeasurementRows.length === 0) {
         return [];
     }
 
-    const datedSources = sources
+    const latestSources = sources
         .map(source => {
             const timestamp = Date.parse(source.date);
             if (!Number.isFinite(timestamp)) {
@@ -418,38 +416,26 @@ export function getCategoryOverviewByLatestInLookback({
         })
         .filter((item): item is { source: SourceColumn; timestamp: number } => item !== null);
 
-    if (datedSources.length === 0) {
-        return [];
-    }
-
-    const latestTimestamp = Math.max(...datedSources.map(item => item.timestamp));
-    const cutoffDate = new Date(latestTimestamp);
-    cutoffDate.setMonth(cutoffDate.getMonth() - lookbackMonths);
-    const cutoffTimestamp = cutoffDate.getTime();
-
-    const lookbackSources = datedSources
-        .filter(item => item.timestamp >= cutoffTimestamp && item.timestamp <= latestTimestamp)
-        .sort((left, right) => {
+    latestSources.sort((left, right) => {
             if (left.timestamp !== right.timestamp) {
                 return right.timestamp - left.timestamp;
             }
             return left.source.index - right.source.index;
-        })
-        .map(item => item.source);
+    });
 
-    if (lookbackSources.length === 0) {
+    if (latestSources.length === 0) {
         return [];
     }
 
     const overviewByCategory = new Map<string, CategoryOverviewItem>();
 
     allMeasurementRows.forEach(row => {
-        const latestSource = lookbackSources.find(source => hasCellDisplayValue(row.valuesBySourceIndex[source.index]));
-        if (!latestSource) {
+        const latestSourceEntry = latestSources.find(source => hasCellDisplayValue(row.valuesBySourceIndex[source.source.index]));
+        if (!latestSourceEntry) {
             return;
         }
 
-        const latestCell = row.valuesBySourceIndex[latestSource.index];
+        const latestCell = row.valuesBySourceIndex[latestSourceEntry.source.index];
         if (!latestCell) {
             return;
         }
