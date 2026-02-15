@@ -51,22 +51,27 @@
 .vitals-category-overview-pills {
     margin-top: 8px;
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 7px 12px;
     min-width: 0;
+    width: 100%;
+    overflow: hidden;
 }
 
 .vitals-category-overview-pill-group {
-    display: inline-flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     min-width: 0;
+    flex: 0 0 auto;
 }
 
 .vitals-category-overview-pill {
     height: 13px;
     border-radius: 999px;
-    flex-shrink: 0;
+    width: 100%;
+    min-width: 0;
 }
 
 .vitals-category-overview-pill-in-range {
@@ -86,6 +91,8 @@
     font-weight: 500;
     color: #334155;
     line-height: 1;
+    white-space: nowrap;
+    flex: 0 0 auto;
 }
 
 .vitals-workspace {
@@ -322,5 +329,9 @@
     .vitals-category-overview-grid {
         grid-template-columns: 1fr;
         max-width: none;
+    }
+
+    .vitals-category-overview-pills {
+        flex-wrap: wrap;
     }
 }

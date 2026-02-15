@@ -4,13 +4,11 @@ type CategoriesOverviewProps = {
     items: CategoryOverviewItem[];
 };
 
-const MAX_PILL_WIDTH_PX = 140;
-
-function toPillWidth(value: number, maxTotal: number): number {
+function toSharePercent(value: number, maxTotal: number): number {
     if (value <= 0 || maxTotal <= 0) {
         return 0;
     }
-    return Math.max(8, Math.round((value / maxTotal) * MAX_PILL_WIDTH_PX));
+    return (value / maxTotal) * 100;
 }
 
 export function CategoriesOverview({ items }: CategoriesOverviewProps) {
@@ -29,16 +27,19 @@ export function CategoriesOverview({ items }: CategoriesOverviewProps) {
                             key: 'in-range',
                             count: item.inRange,
                             className: 'vitals-category-overview-pill-in-range',
+                            sharePercent: toSharePercent(item.inRange, maxTotal),
                         },
                         {
                             key: 'out-of-range',
                             count: item.outOfRange,
                             className: 'vitals-category-overview-pill-out-of-range',
+                            sharePercent: toSharePercent(item.outOfRange, maxTotal),
                         },
                         {
                             key: 'unclassified',
                             count: item.unclassified,
                             className: 'vitals-category-overview-pill-unclassified',
+                            sharePercent: toSharePercent(item.unclassified, maxTotal),
                         },
                     ].filter(status => status.count > 0);
 
@@ -51,10 +52,13 @@ export function CategoriesOverview({ items }: CategoriesOverviewProps) {
 
                             <div className='vitals-category-overview-pills' role='presentation'>
                                 {statuses.map(status => (
-                                    <span key={`${item.category}-${status.key}`} className='vitals-category-overview-pill-group'>
+                                    <span
+                                        key={`${item.category}-${status.key}`}
+                                        className='vitals-category-overview-pill-group'
+                                        style={{ width: `${status.sharePercent}%` }}
+                                    >
                                         <span
                                             className={`vitals-category-overview-pill ${status.className}`}
-                                            style={{ width: `${toPillWidth(status.count, maxTotal)}px` }}
                                         />
                                         <span className='vitals-category-overview-pill-count'>{status.count}</span>
                                     </span>
