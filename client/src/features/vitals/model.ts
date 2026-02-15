@@ -1,5 +1,6 @@
 import type {
     BloodworkLab,
+    CategoryOverviewItem,
     CategorySelectionState,
     ChartSeriesModel,
     MeasurementOverviewTally,
@@ -392,6 +393,90 @@ export function getMeasurementOverviewByKey({
         });
     });
     return overviewByKey;
+}
+
+export function getCategoryOverviewByLatestInLookback({
+    allMeasurementRows,
+    sources,
+    lookbackMonths,
+}: {
+    allMeasurementRows: VitalsRowModel[];
+    sources: SourceColumn[];
+    lookbackMonths: number;
+}): CategoryOverviewItem[] {
+    if (lookbackMonths <= 0 || sources.length === 0 || allMeasurementRows.length === 0) {
+        return [];
+    }
+
+    const datedSources = sources
+        .map(source => {
+            const timestamp = Date.parse(source.date);
+            if (!Number.isFinite(timestamp)) {
+                return null;
+            }
+            return { source, timestamp };
+        })
+        .filter((item): item is { source: SourceColumn; timestamp: number } => item !== null);
+
+    if (datedSources.length === 0) {
+        return [];
+    }
+
+    const latestTimestamp = Math.max(...datedSources.map(item => item.timestamp));
+    const cutoffDate = new Date(latestTimestamp);
+    cutoffDate.setMonth(cutoffDate.getMonth() - lookbackMonths);
+    const cutoffTimestamp = cutoffDate.getTime();
+
+    const lookbackSources = datedSources
+        .filter(item => item.timestamp >= cutoffTimestamp && item.timestamp <= latestTimestamp)
+        .sort((left, right) => {
+            if (left.timestamp !== right.timestamp) {
+                return right.timestamp - left.timestamp;
+            }
+            return left.source.index - right.source.index;
+        })
+        .map(item => item.source);
+
+    if (lookbackSources.length === 0) {
+        return [];
+    }
+
+    const overviewByCategory = new Map<string, CategoryOverviewItem>();
+
+    allMeasurementRows.forEach(row => {
+        const latestSource = lookbackSources.find(source => hasCellDisplayValue(row.valuesBySourceIndex[source.index]));
+        if (!latestSource) {
+            return;
+        }
+
+        const latestCell = row.valuesBySourceIndex[latestSource.index];
+        if (!latestCell) {
+            return;
+        }
+
+        const existing = overviewByCategory.get(row.category) ?? {
+            category: row.category,
+            inRange: 0,
+            outOfRange: 0,
+            unclassified: 0,
+            total: 0,
+        };
+
+        if (isCellOutsideReferenceRange(latestCell)) {
+            existing.outOfRange += 1;
+        } else if (latestCell.numericValue !== null && (latestCell.rangeMin !== null || latestCell.rangeMax !== null)) {
+            existing.inRange += 1;
+        } else {
+            existing.unclassified += 1;
+        }
+
+        existing.total += 1;
+        overviewByCategory.set(row.category, existing);
+    });
+
+    return Array.from(overviewByCategory.values())
+        .filter(item => item.total > 0)
+        .sort((left, right) => left.category.localeCompare(right.category));
 }
 
 export function getOutOfRangeMeasurementCountBySourceId({

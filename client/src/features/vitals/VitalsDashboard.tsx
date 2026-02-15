@@ -12,11 +12,13 @@ import {
 import { ChartLineUp } from '@phosphor-icons/react';
 import { Alert, Empty, Spin } from 'antd';
 
+import { CategoriesOverview } from './components/CategoriesOverview';
 import { VitalsControls } from './components/VitalsControls';
 import { TrendChart } from './components/TrendChart';
 import { VitalsTable } from './components/VitalsTable';
 import {
     getAllMeasurementRows,
+    getCategoryOverviewByLatestInLookback,
     getCategorySelectionByName,
     getChartSeries,
     getChartSources,
@@ -322,6 +324,12 @@ export function VitalsDashboard() {
         chartSources,
     }), [chartSources, selectedRows]);
 
+    const categoryOverview = useMemo(() => getCategoryOverviewByLatestInLookback({
+        allMeasurementRows,
+        sources,
+        lookbackMonths: 6,
+    }), [allMeasurementRows, sources]);
+
     const onMeasurementFilterChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
         setMeasurementFilter(event.target.value);
     }, []);
@@ -604,6 +612,8 @@ export function VitalsDashboard() {
                         }}
                     >
                         <section className='flex min-h-0 min-w-0 flex-col border border-slate-300 bg-white'>
+                            <CategoriesOverview items={categoryOverview} />
+
                             <VitalsControls
                                 isMobile={isMobileViewport}
                                 measurementFilter={measurementFilter}

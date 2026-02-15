@@ -104,6 +104,14 @@ export type MeasurementOverviewTally = {
     outOfRange: number;
 };
 
+export type CategoryOverviewItem = {
+    category: string;
+    inRange: number;
+    outOfRange: number;
+    unclassified: number;
+    total: number;
+};
+
 export type ChartSeriesModel = {
     id: string;
     chartKey: string;

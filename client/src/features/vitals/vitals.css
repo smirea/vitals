@@ -8,6 +8,112 @@
     color: #0f172a;
 }
 
+.vitals-category-overview {
+    border-bottom: 1px solid #cbd5e1;
+    padding: 12px;
+    background: #ffffff;
+}
+
+.vitals-category-overview-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.vitals-category-overview-head strong {
+    font-size: 14px;
+    color: #0f172a;
+}
+
+.vitals-category-overview-head span {
+    font-size: 11px;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.vitals-category-overview-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.vitals-category-overview-item {
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    background: #f8fafc;
+    padding: 9px 10px;
+}
+
+.vitals-category-overview-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.vitals-category-overview-row h3 {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.2;
+    color: #1e293b;
+}
+
+.vitals-category-overview-row span {
+    font-size: 13px;
+    font-weight: 600;
+    color: #334155;
+}
+
+.vitals-category-overview-track {
+    margin-top: 7px;
+    display: flex;
+    width: 100%;
+    height: 8px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: #dbe2eb;
+}
+
+.vitals-category-overview-segment {
+    height: 100%;
+}
+
+.vitals-category-overview-segment-in-range {
+    background: #16a34a;
+}
+
+.vitals-category-overview-segment-out-of-range {
+    background: #dc2626;
+}
+
+.vitals-category-overview-segment-unclassified {
+    background: #64748b;
+}
+
+.vitals-category-overview-legend {
+    margin-top: 6px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    font-size: 11px;
+    color: #334155;
+}
+
+.vitals-category-overview-legend-in-range {
+    color: #166534;
+}
+
+.vitals-category-overview-legend-out-of-range {
+    color: #991b1b;
+}
+
+.vitals-category-overview-legend-unclassified {
+    color: #475569;
+}
+
 .vitals-workspace {
     display: grid;
     width: 100%;
@@ -230,4 +336,10 @@
     border-color: #fcd34d;
     background: #fffbeb;
     color: #b45309;
+}
+
+@media (max-width: 899px) {
+    .vitals-category-overview-grid {
+        grid-template-columns: 1fr;
+    }
 }
