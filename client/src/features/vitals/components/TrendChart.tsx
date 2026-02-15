@@ -22,11 +22,13 @@ import { formatNormalizedYAxisTick } from '../utils';
 type TrendChartProps = {
     series: ChartSeriesModel[];
     orderedSources: SourceColumn[];
+    isMobile: boolean;
 };
 
 export const TrendChart = memo(function TrendChart({
     series,
     orderedSources,
+    isMobile,
 }: TrendChartProps) {
     const visibleSeries = useMemo(
         () =>
@@ -92,25 +94,28 @@ export const TrendChart = memo(function TrendChart({
 
     return (
         <div className='flex w-full flex-col gap-3 p-3'>
-            <div className='h-[380px] min-h-[320px] w-full'>
+            <div className={`w-full ${isMobile ? 'h-[260px] min-h-[220px]' : 'h-[380px] min-h-[320px]'}`}>
                 {hasNumericData ? (
                     <ResponsiveContainer width='100%' height='100%'>
                         <LineChart
                             data={chartData}
-                            margin={{ top: 18, right: 20, left: 12, bottom: 10 }}
+                            margin={isMobile
+                                ? { top: 12, right: 8, left: 0, bottom: 8 }
+                                : { top: 18, right: 20, left: 12, bottom: 10 }}
                         >
                             <CartesianGrid strokeDasharray='3 3' stroke='rgba(15, 23, 42, 0.16)' />
                             <XAxis
                                 dataKey='sourceId'
                                 tickFormatter={sourceId => sourceById.get(String(sourceId))?.prettyDate ?? String(sourceId)}
                                 tick={{ fontSize: 11, fill: '#334155' }}
-                                minTickGap={22}
+                                minTickGap={isMobile ? 40 : 22}
+                                interval='preserveStartEnd'
                             />
                             <YAxis
                                 domain={yDomain}
                                 tickFormatter={formatNormalizedYAxisTick}
                                 tick={{ fontSize: 11, fill: '#334155' }}
-                                width={56}
+                                width={isMobile ? 44 : 56}
                             />
                             <ReferenceLine
                                 y={0}
@@ -164,7 +169,7 @@ export const TrendChart = memo(function TrendChart({
                                 align='left'
                                 iconSize={8}
                                 formatter={value => <span className='text-[11px] leading-tight text-slate-700'>{value}</span>}
-                                wrapperStyle={{ paddingTop: 8 }}
+                                wrapperStyle={{ paddingTop: 8, maxHeight: isMobile ? 68 : undefined, overflowY: isMobile ? 'auto' : undefined }}
                             />
                             {visibleSeries.map(item => (
                                 <Line

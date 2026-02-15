@@ -578,9 +578,9 @@ export function VitalsDashboard() {
 
     const chartContent = useMemo(() => (
         chartSeries.length > 0
-            ? <TrendChart series={chartSeries} orderedSources={chartSources} />
+            ? <TrendChart series={chartSeries} orderedSources={chartSources} isMobile={isMobileViewport} />
             : <div className='grid h-full place-items-center p-4'><Empty description='No numeric values in the selected rows for this date range.' /></div>
-    ), [chartSeries, chartSources]);
+    ), [chartSeries, chartSources, isMobileViewport]);
 
     return (
         <main className='vitals-page'>

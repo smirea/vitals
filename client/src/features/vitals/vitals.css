@@ -326,6 +326,23 @@
 }
 
 @media (max-width: 899px) {
+    .vitals-page {
+        height: auto;
+        min-height: 100dvh;
+        overflow-x: hidden;
+        overflow-y: auto;
+    }
+
+    .vitals-workspace {
+        height: auto;
+        min-height: 0;
+    }
+
+    .vitals-table-shell {
+        height: auto;
+        max-height: none;
+    }
+
     .vitals-category-overview-grid {
         grid-template-columns: 1fr;
         max-width: none;
