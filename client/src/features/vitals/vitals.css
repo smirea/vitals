@@ -67,51 +67,42 @@
     color: #334155;
 }
 
-.vitals-category-overview-track {
-    margin-top: 7px;
-    display: flex;
-    width: 100%;
-    height: 8px;
-    overflow: hidden;
-    border-radius: 999px;
-    background: #dbe2eb;
-}
-
-.vitals-category-overview-segment {
-    height: 100%;
-}
-
-.vitals-category-overview-segment-in-range {
-    background: #16a34a;
-}
-
-.vitals-category-overview-segment-out-of-range {
-    background: #dc2626;
-}
-
-.vitals-category-overview-segment-unclassified {
-    background: #64748b;
-}
-
-.vitals-category-overview-legend {
-    margin-top: 6px;
+.vitals-category-overview-pills {
+    margin-top: 8px;
     display: flex;
     flex-wrap: wrap;
     gap: 6px 10px;
-    font-size: 11px;
+}
+
+.vitals-category-overview-pill-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.vitals-category-overview-pill {
+    height: 12px;
+    min-width: 18px;
+    border-radius: 999px;
+}
+
+.vitals-category-overview-pill-in-range {
+    background: #72b98a;
+}
+
+.vitals-category-overview-pill-out-of-range {
+    background: #bd7a56;
+}
+
+.vitals-category-overview-pill-unclassified {
+    background: #6e7575;
+}
+
+.vitals-category-overview-pill-count {
+    font-size: 13px;
+    font-weight: 500;
     color: #334155;
-}
-
-.vitals-category-overview-legend-in-range {
-    color: #166534;
-}
-
-.vitals-category-overview-legend-out-of-range {
-    color: #991b1b;
-}
-
-.vitals-category-overview-legend-unclassified {
-    color: #475569;
 }
 
 .vitals-workspace {

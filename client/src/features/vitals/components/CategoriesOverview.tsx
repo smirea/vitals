@@ -11,6 +11,14 @@ function toPercent(value: number, total: number): number {
     return (value / total) * 100;
 }
 
+function toPillWidthPercent(value: number, total: number): number {
+    const percentage = toPercent(value, total);
+    if (percentage <= 0) {
+        return 0;
+    }
+    return Math.max(8, percentage);
+}
+
 export function CategoriesOverview({ items }: CategoriesOverviewProps) {
     if (items.length === 0) {
         return null;
@@ -31,31 +39,34 @@ export function CategoriesOverview({ items }: CategoriesOverviewProps) {
                             <span>{item.total}</span>
                         </div>
 
-                        <div className='vitals-category-overview-track' role='presentation'>
+                        <div className='vitals-category-overview-pills' role='presentation'>
                             {item.inRange > 0 && (
-                                <span
-                                    className='vitals-category-overview-segment vitals-category-overview-segment-in-range'
-                                    style={{ width: `${toPercent(item.inRange, item.total)}%` }}
-                                />
+                                <span className='vitals-category-overview-pill-group'>
+                                    <span
+                                        className='vitals-category-overview-pill vitals-category-overview-pill-in-range'
+                                        style={{ width: `${toPillWidthPercent(item.inRange, item.total)}%` }}
+                                    />
+                                    <span className='vitals-category-overview-pill-count'>{item.inRange}</span>
+                                </span>
                             )}
                             {item.outOfRange > 0 && (
-                                <span
-                                    className='vitals-category-overview-segment vitals-category-overview-segment-out-of-range'
-                                    style={{ width: `${toPercent(item.outOfRange, item.total)}%` }}
-                                />
+                                <span className='vitals-category-overview-pill-group'>
+                                    <span
+                                        className='vitals-category-overview-pill vitals-category-overview-pill-out-of-range'
+                                        style={{ width: `${toPillWidthPercent(item.outOfRange, item.total)}%` }}
+                                    />
+                                    <span className='vitals-category-overview-pill-count'>{item.outOfRange}</span>
+                                </span>
                             )}
                             {item.unclassified > 0 && (
-                                <span
-                                    className='vitals-category-overview-segment vitals-category-overview-segment-unclassified'
-                                    style={{ width: `${toPercent(item.unclassified, item.total)}%` }}
-                                />
+                                <span className='vitals-category-overview-pill-group'>
+                                    <span
+                                        className='vitals-category-overview-pill vitals-category-overview-pill-unclassified'
+                                        style={{ width: `${toPillWidthPercent(item.unclassified, item.total)}%` }}
+                                    />
+                                    <span className='vitals-category-overview-pill-count'>{item.unclassified}</span>
+                                </span>
                             )}
-                        </div>
-
-                        <div className='vitals-category-overview-legend'>
-                            {item.inRange > 0 && <span className='vitals-category-overview-legend-in-range'>In range {item.inRange}</span>}
-                            {item.outOfRange > 0 && <span className='vitals-category-overview-legend-out-of-range'>Out of range {item.outOfRange}</span>}
-                            {item.unclassified > 0 && <span className='vitals-category-overview-legend-unclassified'>Unclassified {item.unclassified}</span>}
                         </div>
                     </article>
                 ))}
