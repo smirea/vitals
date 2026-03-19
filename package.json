@@ -8,7 +8,7 @@
         "build": "bun run --filter client build",
         "perf:client:dev": "bun run scripts/client-perf.ts --url http://localhost:3000 --runs 10 --threshold 250",
         "bloodwork:import": "bun run --env-file .env --env-file .env.local scripts/bloodwork-import.ts",
-        "bloodwork:merge": "bun run --env-file .env --env-file .env.local scripts/bloodwork-merge.ts",
+        "bloodwork:merge": "bun run --env-file .env --env-file .env.local scripts/bloodwork-import.ts --merge-existing",
         "bloodwork:backfill": "bun run --env-file .env --env-file .env.local scripts/bloodwork-import.ts --all --continue-on-error --allow-unresolved",
         "db:push": "bunx drizzle-kit push --config drizzle.config.ts --force",
         "db:import:bloodwork": "bun run bloodwork:backfill",

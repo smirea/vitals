@@ -17,9 +17,16 @@ import {
     type BloodworkMeasurementDuplicateValue,
 } from './bloodwork-schema.ts';
 import {
+    buildMeasurementNameKey,
+    cloneMeasurement,
+    cloneReferenceRange,
+    dedupeDuplicateValues,
+} from './bloodwork-shared.ts';
+import {
     consolidateBloodworkReports,
     createBloodworkImportReview,
     getBloodworkImportReview,
+    listBloodworkReports,
     markBloodworkImportReviewApplied,
     resolveBloodworkSourceKey,
     upsertBloodworkReport,
@@ -27,6 +34,7 @@ import {
 import { createScript } from './createScript.ts';
 import {
     PROJECT_GLOSSARY_PATH,
+    PROJECT_ROOT,
     PROJECT_TO_IMPORT_DIR,
 } from './project-paths.ts';
 
@@ -45,6 +53,7 @@ const MAX_NORMALIZATION_CANDIDATES = 320;
 const MAX_GLOSSARY_DECISIONS = 64;
 const RESOLUTION_MIN_CONFIDENCE = 0.85;
 const RESOLUTION_MIN_MARGIN = 0.1;
+let pushDatabaseSchemaPromise: Promise<void> | null = null;
 
 type CliOptions = {
     importAll: boolean;
@@ -52,6 +61,8 @@ type CliOptions = {
     continueOnError: boolean;
     modelIds: string[];
     mergeExistingOnly: boolean;
+    mergeSourceKeys: string[];
+    mergeDates: string[];
     allowUnresolved: boolean;
     approveReviewId: number | null;
 };
@@ -501,12 +512,15 @@ const HELP_TEXT = [
     'Usage:',
     '  bun scripts/bloodwork-import.ts <path-to-pdf> [--model <openrouter-model-id>] [--allow-unresolved]',
     '  bun scripts/bloodwork-import.ts --all [--continue-on-error] [--model <openrouter-model-id>] [--allow-unresolved]',
-    '  bun scripts/bloodwork-import.ts --merge-existing',
+    '  bun scripts/bloodwork-import.ts --merge-existing [--source <report-key> | --file <report-key> | --date <YYYY-MM-DD>]',
     '  bun scripts/bloodwork-import.ts --approve-review <review-id>',
     '',
     'Flags:',
     '  --all                 Import every .pdf file from data/to-import',
     '  --merge-existing      Merge existing bloodwork reports already stored in SQLite',
+    '  --source <key>        Restrict merge mode to a specific SQLite source key (can be repeated)',
+    '  --file <key>          Alias for --source',
+    '  --date <iso-date>     Restrict merge mode to reports matching a lab date (can be repeated)',
     '  --approve-review      Apply decisions from a pending review record and finalize the lab import',
     '  --continue-on-error   Continue processing other files when --all is used',
     '  --model <id>          Override model id (can be repeated)',
@@ -520,6 +534,8 @@ function parseCliOptions(argv: string[]): CliOptions {
     let allowUnresolved = false;
     let approveReviewId: number | null = null;
     const modelIds: string[] = [];
+    const mergeSourceKeys: string[] = [];
+    const mergeDates: string[] = [];
     const positional: string[] = [];
 
     for (let index = 0; index < argv.length; index++) {
@@ -530,6 +546,24 @@ function parseCliOptions(argv: string[]): CliOptions {
         }
         if (token === '--merge-existing') {
             mergeExistingOnly = true;
+            continue;
+        }
+        if (token === '--source' || token === '--file') {
+            const value = argv[index + 1];
+            if (!value || value.startsWith('--')) {
+                throw new Error(`Missing source key after ${token}\n\n${HELP_TEXT}`);
+            }
+            mergeSourceKeys.push(value.trim());
+            index += 1;
+            continue;
+        }
+        if (token === '--date') {
+            const value = argv[index + 1];
+            if (!value || value.startsWith('--')) {
+                throw new Error(`Missing date after --date\n\n${HELP_TEXT}`);
+            }
+            mergeDates.push(value);
+            index += 1;
             continue;
         }
         if (token === '--continue-on-error') {
@@ -618,6 +652,10 @@ function parseCliOptions(argv: string[]): CliOptions {
         throw new Error(`--model is not used with --merge-existing\n\n${HELP_TEXT}`);
     }
 
+    if (!mergeExistingOnly && (mergeSourceKeys.length > 0 || mergeDates.length > 0)) {
+        throw new Error(`--source/--file/--date can only be used with --merge-existing\n\n${HELP_TEXT}`);
+    }
+
     if (approveReviewId === null && !mergeExistingOnly && !importAll && positional.length !== 1) {
         throw new Error(`Expected exactly one PDF path, --all, or --merge-existing\n\n${HELP_TEXT}`);
     }
@@ -632,9 +670,25 @@ function parseCliOptions(argv: string[]): CliOptions {
         continueOnError,
         modelIds,
         mergeExistingOnly,
+        mergeSourceKeys,
+        mergeDates,
         allowUnresolved,
         approveReviewId,
     };
+}
+
+async function pushDatabaseSchema(): Promise<void> {
+    if (!pushDatabaseSchemaPromise) {
+        pushDatabaseSchemaPromise = Bun.$`bun run db:push`
+            .cwd(PROJECT_ROOT)
+            .then(() => undefined)
+            .catch(error => {
+                pushDatabaseSchemaPromise = null;
+                throw error;
+            });
+    }
+
+    await pushDatabaseSchemaPromise;
 }
 
 function requireEnv(name: string): string {
@@ -3345,7 +3399,7 @@ function resolveMeasurementCandidates({
         selectedMeasurement.provenance = dedupeProvenanceEntries(selectedMeasurement);
 
         const mergedDuplicateValues = dedupeDuplicateValues([
-            ...(selectedMeasurement.duplicateValues?.map(cloneDuplicateValue) ?? []),
+            ...(selectedMeasurement.duplicateValues ?? []),
             ...scoredCandidates.slice(1).map(candidate => buildDuplicateValueFromCandidate({
                 measurement: candidate.measurement,
                 date: measurementDate,
@@ -3385,10 +3439,6 @@ function resolveMeasurementCandidates({
         measurements: resolved.sort((left, right) => left.name.localeCompare(right.name)),
         conflicts,
     };
-}
-
-function buildMeasurementNameKey(name: string): string {
-    return normalizeTextForMatch(name).replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
 function titleCase(value: string): string {
@@ -4227,187 +4277,39 @@ async function generateLabObject({
     };
 }
 
-function cloneReferenceRange(
-    referenceRange: BloodworkMeasurement['referenceRange'],
-): BloodworkMeasurement['referenceRange'] {
-    if (!referenceRange) {
-        return undefined;
-    }
-    const nextRange: NonNullable<BloodworkMeasurement['referenceRange']> = {};
-    if (referenceRange.min !== undefined) {
-        nextRange.min = referenceRange.min;
-    }
-    if (referenceRange.max !== undefined) {
-        nextRange.max = referenceRange.max;
-    }
-    if (nextRange.min === undefined && nextRange.max === undefined) {
-        return undefined;
-    }
-    return nextRange;
-}
+async function resolveSelectedSourceKeys(args: {
+    sourceKeys: string[];
+    dates: string[];
+}): Promise<string[]> {
+    const selected = new Set(
+        args.sourceKeys.map(value => value.trim()).filter(value => value.length > 0),
+    );
 
-function cloneMeasurementOriginal(
-    original: BloodworkMeasurement['original'],
-): BloodworkMeasurement['original'] {
-    if (!original) {
-        return undefined;
-    }
-    const nextOriginal: NonNullable<BloodworkMeasurement['original']> = {};
-    if (original.value !== undefined) {
-        nextOriginal.value = original.value;
-    }
-    if (original.unit !== undefined) {
-        nextOriginal.unit = original.unit;
-    }
-    const originalRange = cloneReferenceRange(original.referenceRange);
-    if (originalRange) {
-        nextOriginal.referenceRange = originalRange;
-    }
-    if (
-        nextOriginal.value === undefined &&
-        nextOriginal.unit === undefined &&
-        nextOriginal.referenceRange === undefined
-    ) {
-        return undefined;
-    }
-    return nextOriginal;
-}
-
-function cloneDuplicateValue(
-    value: BloodworkMeasurementDuplicateValue,
-): BloodworkMeasurementDuplicateValue {
-    const cloned: BloodworkMeasurementDuplicateValue = {
-        date: value.date,
-    };
-    if (value.value !== undefined) {
-        cloned.value = value.value;
-    }
-    if (value.unit !== undefined) {
-        cloned.unit = value.unit;
-    }
-    const range = cloneReferenceRange(value.referenceRange);
-    if (range) {
-        cloned.referenceRange = range;
-    }
-    if (value.flag !== undefined) {
-        cloned.flag = value.flag;
-    }
-    if (value.note !== undefined) {
-        cloned.note = value.note;
-    }
-    if (value.sourceFile !== undefined) {
-        cloned.sourceFile = value.sourceFile;
-    }
-    if (value.sourceLabName !== undefined) {
-        cloned.sourceLabName = value.sourceLabName;
-    }
-    if (value.importLocation !== undefined) {
-        cloned.importLocation = value.importLocation;
-    }
-    return cloned;
-}
-
-function cloneMeasurement(measurement: BloodworkMeasurement): BloodworkMeasurement {
-    const cloned: BloodworkMeasurement = {
-        name: measurement.name,
-    };
-    if (measurement.originalName !== undefined) {
-        cloned.originalName = measurement.originalName;
-    }
-    if (measurement.category !== undefined) {
-        cloned.category = measurement.category;
-    }
-    if (measurement.value !== undefined) {
-        cloned.value = measurement.value;
-    }
-    if (measurement.unit !== undefined) {
-        cloned.unit = measurement.unit;
-    }
-    const range = cloneReferenceRange(measurement.referenceRange);
-    if (range) {
-        cloned.referenceRange = range;
-    }
-    const original = cloneMeasurementOriginal(measurement.original);
-    if (original) {
-        cloned.original = original;
-    }
-    if (measurement.flag !== undefined) {
-        cloned.flag = measurement.flag;
-    }
-    if (measurement.note !== undefined) {
-        cloned.note = measurement.note;
-    }
-    if (measurement.notes !== undefined) {
-        cloned.notes = measurement.notes;
-    }
-    if (measurement.reviewStatus !== undefined) {
-        cloned.reviewStatus = measurement.reviewStatus;
-    }
-    if (measurement.confidence !== undefined) {
-        cloned.confidence = measurement.confidence;
-    }
-    if (measurement.conflict !== undefined) {
-        cloned.conflict = {
-            reason: measurement.conflict.reason,
-            candidateCount: measurement.conflict.candidateCount,
-        };
-    }
-    if (measurement.duplicateValues && measurement.duplicateValues.length > 0) {
-        cloned.duplicateValues = measurement.duplicateValues.map(cloneDuplicateValue);
-    }
-    if (measurement.provenance && measurement.provenance.length > 0) {
-        cloned.provenance = measurement.provenance.map(entry => ({ ...entry }));
-    }
-    return cloned;
-}
-
-function buildDuplicateValueKey(value: BloodworkMeasurementDuplicateValue): string {
-    const rawValue = value.value;
-    const valuePart =
-        rawValue === undefined || rawValue === null
-            ? ''
-            : typeof rawValue === 'number'
-                ? rawValue.toString()
-                : rawValue.trim().toLowerCase();
-    const rangePart = value.referenceRange
-        ? [
-            value.referenceRange.min?.toString() ?? '',
-            value.referenceRange.max?.toString() ?? '',
-        ].join('|')
-        : '';
-    return [
-        value.date,
-        valuePart,
-        value.unit?.trim().toLowerCase() ?? '',
-        rangePart,
-        value.flag ?? '',
-        value.note?.trim().toLowerCase() ?? '',
-        value.sourceFile?.trim().toLowerCase() ?? '',
-        value.sourceLabName?.trim().toLowerCase() ?? '',
-        value.importLocation?.trim().toLowerCase() ?? '',
-    ].join('|');
-}
-
-function dedupeDuplicateValues(values: BloodworkMeasurementDuplicateValue[]): BloodworkMeasurementDuplicateValue[] {
-    const deduped = new Map<string, BloodworkMeasurementDuplicateValue>();
-    for (const value of values) {
-        const key = buildDuplicateValueKey(value);
-        if (!deduped.has(key)) {
-            deduped.set(key, cloneDuplicateValue(value));
+    if (args.dates.length > 0) {
+        const availableReports = await listBloodworkReports();
+        for (const rawDate of args.dates) {
+            const date = normalizeIsoDate(rawDate);
+            const matches = availableReports.filter(report => report.lab.date === date);
+            if (matches.length === 0) {
+                throw new Error(`No bloodwork report found for date ${date}`);
+            }
+            if (matches.length > 1) {
+                throw new Error(
+                    `Multiple bloodwork reports found for date ${date}: ${matches.map(report => report.sourceKey).join(', ')}. Use --source instead.`,
+                );
+            }
+            selected.add(matches[0]!.sourceKey);
         }
     }
-    return Array.from(deduped.values()).sort((left, right) => {
-        const dateCompare = left.date.localeCompare(right.date);
-        if (dateCompare !== 0) {
-            return dateCompare;
-        }
-        const sourceCompare = (left.sourceFile ?? '').localeCompare(right.sourceFile ?? '');
-        if (sourceCompare !== 0) {
-            return sourceCompare;
-        }
-        return buildDuplicateValueKey(left).localeCompare(buildDuplicateValueKey(right));
-    });
+
+    const selectedSourceKeys = Array.from(selected).sort((left, right) => left.localeCompare(right));
+    if (selectedSourceKeys.length < 2) {
+        throw new Error('Expected at least two distinct bloodwork reports to merge');
+    }
+
+    return selectedSourceKeys;
 }
+
 function applyReviewReportSelectionsToLab(report: z.infer<typeof reviewReportSchema>): BloodworkLab {
     const selectedByNameKey = new Map<string, BloodworkMeasurement>();
     for (const conflict of report.conflicts) {
@@ -4580,6 +4482,7 @@ async function approveReviewRecord({
 
 async function runBloodworkImporter(argv: string[] = process.argv.slice(2)): Promise<void> {
     const options = parseCliOptions(argv);
+    await pushDatabaseSchema();
 
     if (options.approveReviewId !== null) {
         const result = await approveReviewRecord({
@@ -4592,7 +4495,14 @@ async function runBloodworkImporter(argv: string[] = process.argv.slice(2)): Pro
     }
 
     if (options.mergeExistingOnly) {
-        const consolidation = await consolidateBloodworkReports();
+        const selectedSourceKeys =
+            options.mergeSourceKeys.length > 0 || options.mergeDates.length > 0
+                ? await resolveSelectedSourceKeys({
+                    sourceKeys: options.mergeSourceKeys,
+                    dates: options.mergeDates,
+                })
+                : undefined;
+        const consolidation = await consolidateBloodworkReports({ selectedSourceKeys });
         console.info(`Consolidated ${consolidation.reportsBefore} report(s) into ${consolidation.reportsAfter} report(s)`);
         console.info(`Merged groups: ${consolidation.mergedGroups}/${consolidation.groupsProcessed}`);
         if (consolidation.groups.length > 0) {
