@@ -1,45 +1,40 @@
-import path from 'path';
-
-import { normalizeIsoDate } from './bloodwork-schema.ts';
-import {
-    consolidateBloodworkDataFiles,
-    createS3ClientIfNeeded,
-    listBloodworkDataFiles,
-} from './bloodwork-import.ts';
-import { syncBloodworkDatabaseFromJson } from './bloodwork-db.ts';
-import { createScript } from './createScript.ts';
-import { PROJECT_DATA_DIR } from './project-paths.ts';
+import { createS3ClientIfNeeded, uploadDatabaseSnapshot } from 'scripts/aws.ts';
+import { consolidateBloodworkReports, listBloodworkReports } from 'scripts/bloodwork-db.ts';
+import { normalizeIsoDate } from 'scripts/bloodwork-schema.ts';
+import { createScript } from 'scripts/createScript.ts';
 
 const HELP_TEXT = [
     'Usage:',
-    '  bun scripts/bloodwork-merge.ts --file <bloodwork_*.json> --file <bloodwork_*.json> [--skip-upload]',
+    '  bun scripts/bloodwork-merge.ts --source <report-key> --source <report-key> [--skip-upload]',
+    '  bun scripts/bloodwork-merge.ts --file <report-key> --file <report-key> [--skip-upload]',
     '  bun scripts/bloodwork-merge.ts --date <YYYY-MM-DD> --date <YYYY-MM-DD> [--skip-upload]',
     '',
     'Flags:',
-    '  --file <name>         Select a bloodwork file by filename (can be repeated)',
-    '  --date <iso-date>     Select a bloodwork file by lab date (can be repeated)',
-    '  --skip-upload         Skip S3 upload and delete operations',
+    '  --source <key>       Select a bloodwork report by SQLite source key (can be repeated)',
+    '  --file <key>         Alias for --source',
+    '  --date <iso-date>    Select a bloodwork report by lab date (can be repeated)',
+    '  --skip-upload        Skip SQLite snapshot upload',
 ].join('\n');
 
 type CliOptions = {
-    fileNames: string[];
+    sourceKeys: string[];
     dates: string[];
     skipUpload: boolean;
 };
 
 function parseCliOptions(argv: string[]): CliOptions {
-    const fileNames: string[] = [];
+    const sourceKeys: string[] = [];
     const dates: string[] = [];
     let skipUpload = false;
 
     for (let index = 0; index < argv.length; index++) {
         const token = argv[index];
-        if (token === '--file') {
+        if (token === '--source' || token === '--file') {
             const value = argv[index + 1];
             if (!value || value.startsWith('--')) {
-                throw new Error(`Expected a value after --file\n\n${HELP_TEXT}`);
+                throw new Error(`Expected a value after ${token}\n\n${HELP_TEXT}`);
             }
-            fileNames.push(path.basename(value));
+            sourceKeys.push(value.trim());
             index += 1;
             continue;
         }
@@ -56,114 +51,106 @@ function parseCliOptions(argv: string[]): CliOptions {
             skipUpload = true;
             continue;
         }
+
         throw new Error(`Unknown argument: ${token}\n\n${HELP_TEXT}`);
     }
 
-    if (fileNames.length === 0 && dates.length === 0) {
-        throw new Error(`Provide at least two --file or --date values\n\n${HELP_TEXT}`);
+    if (sourceKeys.length === 0 && dates.length === 0) {
+        throw new Error(`Provide at least two --source/--file or --date values\n\n${HELP_TEXT}`);
     }
 
     return {
-        fileNames,
+        sourceKeys,
         dates,
         skipUpload,
     };
 }
 
-function resolveSelectedFileNames({
-    outputDirectory,
-    fileNames,
-    dates,
-}: {
-    outputDirectory: string;
-    fileNames: string[];
+async function resolveSelectedSourceKeys(args: {
+    sourceKeys: string[];
     dates: string[];
-}): string[] {
+}): Promise<string[]> {
     const selected = new Set(
-        fileNames.map(value => value.trim()).filter(value => value.length > 0),
+        args.sourceKeys.map(value => value.trim()).filter(value => value.length > 0),
     );
 
-    if (dates.length > 0) {
-        const availableFiles = listBloodworkDataFiles(outputDirectory);
-        for (const rawDate of dates) {
+    if (args.dates.length > 0) {
+        const availableReports = await listBloodworkReports();
+        for (const rawDate of args.dates) {
             const date = normalizeIsoDate(rawDate);
-            const matches = availableFiles.filter(file => file.lab.date === date);
+            const matches = availableReports.filter(report => report.lab.date === date);
             if (matches.length === 0) {
-                throw new Error(`No bloodwork file found for date ${date}`);
+                throw new Error(`No bloodwork report found for date ${date}`);
             }
             if (matches.length > 1) {
                 throw new Error(
-                    `Multiple bloodwork files found for date ${date}: ${matches.map(file => file.fileName).join(', ')}. Use --file instead.`,
+                    `Multiple bloodwork reports found for date ${date}: ${matches.map(report => report.sourceKey).join(', ')}. Use --source instead.`,
                 );
             }
-            selected.add(matches[0]!.fileName);
+            selected.add(matches[0]!.sourceKey);
         }
     }
 
-    const selectedFileNames = Array.from(selected).sort((left, right) => left.localeCompare(right));
-    if (selectedFileNames.length < 2) {
-        throw new Error('Expected at least two distinct bloodwork files to merge');
+    const selectedSourceKeys = Array.from(selected).sort((left, right) => left.localeCompare(right));
+    if (selectedSourceKeys.length < 2) {
+        throw new Error('Expected at least two distinct bloodwork reports to merge');
     }
 
-    return selectedFileNames;
+    return selectedSourceKeys;
 }
 
 async function runBloodworkMerge(argv: string[] = process.argv.slice(2)): Promise<void> {
     const options = parseCliOptions(argv);
-    const selectedFileNames = resolveSelectedFileNames({
-        outputDirectory: PROJECT_DATA_DIR,
-        fileNames: options.fileNames,
+    const selectedSourceKeys = await resolveSelectedSourceKeys({
+        sourceKeys: options.sourceKeys,
         dates: options.dates,
     });
     const { s3Client, s3Bucket, s3Prefix } = createS3ClientIfNeeded({
         skipUpload: options.skipUpload,
     });
 
-    console.info(`Selected ${selectedFileNames.length} file(s): ${selectedFileNames.join(', ')}`);
+    console.info(`Selected ${selectedSourceKeys.length} report(s): ${selectedSourceKeys.join(', ')}`);
     if (options.skipUpload) {
-        console.info('S3 upload is disabled for this run (--skip-upload)');
+        console.info('SQLite snapshot upload is disabled for this run (--skip-upload)');
     } else {
         console.info(`S3 destination: s3://${s3Bucket}/${s3Prefix}`);
     }
 
-    const consolidation = await consolidateBloodworkDataFiles({
-        outputDirectory: PROJECT_DATA_DIR,
-        s3Client,
-        s3Bucket,
-        s3Prefix,
-        selectedFileNames,
+    const consolidation = await consolidateBloodworkReports({
+        selectedSourceKeys,
     });
 
-    console.info(`Consolidated ${consolidation.filesBefore} file(s) into ${consolidation.filesAfter} file(s)`);
+    console.info(`Consolidated ${consolidation.reportsBefore} report(s) into ${consolidation.reportsAfter} report(s)`);
     console.info(`Merged groups: ${consolidation.mergedGroups}/${consolidation.groupsProcessed}`);
+
     for (const group of consolidation.groups) {
-        if (group.sourceFileNames.length < 2) {
+        if (group.sourceKeys.length < 2) {
             continue;
         }
         console.info(
             [
-                `Merged ${group.sourceFileNames.length} files into ${group.targetFileName}`,
+                `Merged ${group.sourceKeys.length} reports into ${group.targetSourceKey}`,
                 `latest date ${group.latestDate}`,
-                `sources: ${group.sourceFileNames.join(', ')}`,
+                `sources: ${group.sourceKeys.join(', ')}`,
             ].join(' | '),
         );
     }
-    if (consolidation.uploadedKeys.length > 0) {
-        console.info(`Uploaded ${consolidation.uploadedKeys.length} consolidated file(s)`);
-    }
-    if (consolidation.deletedKeys.length > 0) {
-        console.info(`Deleted ${consolidation.deletedKeys.length} stale S3 object(s)`);
-    }
 
-    const syncSummary = await syncBloodworkDatabaseFromJson();
-    console.info(
-        `Imported ${syncSummary.reportCount} report(s) into SQLite from ${syncSummary.scannedFileCount} JSON file(s)`,
-    );
+    if (consolidation.writtenSourceKeys.length > 0 || consolidation.removedSourceKeys.length > 0) {
+        const uploadedKey = await uploadDatabaseSnapshot({
+            s3Client,
+            s3Bucket,
+            s3Prefix,
+        });
+        if (uploadedKey) {
+            console.info(`Uploaded s3://${s3Bucket}/${uploadedKey}`);
+        }
+    }
 }
 
 export {
     parseCliOptions,
-    resolveSelectedFileNames,
+    resolveSelectedSourceKeys,
     runBloodworkMerge,
 };
 

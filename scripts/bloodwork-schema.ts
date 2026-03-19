@@ -235,18 +235,3 @@ export function slugifyForPath(value: string): string {
         .replace(/^-+|-+$/g, '');
     return stripped || 'unknown-lab';
 }
-
-export function buildBloodworkFileName(input: Pick<BloodworkLab, 'date' | 'labName'>): string {
-    return `bloodwork_${normalizeIsoDate(input.date)}_${slugifyForPath(input.labName)}.json`;
-}
-
-export function buildBloodworkS3Key(
-    input: Pick<BloodworkLab, 'date' | 'labName'>,
-    prefix = 'vitals',
-): string {
-    const normalizedPrefix = prefix.replace(/^\/+|\/+$/g, '');
-    if (!normalizedPrefix) {
-        return buildBloodworkFileName(input);
-    }
-    return `${normalizedPrefix}/${buildBloodworkFileName(input)}`;
-}

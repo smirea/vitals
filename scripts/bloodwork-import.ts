@@ -3,7 +3,6 @@ import { spawnSync } from 'child_process';
 import path from 'path';
 
 import { AnalyzeDocumentCommand, TextractClient } from '@aws-sdk/client-textract';
-import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { generateObject, generateText } from 'ai';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
@@ -12,32 +11,35 @@ import { z } from 'zod';
 import {
     bloodworkLabSchema,
     bloodworkMeasurementSchema,
-    buildBloodworkFileName,
     normalizeIsoDate,
     parseReferenceRangeBoundsFromText,
-    slugifyForPath,
     type BloodworkMeasurement,
     type BloodworkLab,
     type BloodworkMeasurementDuplicateValue,
-    type BloodworkMergedSource,
 } from './bloodwork-schema.ts';
+import {
+    createS3ClientIfNeeded,
+    resolveAwsCredentials,
+    uploadDatabaseSnapshot,
+} from './aws.ts';
+import {
+    consolidateBloodworkReports,
+    createBloodworkImportReview,
+    getBloodworkImportReview,
+    markBloodworkImportReviewApplied,
+    resolveBloodworkSourceKey,
+    upsertBloodworkReport,
+} from './bloodwork-db.ts';
 import { createScript } from './createScript.ts';
 import {
-    PROJECT_DATA_DIR,
     PROJECT_GLOSSARY_PATH,
     PROJECT_TO_IMPORT_DIR,
 } from './project-paths.ts';
-import { syncBloodworkDatabaseFromJson } from './bloodwork-db.ts';
 
-const DEFAULT_S3_BUCKET = 'stefan-life';
-const DEFAULT_S3_PREFIX = 'vitals';
 const DEFAULT_MODEL_IDS = ['google/gemini-3-flash-preview'];
 const DEFAULT_GLOSSARY_VALIDATOR_MODEL_IDS = ['google/gemini-3-flash-preview'];
 const DEFAULT_TO_IMPORT_DIRECTORY = PROJECT_TO_IMPORT_DIR;
-const DEFAULT_OUTPUT_DIRECTORY = PROJECT_DATA_DIR;
 const DEFAULT_GLOSSARY_PATH = PROJECT_GLOSSARY_PATH;
-const DEFAULT_REVIEW_REPORT_DIRECTORY = path.join(PROJECT_DATA_DIR, 'review');
-const MERGE_WINDOW_DAYS = 14;
 const EXTRACTED_TEXT_LIMIT = 45_000;
 const MODEL_MAX_OUTPUT_TOKENS = 1_400;
 const METADATA_MAX_OUTPUT_TOKENS = 280;
@@ -59,48 +61,15 @@ type CliOptions = {
     modelIds: string[];
     mergeExistingOnly: boolean;
     allowUnresolved: boolean;
-    reviewReportDir: string;
-    approveReviewPath: string | null;
+    approveReviewId: number | null;
     enableTextractFallback: boolean;
 };
 
 type ImportResult = {
-    outputPath: string | null;
-    s3Key: string | null;
+    sourceKey: string | null;
     modelId: string;
-    reviewReportPath?: string;
+    reviewId?: number;
     unresolvedCount?: number;
-};
-
-type BloodworkDataFile = {
-    path: string;
-    fileName: string;
-    lab: BloodworkLab;
-};
-
-type ConsolidatedMeasurementSelection = {
-    measurement: BloodworkMeasurement;
-    source: BloodworkDataFile;
-    duplicateValues: BloodworkMeasurementDuplicateValue[];
-};
-
-type ConsolidationGroupSummary = {
-    targetFileName: string;
-    latestDate: string;
-    sourceFileNames: string[];
-    sourceDates: string[];
-};
-
-type ConsolidationSummary = {
-    groupsProcessed: number;
-    mergedGroups: number;
-    filesBefore: number;
-    filesAfter: number;
-    writtenFiles: string[];
-    removedFiles: string[];
-    uploadedKeys: string[];
-    deletedKeys: string[];
-    groups: ConsolidationGroupSummary[];
 };
 
 type ExtractedPdfText = {
@@ -133,16 +102,6 @@ type MeasurementConflict = {
 type MeasurementResolutionResult = {
     measurements: BloodworkMeasurement[];
     conflicts: MeasurementConflict[];
-};
-
-type ReviewReport = {
-    version: 1;
-    generatedAt: string;
-    sourcePdfPath: string;
-    suggestedOutputFileName: string;
-    unresolvedCount: number;
-    conflicts: MeasurementConflict[];
-    labDraft: BloodworkLab;
 };
 
 const NON_MEASUREMENT_NAME_EXACT = new Set([
@@ -517,8 +476,8 @@ const reviewConflictSchema = z.object({
 const reviewReportSchema = z.object({
     version: z.literal(1),
     generatedAt: z.string().trim().min(1),
+    sourceKey: z.string().trim().min(1),
     sourcePdfPath: z.string().trim().min(1),
-    suggestedOutputFileName: z.string().trim().min(1),
     unresolvedCount: z.number().int().nonnegative(),
     conflicts: z.array(reviewConflictSchema),
     labDraft: bloodworkLabSchema,
@@ -552,17 +511,16 @@ const HELP_TEXT = [
     '  bun scripts/bloodwork-import.ts <path-to-pdf> [--skip-upload] [--model <openrouter-model-id>] [--allow-unresolved]',
     '  bun scripts/bloodwork-import.ts --all [--continue-on-error] [--skip-upload] [--model <openrouter-model-id>] [--allow-unresolved]',
     '  bun scripts/bloodwork-import.ts --merge-existing [--skip-upload]',
-    '  bun scripts/bloodwork-import.ts --approve-review <path-to-review-report.json> [--skip-upload]',
+    '  bun scripts/bloodwork-import.ts --approve-review <review-id> [--skip-upload]',
     '',
     'Flags:',
     '  --all                 Import every .pdf file from data/to-import',
-    '  --merge-existing      Merge existing bloodwork_*.json files by date proximity (<= 14 days)',
-    '  --approve-review      Apply decisions from a review report and finalize the lab JSON',
+    '  --merge-existing      Merge existing bloodwork reports already stored in SQLite',
+    '  --approve-review      Apply decisions from a pending review record and finalize the lab import',
     '  --continue-on-error   Continue processing other files when --all is used',
-    '  --skip-upload         Skip S3 upload (useful for local validation)',
+    '  --skip-upload         Skip SQLite snapshot upload (useful for local validation)',
     '  --model <id>          Override model id (can be repeated)',
-    '  --allow-unresolved    Write output even when unresolved conflicts were found',
-    '  --review-report-dir   Directory for generated unresolved review reports (default: data/review)',
+    '  --allow-unresolved    Store the report even when unresolved conflicts were found',
     '  --textract-fallback   Enable AWS Textract fallback when local extraction confidence is low',
 ].join('\n');
 
@@ -572,8 +530,7 @@ function parseCliOptions(argv: string[]): CliOptions {
     let continueOnError = false;
     let skipUpload = false;
     let allowUnresolved = false;
-    let reviewReportDir = DEFAULT_REVIEW_REPORT_DIRECTORY;
-    let approveReviewPath: string | null = null;
+    let approveReviewId: number | null = null;
     let enableTextractFallback = false;
     const modelIds: string[] = [];
     const positional: string[] = [];
@@ -605,37 +562,26 @@ function parseCliOptions(argv: string[]): CliOptions {
             continue;
         }
         if (token === '--approve-review') {
-            const reportPath = argv[index + 1];
-            if (!reportPath || reportPath.startsWith('--')) {
-                throw new Error(`Missing report path after --approve-review\n\n${HELP_TEXT}`);
+            const reviewId = argv[index + 1];
+            if (!reviewId || reviewId.startsWith('--')) {
+                throw new Error(`Missing review id after --approve-review\n\n${HELP_TEXT}`);
             }
-            approveReviewPath = reportPath;
+            approveReviewId = Number.parseInt(reviewId, 10);
+            if (!Number.isInteger(approveReviewId) || approveReviewId <= 0) {
+                throw new Error(`Invalid review id: ${reviewId}\n\n${HELP_TEXT}`);
+            }
             index++;
             continue;
         }
         if (token.startsWith('--approve-review=')) {
-            const reportPath = token.slice('--approve-review='.length).trim();
-            if (!reportPath) {
-                throw new Error(`Missing report path in ${token}\n\n${HELP_TEXT}`);
+            const reviewId = token.slice('--approve-review='.length).trim();
+            if (!reviewId) {
+                throw new Error(`Missing review id in ${token}\n\n${HELP_TEXT}`);
             }
-            approveReviewPath = reportPath;
-            continue;
-        }
-        if (token === '--review-report-dir') {
-            const directory = argv[index + 1];
-            if (!directory || directory.startsWith('--')) {
-                throw new Error(`Missing directory after --review-report-dir\n\n${HELP_TEXT}`);
+            approveReviewId = Number.parseInt(reviewId, 10);
+            if (!Number.isInteger(approveReviewId) || approveReviewId <= 0) {
+                throw new Error(`Invalid review id: ${reviewId}\n\n${HELP_TEXT}`);
             }
-            reviewReportDir = directory;
-            index++;
-            continue;
-        }
-        if (token.startsWith('--review-report-dir=')) {
-            const directory = token.slice('--review-report-dir='.length).trim();
-            if (!directory) {
-                throw new Error(`Missing directory in ${token}\n\n${HELP_TEXT}`);
-            }
-            reviewReportDir = directory;
             continue;
         }
         if (token === '--model') {
@@ -661,19 +607,19 @@ function parseCliOptions(argv: string[]): CliOptions {
         positional.push(token);
     }
 
-    if (approveReviewPath && (importAll || mergeExistingOnly || positional.length > 0)) {
+    if (approveReviewId !== null && (importAll || mergeExistingOnly || positional.length > 0)) {
         throw new Error(`--approve-review cannot be combined with PDF inputs, --all, or --merge-existing\n\n${HELP_TEXT}`);
     }
 
-    if (approveReviewPath && continueOnError) {
+    if (approveReviewId !== null && continueOnError) {
         throw new Error(`--continue-on-error is not used with --approve-review\n\n${HELP_TEXT}`);
     }
 
-    if (approveReviewPath && modelIds.length > 0) {
+    if (approveReviewId !== null && modelIds.length > 0) {
         throw new Error(`--model is not used with --approve-review\n\n${HELP_TEXT}`);
     }
 
-    if (approveReviewPath && allowUnresolved) {
+    if (approveReviewId !== null && allowUnresolved) {
         throw new Error(`--allow-unresolved is not used with --approve-review\n\n${HELP_TEXT}`);
     }
 
@@ -693,7 +639,7 @@ function parseCliOptions(argv: string[]): CliOptions {
         throw new Error(`--model is not used with --merge-existing\n\n${HELP_TEXT}`);
     }
 
-    if (!approveReviewPath && !mergeExistingOnly && !importAll && positional.length !== 1) {
+    if (approveReviewId === null && !mergeExistingOnly && !importAll && positional.length !== 1) {
         throw new Error(`Expected exactly one PDF path, --all, or --merge-existing\n\n${HELP_TEXT}`);
     }
 
@@ -703,14 +649,13 @@ function parseCliOptions(argv: string[]): CliOptions {
 
     return {
         importAll,
-        inputPdfPath: importAll || mergeExistingOnly || approveReviewPath ? null : positional[0]!,
+        inputPdfPath: importAll || mergeExistingOnly || approveReviewId !== null ? null : positional[0]!,
         continueOnError,
         skipUpload,
         modelIds,
         mergeExistingOnly,
         allowUnresolved,
-        reviewReportDir: path.resolve(process.cwd(), reviewReportDir),
-        approveReviewPath: approveReviewPath ? path.resolve(process.cwd(), approveReviewPath) : null,
+        approveReviewId,
         enableTextractFallback,
     };
 }
@@ -4397,40 +4342,6 @@ async function generateLabObject({
     };
 }
 
-function resolveOutputFileName({
-    lab,
-    sourcePath,
-}: {
-    lab: BloodworkLab;
-    sourcePath: string;
-}): string {
-    const baseFileName = buildBloodworkFileName(lab);
-    const baseOutputPath = path.join(DEFAULT_OUTPUT_DIRECTORY, baseFileName);
-    if (!fs.existsSync(baseOutputPath)) {
-        return baseFileName;
-    }
-
-    try {
-        const existing = JSON.parse(fs.readFileSync(baseOutputPath, 'utf8')) as Record<string, unknown>;
-        if (existing.importLocation === sourcePath) {
-            return baseFileName;
-        }
-    } catch {
-        // if existing file is malformed, keep it untouched and write a distinct filename
-    }
-
-    const sourceSlug = slugifyForPath(path.basename(sourcePath, path.extname(sourcePath)));
-    return baseFileName.replace(/\.json$/i, `_${sourceSlug}.json`);
-}
-
-function dateDifferenceInDays(leftDate: string, rightDate: string): number {
-    const [leftYear, leftMonth, leftDay] = leftDate.split('-').map(part => Number.parseInt(part, 10));
-    const [rightYear, rightMonth, rightDay] = rightDate.split('-').map(part => Number.parseInt(part, 10));
-    const leftTimestamp = Date.UTC(leftYear!, (leftMonth ?? 1) - 1, leftDay!);
-    const rightTimestamp = Date.UTC(rightYear!, (rightMonth ?? 1) - 1, rightDay!);
-    return Math.abs(Math.round((leftTimestamp - rightTimestamp) / (24 * 60 * 60 * 1000)));
-}
-
 function cloneReferenceRange(
     referenceRange: BloodworkMeasurement['referenceRange'],
 ): BloodworkMeasurement['referenceRange'] {
@@ -4544,8 +4455,23 @@ function cloneMeasurement(measurement: BloodworkMeasurement): BloodworkMeasureme
     if (measurement.notes !== undefined) {
         cloned.notes = measurement.notes;
     }
+    if (measurement.reviewStatus !== undefined) {
+        cloned.reviewStatus = measurement.reviewStatus;
+    }
+    if (measurement.confidence !== undefined) {
+        cloned.confidence = measurement.confidence;
+    }
+    if (measurement.conflict !== undefined) {
+        cloned.conflict = {
+            reason: measurement.conflict.reason,
+            candidateCount: measurement.conflict.candidateCount,
+        };
+    }
     if (measurement.duplicateValues && measurement.duplicateValues.length > 0) {
         cloned.duplicateValues = measurement.duplicateValues.map(cloneDuplicateValue);
+    }
+    if (measurement.provenance && measurement.provenance.length > 0) {
+        cloned.provenance = measurement.provenance.map(entry => ({ ...entry }));
     }
     return cloned;
 }
@@ -4597,578 +4523,6 @@ function dedupeDuplicateValues(values: BloodworkMeasurementDuplicateValue[]): Bl
         return buildDuplicateValueKey(left).localeCompare(buildDuplicateValueKey(right));
     });
 }
-
-function buildDuplicateValueFromMeasurement({
-    measurement,
-    source,
-}: {
-    measurement: BloodworkMeasurement;
-    source: BloodworkDataFile;
-}): BloodworkMeasurementDuplicateValue {
-    const duplicateValue: BloodworkMeasurementDuplicateValue = {
-        date: source.lab.date,
-    };
-    if (measurement.value !== undefined) {
-        duplicateValue.value = measurement.value;
-    }
-    if (measurement.unit !== undefined) {
-        duplicateValue.unit = measurement.unit;
-    }
-    const range = cloneReferenceRange(measurement.referenceRange);
-    if (range) {
-        duplicateValue.referenceRange = range;
-    }
-    if (measurement.flag !== undefined) {
-        duplicateValue.flag = measurement.flag;
-    }
-    const measurementNote = measurement.note?.trim() || measurement.notes?.trim();
-    if (measurementNote) {
-        duplicateValue.note = measurementNote;
-    }
-    duplicateValue.sourceFile = source.fileName;
-    duplicateValue.sourceLabName = source.lab.labName;
-    if (source.lab.importLocation) {
-        duplicateValue.importLocation = source.lab.importLocation;
-    }
-    return duplicateValue;
-}
-
-function buildMergedFromKey(entry: BloodworkMergedSource): string {
-    return [
-        entry.fileName.trim().toLowerCase(),
-        entry.date,
-        entry.labName.trim().toLowerCase(),
-        entry.importLocation?.trim().toLowerCase() ?? '',
-    ].join('|');
-}
-
-function dedupeMergedFromEntries(entries: BloodworkMergedSource[]): BloodworkMergedSource[] {
-    const deduped = new Map<string, BloodworkMergedSource>();
-    for (const entry of entries) {
-        const key = buildMergedFromKey(entry);
-        if (!deduped.has(key)) {
-            deduped.set(key, {
-                fileName: entry.fileName,
-                date: entry.date,
-                labName: entry.labName,
-                importLocation: entry.importLocation,
-                measurementCount: entry.measurementCount,
-            });
-        }
-    }
-    return Array.from(deduped.values()).sort((left, right) => {
-        const dateCompare = left.date.localeCompare(right.date);
-        if (dateCompare !== 0) {
-            return dateCompare;
-        }
-        return left.fileName.localeCompare(right.fileName);
-    });
-}
-
-function buildMergedSourceFromFile(source: BloodworkDataFile): BloodworkMergedSource {
-    return {
-        fileName: source.fileName,
-        date: source.lab.date,
-        labName: source.lab.labName,
-        importLocation: source.lab.importLocation,
-        measurementCount: source.lab.measurements.length,
-    };
-}
-
-function collectMergedFromEntries(group: BloodworkDataFile[]): BloodworkMergedSource[] {
-    const entries: BloodworkMergedSource[] = [];
-    for (const source of group) {
-        if (source.lab.mergedFrom && source.lab.mergedFrom.length > 0) {
-            entries.push(...source.lab.mergedFrom.map(entry => ({
-                fileName: entry.fileName,
-                date: entry.date,
-                labName: entry.labName,
-                importLocation: entry.importLocation,
-                measurementCount: entry.measurementCount,
-            })));
-            continue;
-        }
-        entries.push(buildMergedSourceFromFile(source));
-    }
-    return dedupeMergedFromEntries(entries);
-}
-
-function compareSourceFreshness(left: BloodworkDataFile, right: BloodworkDataFile): number {
-    const dateCompare = left.lab.date.localeCompare(right.lab.date);
-    if (dateCompare !== 0) {
-        return dateCompare;
-    }
-    const measurementCountCompare = left.lab.measurements.length - right.lab.measurements.length;
-    if (measurementCountCompare !== 0) {
-        return measurementCountCompare;
-    }
-    return left.fileName.localeCompare(right.fileName);
-}
-
-function pickLatestDefinedText(values: Array<string | undefined>): string | undefined {
-    for (let index = values.length - 1; index >= 0; index--) {
-        const value = values[index]?.trim();
-        if (value) {
-            return value;
-        }
-    }
-    return undefined;
-}
-
-function pickLatestDefinedNumber(values: Array<number | undefined>): number | undefined {
-    for (let index = values.length - 1; index >= 0; index--) {
-        const value = values[index];
-        if (value !== undefined) {
-            return value;
-        }
-    }
-    return undefined;
-}
-
-function pickLatestDefinedBoolean(values: Array<boolean | undefined>): boolean | undefined {
-    for (let index = values.length - 1; index >= 0; index--) {
-        const value = values[index];
-        if (value !== undefined) {
-            return value;
-        }
-    }
-    return undefined;
-}
-
-function mergeNotes(group: BloodworkDataFile[]): string | undefined {
-    const byNormalizedValue = new Map<string, string>();
-    for (const source of group) {
-        const note = source.lab.notes?.trim();
-        if (!note) {
-            continue;
-        }
-        const key = note.toLowerCase();
-        if (!byNormalizedValue.has(key)) {
-            byNormalizedValue.set(key, note);
-        }
-    }
-    if (byNormalizedValue.size === 0) {
-        return undefined;
-    }
-    return Array.from(byNormalizedValue.values()).join('\n\n');
-}
-
-function scoreConsolidationMeasurement({
-    measurement,
-}: {
-    measurement: BloodworkMeasurement;
-}): number {
-    let score = measurement.confidence ?? 0;
-    if (measurement.referenceRange) {
-        score += 0.08;
-    }
-    if (measurement.unit && UNIT_TOKEN_PATTERN.test(measurement.unit)) {
-        score += 0.08;
-    }
-    if (measurement.reviewStatus === 'accepted') {
-        score += 0.08;
-    }
-    if (measurement.reviewStatus === 'needs_review') {
-        score -= 0.12;
-    }
-    if (measurement.conflict) {
-        score -= 0.1;
-    }
-    if (typeof measurement.value === 'number' && Number.isFinite(measurement.value)) {
-        score += 0.05;
-    }
-    return score;
-}
-
-function mergeMeasurementsForGroup(group: BloodworkDataFile[]): BloodworkMeasurement[] {
-    const selected = new Map<string, ConsolidatedMeasurementSelection>();
-
-    for (const source of group) {
-        for (const sourceMeasurement of source.lab.measurements) {
-            const measurement = cloneMeasurement(sourceMeasurement);
-            const measurementKey = buildMeasurementNameKey(measurement.name);
-            if (!measurementKey) {
-                continue;
-            }
-
-            const incomingDuplicateValues = measurement.duplicateValues?.map(cloneDuplicateValue) ?? [];
-            delete measurement.duplicateValues;
-
-            const existing = selected.get(measurementKey);
-            if (!existing) {
-                selected.set(measurementKey, {
-                    measurement,
-                    source,
-                    duplicateValues: dedupeDuplicateValues(incomingDuplicateValues),
-                });
-                continue;
-            }
-
-            const existingScore = scoreConsolidationMeasurement({
-                measurement: existing.measurement,
-            });
-            const incomingScore = scoreConsolidationMeasurement({
-                measurement,
-            });
-            const shouldReplace =
-                incomingScore > existingScore ||
-                (Math.abs(incomingScore - existingScore) <= 1e-9 && compareSourceFreshness(source, existing.source) > 0);
-
-            const mergedDuplicateValues = dedupeDuplicateValues([
-                ...existing.duplicateValues,
-                buildDuplicateValueFromMeasurement(shouldReplace
-                    ? {
-                        measurement: existing.measurement,
-                        source: existing.source,
-                    }
-                    : {
-                        measurement,
-                        source,
-                    }),
-                ...incomingDuplicateValues,
-            ]);
-
-            selected.set(measurementKey, {
-                measurement: shouldReplace ? measurement : existing.measurement,
-                source: shouldReplace ? source : existing.source,
-                duplicateValues: mergedDuplicateValues,
-            });
-        }
-    }
-
-    const mergedMeasurements = Array.from(selected.values())
-        .map(({ measurement, duplicateValues }) => {
-            if (duplicateValues.length === 0) {
-                return measurement;
-            }
-            return {
-                ...measurement,
-                duplicateValues,
-            };
-        })
-        .sort((left, right) => left.name.localeCompare(right.name));
-
-    return mergeUniqueMeasurements(mergedMeasurements);
-}
-
-function listBloodworkDataFiles(outputDirectory: string): BloodworkDataFile[] {
-    if (!fs.existsSync(outputDirectory)) {
-        return [];
-    }
-
-    const files: BloodworkDataFile[] = [];
-    for (const entry of fs.readdirSync(outputDirectory, { withFileTypes: true })) {
-        if (!entry.isFile() || !/^bloodwork_.*\.json$/i.test(entry.name)) {
-            continue;
-        }
-
-        const filePath = path.join(outputDirectory, entry.name);
-        const raw = JSON.parse(fs.readFileSync(filePath, 'utf8')) as unknown;
-        const parsed = bloodworkLabSchema.parse(raw);
-        files.push({
-            path: filePath,
-            fileName: entry.name,
-            lab: parsed,
-        });
-    }
-
-    return files.sort((left, right) => left.fileName.localeCompare(right.fileName));
-}
-
-function groupBloodworkDataFilesByDateWindow(files: BloodworkDataFile[]): BloodworkDataFile[][] {
-    if (files.length === 0) {
-        return [];
-    }
-
-    const sorted = [...files].sort((left, right) => {
-        const dateCompare = right.lab.date.localeCompare(left.lab.date);
-        if (dateCompare !== 0) {
-            return dateCompare;
-        }
-        return right.fileName.localeCompare(left.fileName);
-    });
-
-    const groups: BloodworkDataFile[][] = [];
-    let currentGroup: BloodworkDataFile[] = [];
-    let currentGroupLatestDate: string | null = null;
-
-    for (const file of sorted) {
-        if (!currentGroupLatestDate) {
-            currentGroup = [file];
-            currentGroupLatestDate = file.lab.date;
-            continue;
-        }
-
-        if (dateDifferenceInDays(currentGroupLatestDate, file.lab.date) <= MERGE_WINDOW_DAYS) {
-            currentGroup.push(file);
-            continue;
-        }
-
-        groups.push(currentGroup);
-        currentGroup = [file];
-        currentGroupLatestDate = file.lab.date;
-    }
-
-    if (currentGroup.length > 0) {
-        groups.push(currentGroup);
-    }
-
-    return groups.map(group =>
-        group.sort((left, right) => {
-            const dateCompare = left.lab.date.localeCompare(right.lab.date);
-            if (dateCompare !== 0) {
-                return dateCompare;
-            }
-            return left.fileName.localeCompare(right.fileName);
-        }));
-}
-
-function mergeBloodworkDataFileGroup(group: BloodworkDataFile[]): {
-    targetFileName: string;
-    lab: BloodworkLab;
-} {
-    if (group.length === 0) {
-        throw new Error('Cannot merge an empty bloodwork group');
-    }
-
-    const orderedGroup = [...group].sort((left, right) => {
-        const dateCompare = left.lab.date.localeCompare(right.lab.date);
-        if (dateCompare !== 0) {
-            return dateCompare;
-        }
-        return left.fileName.localeCompare(right.fileName);
-    });
-
-    let primary = orderedGroup[0]!;
-    for (const source of orderedGroup.slice(1)) {
-        if (compareSourceFreshness(source, primary) > 0) {
-            primary = source;
-        }
-    }
-
-    const mergedFrom = collectMergedFromEntries(orderedGroup);
-    const mergedLab = bloodworkLabSchema.parse({
-        date: primary.lab.date,
-        labName: primary.lab.labName,
-        location: primary.lab.location ?? pickLatestDefinedText(orderedGroup.map(item => item.lab.location)),
-        importLocation: primary.lab.importLocation ?? pickLatestDefinedText(orderedGroup.map(item => item.lab.importLocation)),
-        importLocationIsInferred:
-            primary.lab.importLocationIsInferred
-                ?? pickLatestDefinedBoolean(orderedGroup.map(item => item.lab.importLocationIsInferred)),
-        weightKg: primary.lab.weightKg ?? pickLatestDefinedNumber(orderedGroup.map(item => item.lab.weightKg)),
-        measurements: mergeMeasurementsForGroup(orderedGroup),
-        mergedFrom: mergedFrom.length > 1 ? mergedFrom : undefined,
-        notes: mergeNotes(orderedGroup),
-    });
-
-    return {
-        targetFileName: buildBloodworkFileName(mergedLab),
-        lab: mergedLab,
-    };
-}
-
-async function consolidateBloodworkDataFiles({
-    outputDirectory,
-    s3Client,
-    s3Bucket,
-    s3Prefix,
-    selectedFileNames,
-}: {
-    outputDirectory: string;
-    s3Client: S3Client | null;
-    s3Bucket: string;
-    s3Prefix: string;
-    selectedFileNames?: string[];
-}): Promise<ConsolidationSummary> {
-    const sourceFiles = listBloodworkDataFiles(outputDirectory);
-    let groups = groupBloodworkDataFilesByDateWindow(sourceFiles);
-    if (selectedFileNames && selectedFileNames.length > 0) {
-        const selectedNames = Array.from(new Set(
-            selectedFileNames.map(value => value.trim()).filter(value => value.length > 0),
-        ));
-        const byFileName = new Map(sourceFiles.map(file => [file.fileName, file]));
-        const missing = selectedNames.filter(fileName => !byFileName.has(fileName));
-        if (missing.length > 0) {
-            throw new Error(`Selected bloodwork files not found: ${missing.join(', ')}`);
-        }
-        const selectedFiles = selectedNames.map(fileName => byFileName.get(fileName)!);
-        groups = groupBloodworkDataFilesByDateWindow(selectedFiles);
-    }
-    const summary: ConsolidationSummary = {
-        groupsProcessed: groups.length,
-        mergedGroups: 0,
-        filesBefore: sourceFiles.length,
-        filesAfter: sourceFiles.length,
-        writtenFiles: [],
-        removedFiles: [],
-        uploadedKeys: [],
-        deletedKeys: [],
-        groups: [],
-    };
-
-    if (groups.length === 0) {
-        return summary;
-    }
-
-    const uploads = new Map<string, string>();
-    const deletedFileNames = new Set<string>();
-
-    for (const group of groups) {
-        const { targetFileName, lab } = mergeBloodworkDataFileGroup(group);
-        const targetPath = path.join(outputDirectory, targetFileName);
-        const jsonPayload = `${JSON.stringify(lab, null, 4)}\n`;
-
-        const currentPayload = fs.existsSync(targetPath)
-            ? fs.readFileSync(targetPath, 'utf8')
-            : null;
-        if (currentPayload !== jsonPayload) {
-            fs.writeFileSync(targetPath, jsonPayload, 'utf8');
-            summary.writtenFiles.push(targetPath);
-            uploads.set(targetFileName, jsonPayload);
-        }
-
-        if (group.length > 1) {
-            summary.mergedGroups += 1;
-        }
-        summary.groups.push({
-            targetFileName,
-            latestDate: lab.date,
-            sourceFileNames: group.map(item => item.fileName),
-            sourceDates: group.map(item => item.lab.date),
-        });
-
-        for (const source of group) {
-            if (source.fileName === targetFileName) {
-                continue;
-            }
-            if (!fs.existsSync(source.path)) {
-                continue;
-            }
-            fs.unlinkSync(source.path);
-            summary.removedFiles.push(source.path);
-            deletedFileNames.add(source.fileName);
-        }
-    }
-
-    if (s3Client) {
-        for (const [fileName, jsonPayload] of uploads.entries()) {
-            const key = buildS3KeyFromFileName(fileName, s3Prefix);
-            await s3Client.send(
-                new PutObjectCommand({
-                    Bucket: s3Bucket,
-                    Key: key,
-                    Body: jsonPayload,
-                    ContentType: 'application/json; charset=utf-8',
-                }),
-            );
-            summary.uploadedKeys.push(key);
-        }
-
-        for (const removedFileName of deletedFileNames) {
-            const key = buildS3KeyFromFileName(removedFileName, s3Prefix);
-            await s3Client.send(
-                new DeleteObjectCommand({
-                    Bucket: s3Bucket,
-                    Key: key,
-                }),
-            );
-            summary.deletedKeys.push(key);
-        }
-    }
-
-    summary.filesAfter = listBloodworkDataFiles(outputDirectory).length;
-    return summary;
-}
-
-function buildS3KeyFromFileName(fileName: string, prefix: string): string {
-    const normalizedPrefix = prefix.replace(/^\/+|\/+$/g, '');
-    return normalizedPrefix ? `${normalizedPrefix}/${fileName}` : fileName;
-}
-
-async function maybeUploadToS3({
-    s3Client,
-    s3Bucket,
-    s3Prefix,
-    fileName,
-    jsonPayload,
-}: {
-    s3Client: S3Client | null;
-    s3Bucket: string;
-    s3Prefix: string;
-    fileName: string;
-    jsonPayload: string;
-}): Promise<string | null> {
-    if (!s3Client) {
-        return null;
-    }
-
-    const key = buildS3KeyFromFileName(fileName, s3Prefix);
-    await s3Client.send(
-        new PutObjectCommand({
-            Bucket: s3Bucket,
-            Key: key,
-            Body: jsonPayload,
-            ContentType: 'application/json; charset=utf-8',
-        }),
-    );
-
-    return key;
-}
-
-function resolveAwsCredentialsForClients(): {
-    region: string;
-    accessKeyId: string;
-    secretAccessKey: string;
-    sessionToken?: string;
-} {
-    const region = process.env.AWS_REGION?.trim() || process.env.AWS_DEFAULT_REGION?.trim();
-    if (!region) {
-        throw new Error('Missing required environment variable: AWS_REGION (or AWS_DEFAULT_REGION)');
-    }
-    const accessKeyId = requireEnv('AWS_ACCESS_KEY_ID');
-    const secretAccessKey = requireEnv('AWS_SECRET_ACCESS_KEY');
-    const sessionToken = process.env.AWS_SESSION_TOKEN?.trim() || undefined;
-    return {
-        region,
-        accessKeyId,
-        secretAccessKey,
-        sessionToken,
-    };
-}
-
-function buildReviewReportFileName(pdfPath: string): string {
-    const baseName = path.basename(pdfPath, path.extname(pdfPath));
-    return `review_${slugifyForPath(baseName)}_${Date.now()}.json`;
-}
-
-function writeReviewReport({
-    reportDir,
-    pdfPath,
-    suggestedOutputFileName,
-    conflicts,
-    labDraft,
-}: {
-    reportDir: string;
-    pdfPath: string;
-    suggestedOutputFileName: string;
-    conflicts: MeasurementConflict[];
-    labDraft: BloodworkLab;
-}): string {
-    fs.mkdirSync(reportDir, { recursive: true });
-    const reportPath = path.join(reportDir, buildReviewReportFileName(pdfPath));
-    const report: ReviewReport = {
-        version: 1,
-        generatedAt: new Date().toISOString(),
-        sourcePdfPath: pdfPath,
-        suggestedOutputFileName,
-        unresolvedCount: conflicts.length,
-        conflicts,
-        labDraft,
-    };
-    fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 4)}\n`, 'utf8');
-    return reportPath;
-}
-
 function applyReviewReportSelectionsToLab(report: z.infer<typeof reviewReportSchema>): BloodworkLab {
     const selectedByNameKey = new Map<string, BloodworkMeasurement>();
     for (const conflict of report.conflicts) {
@@ -5212,25 +4566,17 @@ async function importSingleFile({
     pdfPath,
     openRouterApiKey,
     modelIds,
-    s3Client,
-    s3Bucket,
-    s3Prefix,
     glossary,
     glossaryPath,
     allowUnresolved,
-    reviewReportDir,
     textractClient,
 }: {
     pdfPath: string;
     openRouterApiKey: string;
     modelIds: string[];
-    s3Client: S3Client | null;
-    s3Bucket: string;
-    s3Prefix: string;
     glossary: BloodworkGlossary;
     glossaryPath: string;
     allowUnresolved: boolean;
-    reviewReportDir: string;
     textractClient: TextractClient | null;
 }): Promise<ImportResult> {
     const pdfBytes = new Uint8Array(await Bun.file(pdfPath).arrayBuffer());
@@ -5249,32 +4595,41 @@ async function importSingleFile({
         textractClient,
     });
 
-    const outputFileName = resolveOutputFileName({
+    const sourceKey = await resolveBloodworkSourceKey({
         lab,
         sourcePath: pdfPath,
     });
     const unresolvedCount = conflicts.length;
-    let reviewReportPath: string | undefined;
+    let reviewId: number | undefined;
 
     if (unresolvedCount > 0) {
-        reviewReportPath = writeReviewReport({
-            reportDir: reviewReportDir,
-            pdfPath,
-            suggestedOutputFileName: outputFileName,
-            conflicts,
-            labDraft: bloodworkLabSchema.parse({
-                ...lab,
-                reviewSummary: {
-                    unresolvedCount,
-                },
-            }),
+        const review = await createBloodworkImportReview({
+            sourceKey,
+            sourcePdfPath: pdfPath,
+            unresolvedCount,
+            payload: {
+                version: 1,
+                generatedAt: new Date().toISOString(),
+                sourceKey,
+                sourcePdfPath: pdfPath,
+                unresolvedCount,
+                conflicts,
+                labDraft: bloodworkLabSchema.parse({
+                    ...lab,
+                    reviewSummary: {
+                        unresolvedCount,
+                    },
+                }),
+            },
         });
+        reviewId = review.id;
+
         if (!allowUnresolved) {
             throw new Error(
                 [
                     `Unresolved measurement conflicts detected for ${pdfPath}`,
-                    `Review report: ${reviewReportPath}`,
-                    'Resolve candidate selections and rerun with --approve-review, or pass --allow-unresolved to write anyway.',
+                    `Review id: ${review.id}`,
+                    'Resolve candidate selections and rerun with --approve-review <id>, or pass --allow-unresolved to store the report anyway.',
                 ].join('\n'),
             );
         }
@@ -5286,22 +4641,14 @@ async function importSingleFile({
             unresolvedCount > 0
                 ? {
                     unresolvedCount,
-                    reportFile: reviewReportPath,
+                    reportFile: reviewId ? `review:${reviewId}` : undefined,
                 }
                 : undefined,
     });
 
-    fs.mkdirSync(DEFAULT_OUTPUT_DIRECTORY, { recursive: true });
-    const outputPath = path.join(DEFAULT_OUTPUT_DIRECTORY, outputFileName);
-    const jsonPayload = JSON.stringify(labToWrite, null, 4);
-    await Bun.write(outputPath, jsonPayload);
-
-    const s3Key = await maybeUploadToS3({
-        s3Client,
-        s3Bucket,
-        s3Prefix,
-        fileName: outputFileName,
-        jsonPayload,
+    await upsertBloodworkReport({
+        sourceKey,
+        lab: labToWrite,
     });
 
     glossary.version = glossaryForFile.version;
@@ -5309,53 +4656,41 @@ async function importSingleFile({
     saveBloodworkGlossary(glossaryPath, glossary);
 
     return {
-        outputPath,
-        s3Key,
+        sourceKey,
         modelId,
-        reviewReportPath,
+        reviewId,
         unresolvedCount,
     };
 }
 
-async function approveReviewReport({
-    reviewReportPath,
-    s3Client,
-    s3Bucket,
-    s3Prefix,
+async function approveReviewRecord({
+    reviewId,
 }: {
-    reviewReportPath: string;
-    s3Client: S3Client | null;
-    s3Bucket: string;
-    s3Prefix: string;
+    reviewId: number;
 }): Promise<ImportResult> {
-    if (!fs.existsSync(reviewReportPath)) {
-        throw new Error(`Review report file does not exist: ${reviewReportPath}`);
+    const review = await getBloodworkImportReview({
+        id: reviewId,
+    });
+    if (!review) {
+        throw new Error(`Review id ${reviewId} does not exist`);
+    }
+    if (review.status === 'applied') {
+        throw new Error(`Review id ${reviewId} has already been applied`);
     }
 
-    const raw = JSON.parse(fs.readFileSync(reviewReportPath, 'utf8')) as unknown;
-    const report = reviewReportSchema.parse(raw);
+    const report = reviewReportSchema.parse(review.payload);
     const resolvedLab = applyReviewReportSelectionsToLab(report);
 
-    fs.mkdirSync(DEFAULT_OUTPUT_DIRECTORY, { recursive: true });
-    const outputFileName = resolveOutputFileName({
+    await upsertBloodworkReport({
+        sourceKey: report.sourceKey,
         lab: resolvedLab,
-        sourcePath: report.sourcePdfPath,
     });
-    const outputPath = path.join(DEFAULT_OUTPUT_DIRECTORY, outputFileName);
-    const jsonPayload = JSON.stringify(resolvedLab, null, 4);
-    await Bun.write(outputPath, jsonPayload);
-
-    const s3Key = await maybeUploadToS3({
-        s3Client,
-        s3Bucket,
-        s3Prefix,
-        fileName: outputFileName,
-        jsonPayload,
+    await markBloodworkImportReviewApplied({
+        id: reviewId,
     });
 
     return {
-        outputPath,
-        s3Key,
+        sourceKey: report.sourceKey,
         modelId: 'review-approval',
         unresolvedCount: 0,
     };
@@ -5367,7 +4702,7 @@ function createTextractClientIfNeeded(options: {
     if (!options.enableTextractFallback) {
         return null;
     }
-    const credentials = resolveAwsCredentialsForClients();
+    const credentials = resolveAwsCredentials();
     return new TextractClient({
         region: credentials.region,
         credentials: {
@@ -5376,32 +4711,6 @@ function createTextractClientIfNeeded(options: {
             sessionToken: credentials.sessionToken,
         },
     });
-}
-
-function createS3ClientIfNeeded(options: {
-    skipUpload: boolean;
-}): { s3Client: S3Client | null; s3Bucket: string; s3Prefix: string } {
-    const s3Bucket = process.env.VITALS_S3_BUCKET?.trim() || DEFAULT_S3_BUCKET;
-    const s3Prefix = process.env.VITALS_S3_PREFIX?.trim() || DEFAULT_S3_PREFIX;
-
-    if (options.skipUpload) {
-        return { s3Client: null, s3Bucket, s3Prefix };
-    }
-
-    const credentials = resolveAwsCredentialsForClients();
-
-    return {
-        s3Client: new S3Client({
-            region: credentials.region,
-            credentials: {
-                accessKeyId: credentials.accessKeyId,
-                secretAccessKey: credentials.secretAccessKey,
-                sessionToken: credentials.sessionToken,
-            },
-        }),
-        s3Bucket,
-        s3Prefix,
-    };
 }
 
 async function runBloodworkImporter(argv: string[] = process.argv.slice(2)): Promise<void> {
@@ -5413,60 +4722,52 @@ async function runBloodworkImporter(argv: string[] = process.argv.slice(2)): Pro
         enableTextractFallback: options.enableTextractFallback,
     });
 
-    if (options.approveReviewPath) {
-        const result = await approveReviewReport({
-            reviewReportPath: options.approveReviewPath,
+    if (options.approveReviewId !== null) {
+        const result = await approveReviewRecord({
+            reviewId: options.approveReviewId,
+        });
+        if (result.sourceKey) {
+            console.info(`Stored ${result.sourceKey}`);
+        }
+        const uploadedKey = await uploadDatabaseSnapshot({
             s3Client,
             s3Bucket,
             s3Prefix,
         });
-        const syncSummary = await syncBloodworkDatabaseFromJson();
-        if (result.outputPath) {
-            console.info(`Wrote ${result.outputPath}`);
+        if (uploadedKey) {
+            console.info(`Uploaded s3://${s3Bucket}/${uploadedKey}`);
         }
-        if (result.s3Key) {
-            console.info(`Uploaded s3://${s3Bucket}/${result.s3Key}`);
-        }
-        console.info(
-            `Imported ${syncSummary.reportCount} report(s) into SQLite from ${syncSummary.scannedFileCount} JSON file(s)`,
-        );
         return;
     }
 
     if (options.mergeExistingOnly) {
-        const consolidation = await consolidateBloodworkDataFiles({
-            outputDirectory: DEFAULT_OUTPUT_DIRECTORY,
-            s3Client,
-            s3Bucket,
-            s3Prefix,
-        });
-
-        console.info(`Consolidated ${consolidation.filesBefore} file(s) into ${consolidation.filesAfter} file(s)`);
+        const consolidation = await consolidateBloodworkReports();
+        console.info(`Consolidated ${consolidation.reportsBefore} report(s) into ${consolidation.reportsAfter} report(s)`);
         console.info(`Merged groups: ${consolidation.mergedGroups}/${consolidation.groupsProcessed}`);
         if (consolidation.groups.length > 0) {
             for (const group of consolidation.groups) {
-                if (group.sourceFileNames.length < 2) {
+                if (group.sourceKeys.length < 2) {
                     continue;
                 }
                 console.info(
                     [
-                        `Merged ${group.sourceFileNames.length} files into ${group.targetFileName}`,
+                        `Merged ${group.sourceKeys.length} reports into ${group.targetSourceKey}`,
                         `latest date ${group.latestDate}`,
-                        `sources: ${group.sourceFileNames.join(', ')}`,
+                        `sources: ${group.sourceKeys.join(', ')}`,
                     ].join(' | '),
                 );
             }
         }
-        if (consolidation.uploadedKeys.length > 0) {
-            console.info(`Uploaded ${consolidation.uploadedKeys.length} consolidated file(s)`);
+        if (consolidation.writtenSourceKeys.length > 0 || consolidation.removedSourceKeys.length > 0) {
+            const uploadedKey = await uploadDatabaseSnapshot({
+                s3Client,
+                s3Bucket,
+                s3Prefix,
+            });
+            if (uploadedKey) {
+                console.info(`Uploaded s3://${s3Bucket}/${uploadedKey}`);
+            }
         }
-        if (consolidation.deletedKeys.length > 0) {
-            console.info(`Deleted ${consolidation.deletedKeys.length} stale S3 object(s)`);
-        }
-        const syncSummary = await syncBloodworkDatabaseFromJson();
-        console.info(
-            `Imported ${syncSummary.reportCount} report(s) into SQLite from ${syncSummary.scannedFileCount} JSON file(s)`,
-        );
         return;
     }
 
@@ -5478,15 +4779,15 @@ async function runBloodworkImporter(argv: string[] = process.argv.slice(2)): Pro
 
     console.info(`Importing ${files.length} file(s)`);
     console.info(`Model candidates: ${modelIds.join(', ')}`);
-    console.info(`Review report directory: ${options.reviewReportDir}`);
+    console.info('Pending reviews are stored in SQLite');
     if (options.allowUnresolved) {
-        console.info('Unresolved conflicts will still be written (--allow-unresolved)');
+        console.info('Unresolved conflicts will still be stored (--allow-unresolved)');
     }
     if (textractClient) {
         console.info('AWS Textract fallback is enabled (--textract-fallback)');
     }
     if (options.skipUpload) {
-        console.info('S3 upload is disabled for this run (--skip-upload)');
+        console.info('SQLite snapshot upload is disabled for this run (--skip-upload)');
     } else {
         console.info(`S3 destination: s3://${s3Bucket}/${s3Prefix}`);
     }
@@ -5501,25 +4802,18 @@ async function runBloodworkImporter(argv: string[] = process.argv.slice(2)): Pro
                 pdfPath: filePath,
                 openRouterApiKey,
                 modelIds,
-                s3Client,
-                s3Bucket,
-                s3Prefix,
                 glossary,
                 glossaryPath,
                 allowUnresolved: options.allowUnresolved,
-                reviewReportDir: options.reviewReportDir,
                 textractClient,
             });
 
             successCount += 1;
-            if (result.outputPath) {
-                console.info(`Wrote ${result.outputPath}`);
+            if (result.sourceKey) {
+                console.info(`Stored ${result.sourceKey}`);
             }
-            if ((result.unresolvedCount ?? 0) > 0 && result.reviewReportPath) {
-                console.info(`Unresolved conflicts: ${result.unresolvedCount} (review report: ${result.reviewReportPath})`);
-            }
-            if (result.s3Key) {
-                console.info(`Uploaded s3://${s3Bucket}/${result.s3Key}`);
+            if ((result.unresolvedCount ?? 0) > 0 && result.reviewId) {
+                console.info(`Unresolved conflicts: ${result.unresolvedCount} (review id: ${result.reviewId})`);
             }
             console.info(`Parsed with ${result.modelId}`);
         } catch (error) {
@@ -5539,39 +4833,32 @@ async function runBloodworkImporter(argv: string[] = process.argv.slice(2)): Pro
         throw new Error(`Import failures:\n${failedFiles}`);
     }
 
-    const consolidation = await consolidateBloodworkDataFiles({
-        outputDirectory: DEFAULT_OUTPUT_DIRECTORY,
-        s3Client,
-        s3Bucket,
-        s3Prefix,
-    });
+    const consolidation = await consolidateBloodworkReports();
     console.info(
-        `Consolidated ${consolidation.filesBefore} file(s) into ${consolidation.filesAfter} file(s)`,
+        `Consolidated ${consolidation.reportsBefore} report(s) into ${consolidation.reportsAfter} report(s)`,
     );
     if (consolidation.mergedGroups > 0) {
         for (const group of consolidation.groups) {
-            if (group.sourceFileNames.length < 2) {
+            if (group.sourceKeys.length < 2) {
                 continue;
             }
             console.info(
                 [
-                    `Merged ${group.sourceFileNames.length} files into ${group.targetFileName}`,
+                    `Merged ${group.sourceKeys.length} reports into ${group.targetSourceKey}`,
                     `latest date ${group.latestDate}`,
-                    `sources: ${group.sourceFileNames.join(', ')}`,
+                    `sources: ${group.sourceKeys.join(', ')}`,
                 ].join(' | '),
             );
         }
     }
-    if (consolidation.uploadedKeys.length > 0) {
-        console.info(`Uploaded ${consolidation.uploadedKeys.length} consolidated file(s)`);
+    const uploadedKey = await uploadDatabaseSnapshot({
+        s3Client,
+        s3Bucket,
+        s3Prefix,
+    });
+    if (uploadedKey) {
+        console.info(`Uploaded s3://${s3Bucket}/${uploadedKey}`);
     }
-    if (consolidation.deletedKeys.length > 0) {
-        console.info(`Deleted ${consolidation.deletedKeys.length} stale S3 object(s)`);
-    }
-    const syncSummary = await syncBloodworkDatabaseFromJson();
-    console.info(
-        `Imported ${syncSummary.reportCount} report(s) into SQLite from ${syncSummary.scannedFileCount} JSON file(s)`,
-    );
 }
 
 export {
@@ -5581,8 +4868,6 @@ export {
     normalizeModelOutput,
     filterLikelyMeasurements,
     standardizeMeasurementUnits,
-    groupBloodworkDataFilesByDateWindow,
-    mergeBloodworkDataFileGroup,
     isEnglishGlossaryName,
     normalizeGlossaryDecisionAction,
     resolveModelIds,
@@ -5590,9 +4875,6 @@ export {
     extractDateCandidatesFromText,
     resolveCanonicalLabDate,
     resolveMeasurementCandidates,
-    listBloodworkDataFiles,
-    consolidateBloodworkDataFiles,
-    createS3ClientIfNeeded,
     runBloodworkImporter,
 };
 

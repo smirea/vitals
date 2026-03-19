@@ -11,6 +11,7 @@ import {
 const measurementFlagValues = ['low', 'high', 'normal', 'abnormal', 'critical', 'unknown'] as const;
 const reviewStatusValues = ['accepted', 'needs_review'] as const;
 const provenanceExtractorValues = ['layout_text', 'textract', 'llm_normalizer'] as const;
+const importReviewStatusValues = ['pending', 'applied'] as const;
 
 export const bloodworkReports = sqliteTable('bloodwork_reports', {
     id: integer('id').primaryKey({ autoIncrement: true }),
@@ -118,6 +119,20 @@ export const bloodworkResultProvenance = sqliteTable('bloodwork_result_provenanc
     index('bloodwork_result_provenance_result_sort_idx').on(table.resultId, table.sortOrder),
 ]);
 
+export const bloodworkImportReviews = sqliteTable('bloodwork_import_reviews', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    createdAt: text('created_at').notNull(),
+    sourceKey: text('source_key').notNull(),
+    sourcePdfPath: text('source_pdf_path').notNull(),
+    unresolvedCount: integer('unresolved_count').notNull(),
+    status: text('status', { enum: importReviewStatusValues }).notNull().default('pending'),
+    payload: text('payload').notNull(),
+    appliedAt: text('applied_at'),
+}, table => [
+    index('bloodwork_import_reviews_source_key_idx').on(table.sourceKey),
+    index('bloodwork_import_reviews_status_idx').on(table.status),
+]);
+
 export const bloodworkReportsRelations = relations(bloodworkReports, ({ many }) => ({
     results: many(bloodworkResults),
     mergedSources: many(bloodworkMergedSources),
@@ -172,6 +187,7 @@ export const bloodworkTables = {
 
 export const schema = {
     ...bloodworkTables,
+    bloodworkImportReviews,
     bloodworkReportsRelations,
     bloodworkMarkersRelations,
     bloodworkResultsRelations,
@@ -186,3 +202,4 @@ export type BloodworkResultRow = typeof bloodworkResults.$inferSelect;
 export type BloodworkMergedSourceRow = typeof bloodworkMergedSources.$inferSelect;
 export type BloodworkResultDuplicateRow = typeof bloodworkResultDuplicates.$inferSelect;
 export type BloodworkResultProvenanceRow = typeof bloodworkResultProvenance.$inferSelect;
+export type BloodworkImportReviewRow = typeof bloodworkImportReviews.$inferSelect;
