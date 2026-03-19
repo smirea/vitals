@@ -1,31 +1,27 @@
-import { createS3ClientIfNeeded, uploadDatabaseSnapshot } from 'scripts/aws.ts';
 import { consolidateBloodworkReports, listBloodworkReports } from 'scripts/bloodwork-db.ts';
 import { normalizeIsoDate } from 'scripts/bloodwork-schema.ts';
 import { createScript } from 'scripts/createScript.ts';
 
 const HELP_TEXT = [
     'Usage:',
-    '  bun scripts/bloodwork-merge.ts --source <report-key> --source <report-key> [--skip-upload]',
-    '  bun scripts/bloodwork-merge.ts --file <report-key> --file <report-key> [--skip-upload]',
-    '  bun scripts/bloodwork-merge.ts --date <YYYY-MM-DD> --date <YYYY-MM-DD> [--skip-upload]',
+    '  bun scripts/bloodwork-merge.ts --source <report-key> --source <report-key>',
+    '  bun scripts/bloodwork-merge.ts --file <report-key> --file <report-key>',
+    '  bun scripts/bloodwork-merge.ts --date <YYYY-MM-DD> --date <YYYY-MM-DD>',
     '',
     'Flags:',
     '  --source <key>       Select a bloodwork report by SQLite source key (can be repeated)',
     '  --file <key>         Alias for --source',
     '  --date <iso-date>    Select a bloodwork report by lab date (can be repeated)',
-    '  --skip-upload        Skip SQLite snapshot upload',
 ].join('\n');
 
 type CliOptions = {
     sourceKeys: string[];
     dates: string[];
-    skipUpload: boolean;
 };
 
 function parseCliOptions(argv: string[]): CliOptions {
     const sourceKeys: string[] = [];
     const dates: string[] = [];
-    let skipUpload = false;
 
     for (let index = 0; index < argv.length; index++) {
         const token = argv[index];
@@ -47,10 +43,6 @@ function parseCliOptions(argv: string[]): CliOptions {
             index += 1;
             continue;
         }
-        if (token === '--skip-upload') {
-            skipUpload = true;
-            continue;
-        }
 
         throw new Error(`Unknown argument: ${token}\n\n${HELP_TEXT}`);
     }
@@ -62,7 +54,6 @@ function parseCliOptions(argv: string[]): CliOptions {
     return {
         sourceKeys,
         dates,
-        skipUpload,
     };
 }
 
@@ -105,16 +96,8 @@ async function runBloodworkMerge(argv: string[] = process.argv.slice(2)): Promis
         sourceKeys: options.sourceKeys,
         dates: options.dates,
     });
-    const { s3Client, s3Bucket, s3Prefix } = createS3ClientIfNeeded({
-        skipUpload: options.skipUpload,
-    });
 
     console.info(`Selected ${selectedSourceKeys.length} report(s): ${selectedSourceKeys.join(', ')}`);
-    if (options.skipUpload) {
-        console.info('SQLite snapshot upload is disabled for this run (--skip-upload)');
-    } else {
-        console.info(`S3 destination: s3://${s3Bucket}/${s3Prefix}`);
-    }
 
     const consolidation = await consolidateBloodworkReports({
         selectedSourceKeys,
@@ -134,17 +117,6 @@ async function runBloodworkMerge(argv: string[] = process.argv.slice(2)): Promis
                 `sources: ${group.sourceKeys.join(', ')}`,
             ].join(' | '),
         );
-    }
-
-    if (consolidation.writtenSourceKeys.length > 0 || consolidation.removedSourceKeys.length > 0) {
-        const uploadedKey = await uploadDatabaseSnapshot({
-            s3Client,
-            s3Bucket,
-            s3Prefix,
-        });
-        if (uploadedKey) {
-            console.info(`Uploaded s3://${s3Bucket}/${uploadedKey}`);
-        }
     }
 }
 

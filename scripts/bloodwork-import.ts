@@ -2,7 +2,6 @@ import fs from 'fs';
 import { spawnSync } from 'child_process';
 import path from 'path';
 
-import { AnalyzeDocumentCommand, TextractClient } from '@aws-sdk/client-textract';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { generateObject, generateText } from 'ai';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
@@ -17,11 +16,6 @@ import {
     type BloodworkLab,
     type BloodworkMeasurementDuplicateValue,
 } from './bloodwork-schema.ts';
-import {
-    createS3ClientIfNeeded,
-    resolveAwsCredentials,
-    uploadDatabaseSnapshot,
-} from './aws.ts';
 import {
     consolidateBloodworkReports,
     createBloodworkImportReview,
@@ -51,18 +45,15 @@ const MAX_NORMALIZATION_CANDIDATES = 320;
 const MAX_GLOSSARY_DECISIONS = 64;
 const RESOLUTION_MIN_CONFIDENCE = 0.85;
 const RESOLUTION_MIN_MARGIN = 0.1;
-const TEXTRACT_MIN_LAYOUT_CANDIDATES = 8;
 
 type CliOptions = {
     importAll: boolean;
     inputPdfPath: string | null;
     continueOnError: boolean;
-    skipUpload: boolean;
     modelIds: string[];
     mergeExistingOnly: boolean;
     allowUnresolved: boolean;
     approveReviewId: number | null;
-    enableTextractFallback: boolean;
 };
 
 type ImportResult = {
@@ -508,30 +499,26 @@ const GLOSSARY_NEW_VALID_ACTION_KEYS = new Set([
 
 const HELP_TEXT = [
     'Usage:',
-    '  bun scripts/bloodwork-import.ts <path-to-pdf> [--skip-upload] [--model <openrouter-model-id>] [--allow-unresolved]',
-    '  bun scripts/bloodwork-import.ts --all [--continue-on-error] [--skip-upload] [--model <openrouter-model-id>] [--allow-unresolved]',
-    '  bun scripts/bloodwork-import.ts --merge-existing [--skip-upload]',
-    '  bun scripts/bloodwork-import.ts --approve-review <review-id> [--skip-upload]',
+    '  bun scripts/bloodwork-import.ts <path-to-pdf> [--model <openrouter-model-id>] [--allow-unresolved]',
+    '  bun scripts/bloodwork-import.ts --all [--continue-on-error] [--model <openrouter-model-id>] [--allow-unresolved]',
+    '  bun scripts/bloodwork-import.ts --merge-existing',
+    '  bun scripts/bloodwork-import.ts --approve-review <review-id>',
     '',
     'Flags:',
     '  --all                 Import every .pdf file from data/to-import',
     '  --merge-existing      Merge existing bloodwork reports already stored in SQLite',
     '  --approve-review      Apply decisions from a pending review record and finalize the lab import',
     '  --continue-on-error   Continue processing other files when --all is used',
-    '  --skip-upload         Skip SQLite snapshot upload (useful for local validation)',
     '  --model <id>          Override model id (can be repeated)',
     '  --allow-unresolved    Store the report even when unresolved conflicts were found',
-    '  --textract-fallback   Enable AWS Textract fallback when local extraction confidence is low',
 ].join('\n');
 
 function parseCliOptions(argv: string[]): CliOptions {
     let importAll = false;
     let mergeExistingOnly = false;
     let continueOnError = false;
-    let skipUpload = false;
     let allowUnresolved = false;
     let approveReviewId: number | null = null;
-    let enableTextractFallback = false;
     const modelIds: string[] = [];
     const positional: string[] = [];
 
@@ -549,16 +536,8 @@ function parseCliOptions(argv: string[]): CliOptions {
             continueOnError = true;
             continue;
         }
-        if (token === '--skip-upload') {
-            skipUpload = true;
-            continue;
-        }
         if (token === '--allow-unresolved') {
             allowUnresolved = true;
-            continue;
-        }
-        if (token === '--textract-fallback') {
-            enableTextractFallback = true;
             continue;
         }
         if (token === '--approve-review') {
@@ -651,12 +630,10 @@ function parseCliOptions(argv: string[]): CliOptions {
         importAll,
         inputPdfPath: importAll || mergeExistingOnly || approveReviewId !== null ? null : positional[0]!,
         continueOnError,
-        skipUpload,
         modelIds,
         mergeExistingOnly,
         allowUnresolved,
         approveReviewId,
-        enableTextractFallback,
     };
 }
 
@@ -4109,82 +4086,6 @@ async function extractLayoutMeasurementsFromPdfBytes(pdfBytes: Uint8Array): Prom
     return filterLikelyMeasurements(measurements);
 }
 
-async function extractMeasurementsWithTextract({
-    textractClient,
-    pdfBytes,
-}: {
-    textractClient: TextractClient;
-    pdfBytes: Uint8Array;
-}): Promise<BloodworkMeasurement[]> {
-    const response = await textractClient.send(new AnalyzeDocumentCommand({
-        Document: {
-            Bytes: pdfBytes,
-        },
-        FeatureTypes: ['TABLES', 'FORMS'],
-    }));
-    const blocks = response.Blocks ?? [];
-    const lineBlocks = blocks
-        .filter(block => block.BlockType === 'LINE' && block.Text && block.Page)
-        .map(block => ({
-            page: block.Page!,
-            text: block.Text!.trim(),
-            top: block.Geometry?.BoundingBox?.Top ?? 0,
-            confidence: block.Confidence ?? 0,
-        }))
-        .filter(block => block.text.length > 0);
-
-    const pageTexts = new Map<number, Array<{ text: string; top: number; confidence: number }>>();
-    for (const line of lineBlocks) {
-        const existing = pageTexts.get(line.page) ?? [];
-        existing.push(line);
-        pageTexts.set(line.page, existing);
-    }
-
-    const measurements: BloodworkMeasurement[] = [];
-    for (const [page, lines] of pageTexts.entries()) {
-        const sortedLines = lines.sort((left, right) => left.top - right.top);
-        const text = sortedLines.map(item => item.text).join('\n');
-        const parsed = parseMeasurementsFromTableLikeRows(extractTableLikeRows(text));
-        const averageConfidence = sortedLines.reduce((sum, line) => sum + line.confidence, 0) / sortedLines.length / 100;
-        measurements.push(...parsed.map(measurement => ({
-            ...measurement,
-            provenance: dedupeProvenanceEntries({
-                ...measurement,
-                provenance: [{
-                    extractor: 'textract',
-                    page,
-                    rawName: measurement.originalName || measurement.name,
-                    rawValue: measurement.value !== undefined ? String(measurement.value) : undefined,
-                    rawUnit: measurement.unit,
-                    rawRange: measurement.referenceRange
-                        ? [measurement.referenceRange.min ?? '', measurement.referenceRange.max ?? ''].join('..')
-                        : undefined,
-                    confidence: clampScore(averageConfidence),
-                }],
-            }),
-        })));
-    }
-
-    return filterLikelyMeasurements(measurements);
-}
-
-function shouldTriggerTextractFallback({
-    layoutMeasurements,
-    pageTexts,
-}: {
-    layoutMeasurements: BloodworkMeasurement[];
-    pageTexts: string[];
-}): boolean {
-    const pagesWithNumbers = pageTexts.filter(page => /\d/.test(page)).length;
-    if (pagesWithNumbers === 0) {
-        return false;
-    }
-    if (layoutMeasurements.length >= TEXTRACT_MIN_LAYOUT_CANDIDATES) {
-        return false;
-    }
-    return true;
-}
-
 async function generateLabObject({
     openRouterApiKey,
     modelIds,
@@ -4193,7 +4094,6 @@ async function generateLabObject({
     pageTexts,
     glossary,
     pdfBytes,
-    textractClient,
 }: {
     openRouterApiKey: string;
     modelIds: string[];
@@ -4202,7 +4102,6 @@ async function generateLabObject({
     pageTexts: string[];
     glossary: BloodworkGlossary;
     pdfBytes: Uint8Array;
-    textractClient: TextractClient | null;
 }): Promise<{ lab: BloodworkLab; modelId: string; conflicts: MeasurementConflict[] }> {
     const provider = createOpenRouter({ apiKey: openRouterApiKey });
     let metadataModelId: string | null = null;
@@ -4255,20 +4154,6 @@ async function generateLabObject({
     try {
         const layoutMeasurements = await extractLayoutMeasurementsFromPdfBytes(pdfBytes);
         candidateMeasurements.push(...layoutMeasurements);
-        if (textractClient && shouldTriggerTextractFallback({
-            layoutMeasurements,
-            pageTexts,
-        })) {
-            try {
-                const textractMeasurements = await extractMeasurementsWithTextract({
-                    textractClient,
-                    pdfBytes,
-                });
-                candidateMeasurements.push(...textractMeasurements);
-            } catch {
-                // textract fallback is best-effort and should not fail the import flow.
-            }
-        }
     } catch {
         // Keep pipeline resilient and continue with downstream extraction methods.
     }
@@ -4569,7 +4454,6 @@ async function importSingleFile({
     glossary,
     glossaryPath,
     allowUnresolved,
-    textractClient,
 }: {
     pdfPath: string;
     openRouterApiKey: string;
@@ -4577,7 +4461,6 @@ async function importSingleFile({
     glossary: BloodworkGlossary;
     glossaryPath: string;
     allowUnresolved: boolean;
-    textractClient: TextractClient | null;
 }): Promise<ImportResult> {
     const pdfBytes = new Uint8Array(await Bun.file(pdfPath).arrayBuffer());
     assertPdfSignature(pdfBytes, pdfPath);
@@ -4592,7 +4475,6 @@ async function importSingleFile({
         pageTexts: extracted.pageTexts,
         glossary: glossaryForFile,
         pdfBytes,
-        textractClient,
     });
 
     const sourceKey = await resolveBloodworkSourceKey({
@@ -4696,31 +4578,8 @@ async function approveReviewRecord({
     };
 }
 
-function createTextractClientIfNeeded(options: {
-    enableTextractFallback: boolean;
-}): TextractClient | null {
-    if (!options.enableTextractFallback) {
-        return null;
-    }
-    const credentials = resolveAwsCredentials();
-    return new TextractClient({
-        region: credentials.region,
-        credentials: {
-            accessKeyId: credentials.accessKeyId,
-            secretAccessKey: credentials.secretAccessKey,
-            sessionToken: credentials.sessionToken,
-        },
-    });
-}
-
 async function runBloodworkImporter(argv: string[] = process.argv.slice(2)): Promise<void> {
     const options = parseCliOptions(argv);
-    const { s3Client, s3Bucket, s3Prefix } = createS3ClientIfNeeded({
-        skipUpload: options.skipUpload,
-    });
-    const textractClient = createTextractClientIfNeeded({
-        enableTextractFallback: options.enableTextractFallback,
-    });
 
     if (options.approveReviewId !== null) {
         const result = await approveReviewRecord({
@@ -4728,14 +4587,6 @@ async function runBloodworkImporter(argv: string[] = process.argv.slice(2)): Pro
         });
         if (result.sourceKey) {
             console.info(`Stored ${result.sourceKey}`);
-        }
-        const uploadedKey = await uploadDatabaseSnapshot({
-            s3Client,
-            s3Bucket,
-            s3Prefix,
-        });
-        if (uploadedKey) {
-            console.info(`Uploaded s3://${s3Bucket}/${uploadedKey}`);
         }
         return;
     }
@@ -4758,16 +4609,6 @@ async function runBloodworkImporter(argv: string[] = process.argv.slice(2)): Pro
                 );
             }
         }
-        if (consolidation.writtenSourceKeys.length > 0 || consolidation.removedSourceKeys.length > 0) {
-            const uploadedKey = await uploadDatabaseSnapshot({
-                s3Client,
-                s3Bucket,
-                s3Prefix,
-            });
-            if (uploadedKey) {
-                console.info(`Uploaded s3://${s3Bucket}/${uploadedKey}`);
-            }
-        }
         return;
     }
 
@@ -4783,14 +4624,6 @@ async function runBloodworkImporter(argv: string[] = process.argv.slice(2)): Pro
     if (options.allowUnresolved) {
         console.info('Unresolved conflicts will still be stored (--allow-unresolved)');
     }
-    if (textractClient) {
-        console.info('AWS Textract fallback is enabled (--textract-fallback)');
-    }
-    if (options.skipUpload) {
-        console.info('SQLite snapshot upload is disabled for this run (--skip-upload)');
-    } else {
-        console.info(`S3 destination: s3://${s3Bucket}/${s3Prefix}`);
-    }
 
     const failures: Array<{ file: string; error: unknown }> = [];
     let successCount = 0;
@@ -4805,7 +4638,6 @@ async function runBloodworkImporter(argv: string[] = process.argv.slice(2)): Pro
                 glossary,
                 glossaryPath,
                 allowUnresolved: options.allowUnresolved,
-                textractClient,
             });
 
             successCount += 1;
@@ -4850,14 +4682,6 @@ async function runBloodworkImporter(argv: string[] = process.argv.slice(2)): Pro
                 ].join(' | '),
             );
         }
-    }
-    const uploadedKey = await uploadDatabaseSnapshot({
-        s3Client,
-        s3Bucket,
-        s3Prefix,
-    });
-    if (uploadedKey) {
-        console.info(`Uploaded s3://${s3Bucket}/${uploadedKey}`);
     }
 }
 
