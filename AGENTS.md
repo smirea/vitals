@@ -2,16 +2,14 @@ IMPORTANT: this is a hobby project that will exclusively be used by 1 user on th
 
 NEVER EVER WRITE A DATABASE MIGRATION: just update the database shape and import the data, I never want to see any migration files in this repo
 
-see `PROJECT.md` for detailed info. when asked to implement new features, update the project file if needed
-
 # Broad guidelines
 
-This is an information dense, concise but comprehensive tool to analyze medical information such as bloodwork
+This is an information dense, concise but comprehensive tool to analyze all sorts of information about 1 person: medical information such as bloodwork, food tracking, supplement tracking,workouts and the like
 
 # Stack
 
 - Tooling: Bun + TypeScript
 - Server: Bun.serve API
 - Client: React + Vite + TanStack Router
-- UI: Ant Design + Emotion + Tailwind CSS (enabled in client/src/index.css)
+- UI: Ant Design + Emotion + Tailwind CSS (enabled in client/src/index.css, avoid using tailwind)
 - Linting and Hooks: Oxlint + Lefthook

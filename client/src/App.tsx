@@ -7,6 +7,7 @@ import {
     createBrowserTrpcClient,
     createQueryClient,
 } from './lib/trpc'
+import { AutofillGuard } from './components/AutofillGuard'
 import { routeTree } from './routeTree.gen'
 
 const router = createRouter({
@@ -27,6 +28,7 @@ export default function App() {
     return (
         <QueryClientProvider client={queryClient}>
             <TRPCProvider queryClient={queryClient} trpcClient={trpcClient}>
+                <AutofillGuard />
                 <RouterProvider router={router} />
             </TRPCProvider>
         </QueryClientProvider>

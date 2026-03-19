@@ -9,9 +9,15 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as PillsRouteImport } from './routes/pills'
 import { Route as BloodworkRouteImport } from './routes/bloodwork'
 import { Route as IndexRouteImport } from './routes/index'
 
+const PillsRoute = PillsRouteImport.update({
+  id: '/pills',
+  path: '/pills',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const BloodworkRoute = BloodworkRouteImport.update({
   id: '/bloodwork',
   path: '/bloodwork',
@@ -26,31 +32,42 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/bloodwork': typeof BloodworkRoute
+  '/pills': typeof PillsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/bloodwork': typeof BloodworkRoute
+  '/pills': typeof PillsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/bloodwork': typeof BloodworkRoute
+  '/pills': typeof PillsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/bloodwork'
+  fullPaths: '/' | '/bloodwork' | '/pills'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/bloodwork'
-  id: '__root__' | '/' | '/bloodwork'
+  to: '/' | '/bloodwork' | '/pills'
+  id: '__root__' | '/' | '/bloodwork' | '/pills'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   BloodworkRoute: typeof BloodworkRoute
+  PillsRoute: typeof PillsRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/pills': {
+      id: '/pills'
+      path: '/pills'
+      fullPath: '/pills'
+      preLoaderRoute: typeof PillsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/bloodwork': {
       id: '/bloodwork'
       path: '/bloodwork'
@@ -71,6 +88,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   BloodworkRoute: BloodworkRoute,
+  PillsRoute: PillsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

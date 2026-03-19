@@ -12,6 +12,7 @@ const measurementFlagValues = ['low', 'high', 'normal', 'abnormal', 'critical', 
 const reviewStatusValues = ['accepted', 'needs_review'] as const;
 const provenanceExtractorValues = ['layout_text', 'textract', 'llm_normalizer'] as const;
 const importReviewStatusValues = ['pending', 'applied'] as const;
+const pillTimingValues = ['morning', 'afternoon', 'evening', 'random'] as const;
 
 export const bloodworkReports = sqliteTable('bloodwork_reports', {
     id: integer('id').primaryKey({ autoIncrement: true }),
@@ -133,6 +134,50 @@ export const bloodworkImportReviews = sqliteTable('bloodwork_import_reviews', {
     index('bloodwork_import_reviews_status_idx').on(table.status),
 ]);
 
+export const pills = sqliteTable('pills', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    name: text('name').notNull(),
+    value: text('value'),
+    unit: text('unit'),
+    note: text('note'),
+}, table => [
+    uniqueIndex('pills_name_idx').on(table.name),
+    index('pills_name_sort_idx').on(table.name, table.id),
+]);
+
+export const pillComponents = sqliteTable('pill_components', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    pillId: integer('pill_id').notNull().references(() => pills.id, { onDelete: 'cascade' }),
+    sortOrder: integer('sort_order').notNull(),
+    name: text('name').notNull(),
+    value: text('value'),
+    unit: text('unit'),
+}, table => [
+    index('pill_components_pill_sort_idx').on(table.pillId, table.sortOrder),
+]);
+
+export const pillImages = sqliteTable('pill_images', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    pillId: integer('pill_id').notNull().references(() => pills.id, { onDelete: 'cascade' }),
+    sortOrder: integer('sort_order').notNull(),
+    fileName: text('file_name').notNull(),
+    dataUrl: text('data_url').notNull(),
+}, table => [
+    index('pill_images_pill_sort_idx').on(table.pillId, table.sortOrder),
+]);
+
+export const pillPeriods = sqliteTable('pill_periods', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    pillId: integer('pill_id').notNull().references(() => pills.id, { onDelete: 'cascade' }),
+    startDate: text('start_date').notNull(),
+    endDate: text('end_date'),
+    valueOverride: text('value_override'),
+    unitOverride: text('unit_override'),
+    timing: text('timing', { enum: pillTimingValues }).notNull().default('random'),
+}, table => [
+    index('pill_periods_pill_start_idx').on(table.pillId, table.startDate, table.id),
+]);
+
 export const bloodworkReportsRelations = relations(bloodworkReports, ({ many }) => ({
     results: many(bloodworkResults),
     mergedSources: many(bloodworkMergedSources),
@@ -176,6 +221,33 @@ export const bloodworkResultProvenanceRelations = relations(bloodworkResultProve
     }),
 }));
 
+export const pillsRelations = relations(pills, ({ many }) => ({
+    components: many(pillComponents),
+    images: many(pillImages),
+    periods: many(pillPeriods),
+}));
+
+export const pillComponentsRelations = relations(pillComponents, ({ one }) => ({
+    pill: one(pills, {
+        fields: [pillComponents.pillId],
+        references: [pills.id],
+    }),
+}));
+
+export const pillImagesRelations = relations(pillImages, ({ one }) => ({
+    pill: one(pills, {
+        fields: [pillImages.pillId],
+        references: [pills.id],
+    }),
+}));
+
+export const pillPeriodsRelations = relations(pillPeriods, ({ one }) => ({
+    pill: one(pills, {
+        fields: [pillPeriods.pillId],
+        references: [pills.id],
+    }),
+}));
+
 export const bloodworkTables = {
     bloodworkReports,
     bloodworkMarkers,
@@ -185,15 +257,27 @@ export const bloodworkTables = {
     bloodworkResultProvenance,
 } as const;
 
-export const schema = {
+export const appTables = {
     ...bloodworkTables,
     bloodworkImportReviews,
+    pills,
+    pillComponents,
+    pillImages,
+    pillPeriods,
+} as const;
+
+export const schema = {
+    ...appTables,
     bloodworkReportsRelations,
     bloodworkMarkersRelations,
     bloodworkResultsRelations,
     bloodworkMergedSourcesRelations,
     bloodworkResultDuplicatesRelations,
     bloodworkResultProvenanceRelations,
+    pillsRelations,
+    pillComponentsRelations,
+    pillImagesRelations,
+    pillPeriodsRelations,
 };
 
 export type BloodworkReportRow = typeof bloodworkReports.$inferSelect;
@@ -203,3 +287,7 @@ export type BloodworkMergedSourceRow = typeof bloodworkMergedSources.$inferSelec
 export type BloodworkResultDuplicateRow = typeof bloodworkResultDuplicates.$inferSelect;
 export type BloodworkResultProvenanceRow = typeof bloodworkResultProvenance.$inferSelect;
 export type BloodworkImportReviewRow = typeof bloodworkImportReviews.$inferSelect;
+export type PillRow = typeof pills.$inferSelect;
+export type PillComponentRow = typeof pillComponents.$inferSelect;
+export type PillImageRow = typeof pillImages.$inferSelect;
+export type PillPeriodRow = typeof pillPeriods.$inferSelect;

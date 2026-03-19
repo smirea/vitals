@@ -2,6 +2,7 @@ import {
     and,
     asc,
     count,
+    count as countAll,
     desc,
     eq,
     getTableColumns,
@@ -18,7 +19,7 @@ import {
 import type { AnySQLiteTable } from 'drizzle-orm/sqlite-core';
 import { z } from 'zod';
 
-import { bloodworkTables } from 'server/db/schema.ts';
+import { appTables } from 'server/db/schema.ts';
 import { createRouter, publicProcedure } from 'server/trpc/shared.ts';
 
 type TableColumns<TTable extends AnySQLiteTable> = TTable['_']['columns'];
@@ -191,6 +192,14 @@ function buildTableQuerySchema<TTable extends AnySQLiteTable>(table: TTable): z.
     }) as z.ZodType<TableQueryInput<TTable>>;
 }
 
+function buildDeleteSchema<TTable extends AnySQLiteTable>(table: TTable) {
+    const whereSchema = buildWhereSchema(table) as unknown as z.ZodArray<z.ZodTypeAny>;
+
+    return z.object({
+        where: whereSchema.min(1),
+    }) as z.ZodType<{ where: TableFilterCondition<TTable>[] }>;
+}
+
 function buildWhereClause<TTable extends AnySQLiteTable>(
     table: TTable,
     where: TableFilterCondition<TTable>[] | undefined,
@@ -244,6 +253,7 @@ function buildOrderBy<TTable extends AnySQLiteTable>(
 
 function createTableAccessRouter<TTable extends AnySQLiteTable>(table: TTable) {
     const querySchema = buildTableQuerySchema(table);
+    const deleteSchema = buildDeleteSchema(table);
 
     return createRouter({
         findMany: publicProcedure
@@ -306,14 +316,32 @@ function createTableAccessRouter<TTable extends AnySQLiteTable>(table: TTable) {
 
                 return query.get()?.value ?? 0;
             }),
+        deleteMany: publicProcedure
+            .input(deleteSchema)
+            .mutation(({ ctx, input }) => {
+                const whereClause = buildWhereClause(table, input.where);
+                if (!whereClause) {
+                    throw new Error('deleteMany requires at least one where condition.');
+                }
+
+                const deletedCount = ctx.db.select({
+                    value: countAll(),
+                }).from(table).where(whereClause).get()?.value ?? 0;
+
+                ctx.db.delete(table).where(whereClause).run();
+
+                return {
+                    deletedCount,
+                };
+            }),
     });
 }
 
 const tableRouters = Object.fromEntries(
-    Object.entries(bloodworkTables).map(([tableName, table]) => [tableName, createTableAccessRouter(table)]),
+    Object.entries(appTables).map(([tableName, table]) => [tableName, createTableAccessRouter(table)]),
 ) as {
-    [TTableName in keyof typeof bloodworkTables]: ReturnType<
-        typeof createTableAccessRouter<(typeof bloodworkTables)[TTableName]>
+    [TTableName in keyof typeof appTables]: ReturnType<
+        typeof createTableAccessRouter<(typeof appTables)[TTableName]>
     >;
 };
 

@@ -1,4 +1,4 @@
-import { HomeOutlined, MedicineBoxOutlined } from '@ant-design/icons'
+import { ExperimentOutlined, HomeOutlined, MedicineBoxOutlined } from '@ant-design/icons'
 import { Link, useRouterState } from '@tanstack/react-router'
 import { Menu, Typography } from 'antd'
 
@@ -14,6 +14,12 @@ const navigationItems = [
         to: '/bloodwork',
         label: 'Bloodwork',
         icon: <MedicineBoxOutlined />,
+    },
+    {
+        key: '/pills',
+        to: '/pills',
+        label: 'Pills',
+        icon: <ExperimentOutlined />,
     },
 ] as const
 
