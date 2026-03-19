@@ -31,7 +31,7 @@ Pick the next most important feature to work on, implement it fully and test it 
 - [x] use the aws cli to create a purpose built user for this project with dedicated permissions and store the credentials in .env.local
 - [x] create env with env-manager and create specific keys for everything requested (you can use env-manager to generate an openrouter key)
 - [x] bloodwork glossary enforcement: track canonical measurement names, aliases, and ranges with LLM-validated updates
-    - [x] add `server/src/bloodwork-glossary.json` for known measurement vocabulary and range history
+    - [x] add `scripts/bloodwork-glossary.json` for known measurement vocabulary and range history
     - [x] during import, validate extracted measurement names against glossary and run a second LLM pass for unknown names
     - [x] classify unknown names as alias, valid new entry, or invalid parse and update glossary automatically
     - [x] enforce english-only canonical names/aliases in validator prompts and acceptance rules
@@ -56,7 +56,7 @@ Pick the next most important feature to work on, implement it fully and test it 
 - Importer runtime requires `OPENROUTER_API_KEY` and AWS env vars (`AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`) unless running with `--skip-upload`.
 - Dedicated IAM user `vitals-project-user` has been created with scoped access to `s3://stefan-life/vitals/*` and credentials are stored in `.env.local`.
 - `scripts/download-data.ts` uses a local sync state file (`data/.s3-sync-state.json`) to only download changed S3 objects.
-- Importer now maintains `server/src/bloodwork-glossary.json` with canonical measurement names, aliases, and known ranges; glossary updates happen automatically during import runs.
+- Importer now maintains `scripts/bloodwork-glossary.json` with canonical measurement names, aliases, and known ranges; glossary updates happen automatically during import runs.
 - Unknown glossary names go through a second-pass validator prompt that enforces english-only canonical names and aliases before entries are accepted.
 - Importer standardizes measurement units for key analytes; when a numeric unit conversion is applied it preserves pre-conversion data in `measurement.original` (`value`, `unit`, `referenceRange`).
 - Importer consolidates bloodwork JSON files within a 7-day window into the latest-dated file, records contributing files in `mergedFrom`, and stores superseded measurement readings in `measurement.duplicateValues`.

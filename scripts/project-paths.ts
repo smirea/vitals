@@ -10,7 +10,7 @@ const PROJECT_DATA_DIR = configuredDataDir
     : path.join(PROJECT_ROOT, 'data');
 
 const PROJECT_TO_IMPORT_DIR = path.join(PROJECT_DATA_DIR, 'to-import');
-const PROJECT_GLOSSARY_PATH = path.join(PROJECT_ROOT, 'server/src/bloodwork-glossary.json');
+const PROJECT_GLOSSARY_PATH = path.join(PROJECT_ROOT, 'scripts', 'bloodwork-glossary.json');
 const configuredDbPath = process.env.VITALS_DB_PATH?.trim();
 const PROJECT_DB_PATH = configuredDbPath
     ? (path.isAbsolute(configuredDbPath)

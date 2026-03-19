@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { PROJECT_DATA_DIR } from 'scripts/project-paths.ts';
+import { PROJECT_DATA_DIR, PROJECT_ROOT } from 'scripts/project-paths.ts';
 import {
     bloodworkLabSchema,
     type BloodworkLab,
@@ -10,7 +10,6 @@ import {
     type BloodworkMeasurementProvenance,
 } from 'scripts/bloodwork-schema.ts';
 import { getDatabase, type VitalsDatabase } from 'server/db/client.ts';
-import { pushDatabaseSchema } from 'server/db/push.ts';
 import {
     bloodworkMarkers,
     bloodworkMergedSources,
@@ -227,7 +226,7 @@ export async function syncBloodworkDatabaseFromJson(args: {
     dataDir?: string;
     db?: VitalsDatabase;
 } = {}): Promise<BloodworkDatabaseSyncSummary> {
-    await pushDatabaseSchema();
+    await Bun.$`bunx drizzle-kit push --config drizzle.config.ts --force`.cwd(PROJECT_ROOT);
 
     const dataDir = args.dataDir ?? PROJECT_DATA_DIR;
     const db = args.db ?? getDatabase();

@@ -27,19 +27,19 @@ export const bloodworkReports = sqliteTable('bloodwork_reports', {
     notes: text('notes'),
     reviewUnresolvedCount: integer('review_unresolved_count').notNull().default(0),
     reviewReportFile: text('review_report_file'),
-}, table => ({
-    sourceFileNameIdx: uniqueIndex('bloodwork_reports_source_file_name_idx').on(table.sourceFileName),
-    dateIdx: index('bloodwork_reports_date_idx').on(table.date),
-}));
+}, table => [
+    uniqueIndex('bloodwork_reports_source_file_name_idx').on(table.sourceFileName),
+    index('bloodwork_reports_date_idx').on(table.date),
+]);
 
 export const bloodworkMarkers = sqliteTable('bloodwork_markers', {
     id: integer('id').primaryKey({ autoIncrement: true }),
     key: text('key').notNull(),
     name: text('name').notNull(),
-}, table => ({
-    keyIdx: uniqueIndex('bloodwork_markers_key_idx').on(table.key),
-    nameIdx: index('bloodwork_markers_name_idx').on(table.name),
-}));
+}, table => [
+    uniqueIndex('bloodwork_markers_key_idx').on(table.key),
+    index('bloodwork_markers_name_idx').on(table.name),
+]);
 
 export const bloodworkResults = sqliteTable('bloodwork_results', {
     id: integer('id').primaryKey({ autoIncrement: true }),
@@ -65,11 +65,11 @@ export const bloodworkResults = sqliteTable('bloodwork_results', {
     confidence: real('confidence'),
     conflictReason: text('conflict_reason'),
     conflictCandidateCount: integer('conflict_candidate_count'),
-}, table => ({
-    reportMarkerIdx: uniqueIndex('bloodwork_results_report_marker_idx').on(table.reportId, table.markerId),
-    reportSortIdx: index('bloodwork_results_report_sort_idx').on(table.reportId, table.sortOrder),
-    markerIdx: index('bloodwork_results_marker_idx').on(table.markerId),
-}));
+}, table => [
+    uniqueIndex('bloodwork_results_report_marker_idx').on(table.reportId, table.markerId),
+    index('bloodwork_results_report_sort_idx').on(table.reportId, table.sortOrder),
+    index('bloodwork_results_marker_idx').on(table.markerId),
+]);
 
 export const bloodworkMergedSources = sqliteTable('bloodwork_merged_sources', {
     id: integer('id').primaryKey({ autoIncrement: true }),
@@ -80,9 +80,9 @@ export const bloodworkMergedSources = sqliteTable('bloodwork_merged_sources', {
     labName: text('lab_name').notNull(),
     importLocation: text('import_location'),
     measurementCount: integer('measurement_count'),
-}, table => ({
-    reportSortIdx: index('bloodwork_merged_sources_report_sort_idx').on(table.reportId, table.sortOrder),
-}));
+}, table => [
+    index('bloodwork_merged_sources_report_sort_idx').on(table.reportId, table.sortOrder),
+]);
 
 export const bloodworkResultDuplicates = sqliteTable('bloodwork_result_duplicates', {
     id: integer('id').primaryKey({ autoIncrement: true }),
@@ -99,9 +99,9 @@ export const bloodworkResultDuplicates = sqliteTable('bloodwork_result_duplicate
     sourceFile: text('source_file'),
     sourceLabName: text('source_lab_name'),
     importLocation: text('import_location'),
-}, table => ({
-    resultSortIdx: index('bloodwork_result_duplicates_result_sort_idx').on(table.resultId, table.sortOrder),
-}));
+}, table => [
+    index('bloodwork_result_duplicates_result_sort_idx').on(table.resultId, table.sortOrder),
+]);
 
 export const bloodworkResultProvenance = sqliteTable('bloodwork_result_provenance', {
     id: integer('id').primaryKey({ autoIncrement: true }),
@@ -114,9 +114,9 @@ export const bloodworkResultProvenance = sqliteTable('bloodwork_result_provenanc
     rawUnit: text('raw_unit'),
     rawRange: text('raw_range'),
     confidence: real('confidence'),
-}, table => ({
-    resultSortIdx: index('bloodwork_result_provenance_result_sort_idx').on(table.resultId, table.sortOrder),
-}));
+}, table => [
+    index('bloodwork_result_provenance_result_sort_idx').on(table.resultId, table.sortOrder),
+]);
 
 export const bloodworkReportsRelations = relations(bloodworkReports, ({ many }) => ({
     results: many(bloodworkResults),
