@@ -4,39 +4,26 @@ import path from 'path';
 
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { generateObject, generateText } from 'ai';
+import { eq, inArray } from 'drizzle-orm';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { z } from 'zod';
 
-import {
-    bloodworkLabSchema,
-    bloodworkMeasurementSchema,
-    normalizeIsoDate,
-    parseReferenceRangeBoundsFromText,
-    type BloodworkMeasurement,
-    type BloodworkLab,
-    type BloodworkMeasurementDuplicateValue,
-} from './bloodwork-schema.ts';
-import {
-    buildMeasurementNameKey,
-    cloneMeasurement,
-    cloneReferenceRange,
-    dedupeDuplicateValues,
-} from './bloodwork-shared.ts';
-import {
-    consolidateBloodworkReports,
-    createBloodworkImportReview,
-    getBloodworkImportReview,
-    listBloodworkReports,
-    markBloodworkImportReviewApplied,
-    resolveBloodworkSourceKey,
-    upsertBloodworkReport,
-} from './bloodwork-db.ts';
 import { createScript } from './createScript.ts';
 import {
     PROJECT_GLOSSARY_PATH,
     PROJECT_ROOT,
     PROJECT_TO_IMPORT_DIR,
 } from './project-paths.ts';
+import { getDatabase, type VitalsDatabase } from 'server/db/client.ts';
+import {
+    bloodworkImportReviews,
+    bloodworkMarkers,
+    bloodworkMergedSources,
+    bloodworkReports,
+    bloodworkResultDuplicates,
+    bloodworkResultProvenance,
+    bloodworkResults,
+} from 'server/db/schema.ts';
 
 const DEFAULT_MODEL_IDS = ['google/gemini-3-flash-preview'];
 const DEFAULT_GLOSSARY_VALIDATOR_MODEL_IDS = ['google/gemini-3-flash-preview'];
@@ -54,6 +41,1637 @@ const MAX_GLOSSARY_DECISIONS = 64;
 const RESOLUTION_MIN_CONFIDENCE = 0.85;
 const RESOLUTION_MIN_MARGIN = 0.1;
 let pushDatabaseSchemaPromise: Promise<void> | null = null;
+
+const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+
+const bloodworkMeasurementFlagSchema = z.enum([
+    'low',
+    'high',
+    'normal',
+    'abnormal',
+    'critical',
+    'unknown',
+]);
+
+const bloodworkMeasurementReviewStatusSchema = z.enum([
+    'accepted',
+    'needs_review',
+]);
+
+const bloodworkReferenceRangeSchema = z
+    .object({
+        min: z.number().finite().optional(),
+        max: z.number().finite().optional(),
+        lower: z.number().finite().optional(),
+        upper: z.number().finite().optional(),
+        text: z.string().trim().min(1).optional(),
+    })
+    .transform(value => {
+        const min = value.min ?? value.lower;
+        const max = value.max ?? value.upper;
+        if (min !== undefined || max !== undefined) {
+            return { min, max };
+        }
+        if (!value.text) {
+            return {};
+        }
+        return parseReferenceRangeBoundsFromText(value.text) ?? {};
+    })
+    .refine(
+        value => value.min !== undefined || value.max !== undefined,
+        { message: 'referenceRange must contain at least one bound' },
+    );
+
+const bloodworkMeasurementDuplicateValueSchema = z.object({
+    date: z.string().trim().min(1).transform(normalizeIsoDate),
+    value: z.union([z.number().finite(), z.string().trim().min(1)]).optional(),
+    unit: z.string().trim().min(1).optional(),
+    referenceRange: bloodworkReferenceRangeSchema.optional(),
+    flag: bloodworkMeasurementFlagSchema.optional(),
+    note: z.string().trim().min(1).optional(),
+    sourceFile: z.string().trim().min(1).optional(),
+    sourceLabName: z.string().trim().min(1).optional(),
+    importLocation: z.string().trim().min(1).optional(),
+});
+
+const bloodworkMeasurementProvenanceSchema = z.object({
+    extractor: z.enum([
+        'layout_text',
+        'textract',
+        'llm_normalizer',
+    ]),
+    page: z.number().int().positive(),
+    rawName: z.string().trim().min(1).optional(),
+    rawValue: z.string().trim().min(1).optional(),
+    rawUnit: z.string().trim().min(1).optional(),
+    rawRange: z.string().trim().min(1).optional(),
+    confidence: z.number().finite().min(0).max(1).optional(),
+});
+
+const bloodworkMeasurementConflictSchema = z.object({
+    reason: z.string().trim().min(1),
+    candidateCount: z.number().int().nonnegative(),
+});
+
+const bloodworkMeasurementSchema = z.object({
+    name: z.string().trim().min(1),
+    originalName: z.string().trim().min(1).optional(),
+    category: z.string().trim().min(1).optional(),
+    value: z.union([z.number().finite(), z.string().trim().min(1)]).optional(),
+    unit: z.string().trim().min(1).optional(),
+    referenceRange: bloodworkReferenceRangeSchema.optional(),
+    original: z.object({
+        value: z.union([z.number().finite(), z.string().trim().min(1)]).optional(),
+        unit: z.string().trim().min(1).optional(),
+        referenceRange: bloodworkReferenceRangeSchema.optional(),
+    }).optional(),
+    duplicateValues: z.array(bloodworkMeasurementDuplicateValueSchema).min(1).optional(),
+    flag: bloodworkMeasurementFlagSchema.optional(),
+    note: z.string().trim().min(1).optional(),
+    notes: z.string().trim().min(1).optional(),
+    reviewStatus: bloodworkMeasurementReviewStatusSchema.optional(),
+    confidence: z.number().finite().min(0).max(1).optional(),
+    provenance: z.array(bloodworkMeasurementProvenanceSchema).min(1).optional(),
+    conflict: bloodworkMeasurementConflictSchema.optional(),
+});
+
+const bloodworkMergedSourceSchema = z.object({
+    fileName: z.string().trim().min(1),
+    date: z.string().trim().min(1).transform(normalizeIsoDate),
+    labName: z.string().trim().min(1),
+    importLocation: z.string().trim().min(1).optional(),
+    measurementCount: z.number().int().nonnegative().optional(),
+});
+
+const bloodworkLabSchema = z.object({
+    date: z.string().trim().min(1).transform(normalizeIsoDate),
+    collectionDate: z.string().trim().min(1).transform(normalizeIsoDate).optional(),
+    reportedDate: z.string().trim().min(1).transform(normalizeIsoDate).optional(),
+    receivedDate: z.string().trim().min(1).transform(normalizeIsoDate).optional(),
+    labName: z.string().trim().min(1),
+    location: z.string().trim().min(1).optional(),
+    importLocation: z.string().trim().min(1).optional(),
+    importLocationIsInferred: z.boolean().optional(),
+    weightKg: z.number().positive().finite().optional(),
+    measurements: z.array(bloodworkMeasurementSchema).min(1),
+    mergedFrom: z.array(bloodworkMergedSourceSchema).min(1).optional(),
+    notes: z.string().trim().min(1).optional(),
+    reviewSummary: z.object({
+        unresolvedCount: z.number().int().nonnegative(),
+        reportFile: z.string().trim().min(1).optional(),
+    }).optional(),
+});
+
+type BloodworkMeasurement = z.infer<typeof bloodworkMeasurementSchema>;
+type BloodworkLab = z.infer<typeof bloodworkLabSchema>;
+type BloodworkMeasurementDuplicateValue = z.infer<typeof bloodworkMeasurementDuplicateValueSchema>;
+type BloodworkMergedSource = z.infer<typeof bloodworkMergedSourceSchema>;
+type BloodworkMeasurementProvenance = z.infer<typeof bloodworkMeasurementProvenanceSchema>;
+
+type StoredBloodworkReport = {
+    reportId: number;
+    sourceKey: string;
+    lab: BloodworkLab;
+};
+
+type BloodworkImportReview = {
+    id: number;
+    createdAt: string;
+    sourceKey: string;
+    sourcePdfPath: string;
+    unresolvedCount: number;
+    status: 'pending' | 'applied';
+    payload: unknown;
+    appliedAt: string | null;
+};
+
+type ConsolidationGroupSummary = {
+    targetSourceKey: string;
+    latestDate: string;
+    sourceKeys: string[];
+    sourceDates: string[];
+};
+
+type ConsolidationSummary = {
+    groupsProcessed: number;
+    mergedGroups: number;
+    reportsBefore: number;
+    reportsAfter: number;
+    writtenSourceKeys: string[];
+    removedSourceKeys: string[];
+    groups: ConsolidationGroupSummary[];
+};
+
+type BloodworkWriteDb = Pick<VitalsDatabase, 'delete' | 'insert' | 'select' | 'update'>;
+
+function toInteger(value: string, fieldName: string): number {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isNaN(parsed)) {
+        throw new Error(`Invalid ${fieldName}: ${value}`);
+    }
+    return parsed;
+}
+
+function isValidCalendarDate(year: number, month: number, day: number): boolean {
+    if (month < 1 || month > 12) {
+        return false;
+    }
+    if (day < 1 || day > 31) {
+        return false;
+    }
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return (
+        date.getUTCFullYear() === year &&
+        date.getUTCMonth() === month - 1 &&
+        date.getUTCDate() === day
+    );
+}
+
+function normalizeIsoDate(rawDate: string): string {
+    const value = rawDate.trim();
+    if (!value) {
+        throw new Error('Date is empty');
+    }
+
+    if (ISO_DATE_REGEX.test(value)) {
+        const [year, month, day] = value.split('-').map(part => toInteger(part, 'date part'));
+        if (!isValidCalendarDate(year, month, day)) {
+            throw new Error(`Invalid ISO date: ${value}`);
+        }
+        return value;
+    }
+
+    const yearFirst = value.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})$/);
+    if (yearFirst) {
+        const year = toInteger(yearFirst[1], 'year');
+        const month = toInteger(yearFirst[2], 'month');
+        const day = toInteger(yearFirst[3], 'day');
+        if (!isValidCalendarDate(year, month, day)) {
+            throw new Error(`Invalid date: ${value}`);
+        }
+        return `${year.toString().padStart(4, '0')}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+    }
+
+    const dayFirst = value.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
+    if (dayFirst) {
+        const day = toInteger(dayFirst[1], 'day');
+        const month = toInteger(dayFirst[2], 'month');
+        const year = toInteger(dayFirst[3], 'year');
+        if (!isValidCalendarDate(year, month, day)) {
+            throw new Error(`Invalid date: ${value}`);
+        }
+        return `${year.toString().padStart(4, '0')}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+    }
+
+    const parsedTimestamp = Date.parse(value);
+    if (!Number.isNaN(parsedTimestamp)) {
+        return new Date(parsedTimestamp).toISOString().slice(0, 10);
+    }
+
+    throw new Error(`Could not parse date: ${value}`);
+}
+
+function parseRangeNumber(raw: string): number | undefined {
+    const parsed = Number.parseFloat(raw.replace(/[<>]/g, '').replace(',', '.').trim());
+    return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function parseReferenceRangeBoundsFromText(text: string): { min?: number; max?: number } | undefined {
+    const trimmed = text.trim();
+    if (!trimmed) {
+        return undefined;
+    }
+
+    const pair = trimmed.match(/([<>]?\s*-?\d+(?:[.,]\d+)?)\s*(?:-|–|—|to)\s*([<>]?\s*-?\d+(?:[.,]\d+)?)/i);
+    if (pair) {
+        const min = parseRangeNumber(pair[1]!);
+        const max = parseRangeNumber(pair[2]!);
+        if (min === undefined && max === undefined) {
+            return undefined;
+        }
+        return { min, max };
+    }
+
+    const comparator = trimmed.match(/([<>]=?)\s*(-?\d+(?:[.,]\d+)?)/);
+    if (!comparator) {
+        return undefined;
+    }
+
+    const value = parseRangeNumber(comparator[2]!);
+    if (value === undefined) {
+        return undefined;
+    }
+
+    if (comparator[1]!.includes('<')) {
+        return { max: value };
+    }
+
+    return { min: value };
+}
+
+function slugifyForPath(value: string): string {
+    const stripped = value
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    return stripped || 'unknown-lab';
+}
+
+function buildMeasurementNameKey(value: string): string {
+    return value
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+}
+
+function cloneReferenceRange(
+    referenceRange: BloodworkMeasurement['referenceRange'],
+): BloodworkMeasurement['referenceRange'] {
+    if (!referenceRange) {
+        return undefined;
+    }
+
+    const nextRange: NonNullable<BloodworkMeasurement['referenceRange']> = {};
+    if (referenceRange.min !== undefined) {
+        nextRange.min = referenceRange.min;
+    }
+    if (referenceRange.max !== undefined) {
+        nextRange.max = referenceRange.max;
+    }
+    if (nextRange.min === undefined && nextRange.max === undefined) {
+        return undefined;
+    }
+
+    return nextRange;
+}
+
+function cloneMeasurementOriginal(
+    original: BloodworkMeasurement['original'],
+): BloodworkMeasurement['original'] {
+    if (!original) {
+        return undefined;
+    }
+
+    const nextOriginal: NonNullable<BloodworkMeasurement['original']> = {};
+    if (original.value !== undefined) {
+        nextOriginal.value = original.value;
+    }
+    if (original.unit !== undefined) {
+        nextOriginal.unit = original.unit;
+    }
+
+    const originalRange = cloneReferenceRange(original.referenceRange);
+    if (originalRange) {
+        nextOriginal.referenceRange = originalRange;
+    }
+    if (
+        nextOriginal.value === undefined &&
+        nextOriginal.unit === undefined &&
+        nextOriginal.referenceRange === undefined
+    ) {
+        return undefined;
+    }
+
+    return nextOriginal;
+}
+
+function cloneDuplicateValue(
+    value: BloodworkMeasurementDuplicateValue,
+): BloodworkMeasurementDuplicateValue {
+    const cloned: BloodworkMeasurementDuplicateValue = {
+        date: value.date,
+    };
+
+    if (value.value !== undefined) {
+        cloned.value = value.value;
+    }
+    if (value.unit !== undefined) {
+        cloned.unit = value.unit;
+    }
+
+    const range = cloneReferenceRange(value.referenceRange);
+    if (range) {
+        cloned.referenceRange = range;
+    }
+    if (value.flag !== undefined) {
+        cloned.flag = value.flag;
+    }
+    if (value.note !== undefined) {
+        cloned.note = value.note;
+    }
+    if (value.sourceFile !== undefined) {
+        cloned.sourceFile = value.sourceFile;
+    }
+    if (value.sourceLabName !== undefined) {
+        cloned.sourceLabName = value.sourceLabName;
+    }
+    if (value.importLocation !== undefined) {
+        cloned.importLocation = value.importLocation;
+    }
+
+    return cloned;
+}
+
+function cloneMeasurement(measurement: BloodworkMeasurement): BloodworkMeasurement {
+    const cloned: BloodworkMeasurement = {
+        name: measurement.name,
+    };
+
+    if (measurement.originalName !== undefined) {
+        cloned.originalName = measurement.originalName;
+    }
+    if (measurement.category !== undefined) {
+        cloned.category = measurement.category;
+    }
+    if (measurement.value !== undefined) {
+        cloned.value = measurement.value;
+    }
+    if (measurement.unit !== undefined) {
+        cloned.unit = measurement.unit;
+    }
+
+    const range = cloneReferenceRange(measurement.referenceRange);
+    if (range) {
+        cloned.referenceRange = range;
+    }
+
+    const original = cloneMeasurementOriginal(measurement.original);
+    if (original) {
+        cloned.original = original;
+    }
+    if (measurement.flag !== undefined) {
+        cloned.flag = measurement.flag;
+    }
+    if (measurement.note !== undefined) {
+        cloned.note = measurement.note;
+    }
+    if (measurement.notes !== undefined) {
+        cloned.notes = measurement.notes;
+    }
+    if (measurement.reviewStatus !== undefined) {
+        cloned.reviewStatus = measurement.reviewStatus;
+    }
+    if (measurement.confidence !== undefined) {
+        cloned.confidence = measurement.confidence;
+    }
+    if (measurement.conflict !== undefined) {
+        cloned.conflict = {
+            reason: measurement.conflict.reason,
+            candidateCount: measurement.conflict.candidateCount,
+        };
+    }
+    if (measurement.duplicateValues?.length) {
+        cloned.duplicateValues = measurement.duplicateValues.map(cloneDuplicateValue);
+    }
+    if (measurement.provenance?.length) {
+        cloned.provenance = measurement.provenance.map(entry => ({ ...entry }));
+    }
+
+    return cloned;
+}
+
+function buildDuplicateValueKey(value: BloodworkMeasurementDuplicateValue): string {
+    const rawValue = value.value;
+    const valuePart =
+        rawValue === undefined || rawValue === null
+            ? ''
+            : typeof rawValue === 'number'
+                ? rawValue.toString()
+                : rawValue.trim().toLowerCase();
+    const rangePart = value.referenceRange
+        ? [
+            value.referenceRange.min?.toString() ?? '',
+            value.referenceRange.max?.toString() ?? '',
+        ].join('|')
+        : '';
+
+    return [
+        value.date,
+        valuePart,
+        value.unit?.trim().toLowerCase() ?? '',
+        rangePart,
+        value.flag ?? '',
+        value.note?.trim().toLowerCase() ?? '',
+        value.sourceFile?.trim().toLowerCase() ?? '',
+        value.sourceLabName?.trim().toLowerCase() ?? '',
+        value.importLocation?.trim().toLowerCase() ?? '',
+    ].join('|');
+}
+
+function dedupeDuplicateValues(values: BloodworkMeasurementDuplicateValue[]): BloodworkMeasurementDuplicateValue[] {
+    const deduped = new Map<string, BloodworkMeasurementDuplicateValue>();
+
+    for (const value of values) {
+        const key = buildDuplicateValueKey(value);
+        if (!deduped.has(key)) {
+            deduped.set(key, cloneDuplicateValue(value));
+        }
+    }
+
+    return Array.from(deduped.values()).sort((left, right) => {
+        const dateCompare = left.date.localeCompare(right.date);
+        if (dateCompare !== 0) {
+            return dateCompare;
+        }
+
+        const sourceCompare = (left.sourceFile ?? '').localeCompare(right.sourceFile ?? '');
+        if (sourceCompare !== 0) {
+            return sourceCompare;
+        }
+
+        return buildDuplicateValueKey(left).localeCompare(buildDuplicateValueKey(right));
+    });
+}
+
+function toOptionalText(value: number | string | undefined): string | null {
+    if (value === undefined) {
+        return null;
+    }
+
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? String(value) : null;
+    }
+
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+}
+
+function toOptionalNumber(value: number | string | undefined): number | null {
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : null;
+    }
+
+    if (typeof value !== 'string') {
+        return null;
+    }
+
+    const normalized = value.replace(',', '.').replace(/[^0-9.+-]/g, '').trim();
+    if (!normalized) {
+        return null;
+    }
+
+    const parsed = Number.parseFloat(normalized);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toMeasurementValue(valueNumeric: number | null, valueText: string | null): number | string | undefined {
+    if (valueNumeric !== null) {
+        return valueNumeric;
+    }
+
+    const trimmed = valueText?.trim();
+    return trimmed ? trimmed : undefined;
+}
+
+function toReferenceRange(min: number | null, max: number | null): { min?: number; max?: number } | undefined {
+    if (min === null && max === null) {
+        return undefined;
+    }
+
+    const range: { min?: number; max?: number } = {};
+    if (min !== null) {
+        range.min = min;
+    }
+    if (max !== null) {
+        range.max = max;
+    }
+    return range;
+}
+
+function buildBloodworkSourceKey(input: Pick<BloodworkLab, 'date' | 'labName'>): string {
+    return `bloodwork_${normalizeIsoDate(input.date)}_${slugifyForPath(input.labName)}`;
+}
+
+function assertUniqueMeasurementsInReport(sourceKey: string, lab: BloodworkLab) {
+    const seen = new Set<string>();
+
+    lab.measurements.forEach(measurement => {
+        const key = buildMeasurementNameKey(measurement.name);
+        if (!key) {
+            return;
+        }
+        if (seen.has(key)) {
+            throw new Error(`Duplicate canonical measurement "${measurement.name}" in ${sourceKey}`);
+        }
+        seen.add(key);
+    });
+}
+
+function collectMarkerDefinitions(labs: Array<{ sourceKey: string; lab: BloodworkLab }>) {
+    const markers = new Map<string, string>();
+
+    labs.forEach(({ lab }) => {
+        lab.measurements.forEach(measurement => {
+            const key = buildMeasurementNameKey(measurement.name);
+            if (!key) {
+                return;
+            }
+            markers.set(key, measurement.name.trim());
+        });
+    });
+
+    return Array.from(markers.entries())
+        .sort((left, right) => left[0].localeCompare(right[0]))
+        .map(([key, name]) => ({ key, name }));
+}
+
+function insertDuplicateValues(args: {
+    db: BloodworkWriteDb;
+    resultId: number;
+    duplicateValues: BloodworkMeasurementDuplicateValue[] | undefined;
+}) {
+    const { db, resultId, duplicateValues } = args;
+    if (!duplicateValues?.length) {
+        return 0;
+    }
+
+    db.insert(bloodworkResultDuplicates).values(
+        duplicateValues.map((item, index) => ({
+            resultId,
+            sortOrder: index,
+            date: item.date,
+            valueText: toOptionalText(item.value),
+            valueNumeric: toOptionalNumber(item.value),
+            unit: item.unit ?? null,
+            referenceRangeMin: item.referenceRange?.min ?? null,
+            referenceRangeMax: item.referenceRange?.max ?? null,
+            flag: item.flag ?? null,
+            note: item.note ?? null,
+            sourceFile: item.sourceFile ?? null,
+            sourceLabName: item.sourceLabName ?? null,
+            importLocation: item.importLocation ?? null,
+        })),
+    ).run();
+
+    return duplicateValues.length;
+}
+
+function insertProvenance(args: {
+    db: BloodworkWriteDb;
+    resultId: number;
+    provenance: BloodworkMeasurementProvenance[] | undefined;
+}) {
+    const { db, resultId, provenance } = args;
+    if (!provenance?.length) {
+        return 0;
+    }
+
+    db.insert(bloodworkResultProvenance).values(
+        provenance.map((item, index) => ({
+            resultId,
+            sortOrder: index,
+            extractor: item.extractor,
+            page: item.page,
+            rawName: item.rawName ?? null,
+            rawValue: item.rawValue ?? null,
+            rawUnit: item.rawUnit ?? null,
+            rawRange: item.rawRange ?? null,
+            confidence: item.confidence ?? null,
+        })),
+    ).run();
+
+    return provenance.length;
+}
+
+function pruneUnusedMarkers(db: VitalsDatabase): void {
+    db.$client.exec(`
+        DELETE FROM bloodwork_markers
+        WHERE id NOT IN (
+            SELECT DISTINCT marker_id FROM bloodwork_results
+        )
+    `);
+}
+
+function insertBloodworkReport(args: {
+    db: BloodworkWriteDb;
+    sourceKey: string;
+    lab: BloodworkLab;
+    markerIdByKey: Map<string, number>;
+}) {
+    const { db, sourceKey, lab, markerIdByKey } = args;
+
+    const reportRow = db.insert(bloodworkReports).values({
+        sourceFileName: sourceKey,
+        date: lab.date,
+        collectionDate: lab.collectionDate ?? null,
+        reportedDate: lab.reportedDate ?? null,
+        receivedDate: lab.receivedDate ?? null,
+        labName: lab.labName,
+        location: lab.location ?? null,
+        importLocation: lab.importLocation ?? null,
+        importLocationIsInferred: lab.importLocationIsInferred ?? false,
+        weightKg: lab.weightKg ?? null,
+        notes: lab.notes ?? null,
+        reviewUnresolvedCount: lab.reviewSummary?.unresolvedCount ?? 0,
+        reviewReportFile: lab.reviewSummary?.reportFile ?? null,
+    }).returning({
+        id: bloodworkReports.id,
+    }).get();
+
+    if (lab.mergedFrom?.length) {
+        db.insert(bloodworkMergedSources).values(
+            lab.mergedFrom.map((item, index) => ({
+                reportId: reportRow.id,
+                sortOrder: index,
+                fileName: item.fileName,
+                date: item.date,
+                labName: item.labName,
+                importLocation: item.importLocation ?? null,
+                measurementCount: item.measurementCount ?? null,
+            })),
+        ).run();
+    }
+
+    lab.measurements.forEach((measurement, sortOrder) => {
+        const markerKey = buildMeasurementNameKey(measurement.name);
+        const markerId = markerIdByKey.get(markerKey);
+        if (!markerId) {
+            throw new Error(`Unknown marker key "${markerKey}" while importing ${sourceKey}`);
+        }
+
+        const resultRow = db.insert(bloodworkResults).values({
+            reportId: reportRow.id,
+            markerId,
+            sortOrder,
+            category: measurement.category ?? null,
+            originalName: measurement.originalName ?? null,
+            valueText: toOptionalText(measurement.value),
+            valueNumeric: toOptionalNumber(measurement.value),
+            unit: measurement.unit ?? null,
+            referenceRangeMin: measurement.referenceRange?.min ?? null,
+            referenceRangeMax: measurement.referenceRange?.max ?? null,
+            flag: measurement.flag ?? null,
+            note: measurement.note ?? null,
+            notes: measurement.notes ?? null,
+            originalValueText: toOptionalText(measurement.original?.value),
+            originalValueNumeric: toOptionalNumber(measurement.original?.value),
+            originalUnit: measurement.original?.unit ?? null,
+            originalRangeMin: measurement.original?.referenceRange?.min ?? null,
+            originalRangeMax: measurement.original?.referenceRange?.max ?? null,
+            reviewStatus: measurement.reviewStatus ?? null,
+            confidence: measurement.confidence ?? null,
+            conflictReason: measurement.conflict?.reason ?? null,
+            conflictCandidateCount: measurement.conflict?.candidateCount ?? null,
+        }).returning({
+            id: bloodworkResults.id,
+        }).get();
+
+        insertDuplicateValues({
+            db,
+            resultId: resultRow.id,
+            duplicateValues: measurement.duplicateValues,
+        });
+
+        insertProvenance({
+            db,
+            resultId: resultRow.id,
+            provenance: measurement.provenance,
+        });
+    });
+
+    return reportRow.id;
+}
+
+function buildDuplicateValueFromMeasurement(args: {
+    measurement: BloodworkMeasurement;
+    source: StoredBloodworkReport;
+}): BloodworkMeasurementDuplicateValue {
+    const { measurement, source } = args;
+    const duplicateValue: BloodworkMeasurementDuplicateValue = {
+        date: source.lab.date,
+    };
+
+    if (measurement.value !== undefined) {
+        duplicateValue.value = measurement.value;
+    }
+    if (measurement.unit !== undefined) {
+        duplicateValue.unit = measurement.unit;
+    }
+
+    const range = cloneReferenceRange(measurement.referenceRange);
+    if (range) {
+        duplicateValue.referenceRange = range;
+    }
+
+    if (measurement.flag !== undefined) {
+        duplicateValue.flag = measurement.flag;
+    }
+
+    const measurementNote = measurement.note?.trim() || measurement.notes?.trim();
+    if (measurementNote) {
+        duplicateValue.note = measurementNote;
+    }
+
+    duplicateValue.sourceFile = source.sourceKey;
+    duplicateValue.sourceLabName = source.lab.labName;
+    if (source.lab.importLocation) {
+        duplicateValue.importLocation = source.lab.importLocation;
+    }
+
+    return duplicateValue;
+}
+
+function dedupeMergedFromEntries(entries: BloodworkMergedSource[]): BloodworkMergedSource[] {
+    const deduped = new Map<string, BloodworkMergedSource>();
+
+    for (const entry of entries) {
+        const key = [
+            entry.fileName.trim().toLowerCase(),
+            entry.date,
+            entry.labName.trim().toLowerCase(),
+            entry.importLocation?.trim().toLowerCase() ?? '',
+        ].join('|');
+        if (!deduped.has(key)) {
+            deduped.set(key, {
+                fileName: entry.fileName,
+                date: entry.date,
+                labName: entry.labName,
+                importLocation: entry.importLocation,
+                measurementCount: entry.measurementCount,
+            });
+        }
+    }
+
+    return Array.from(deduped.values()).sort((left, right) => {
+        const dateCompare = left.date.localeCompare(right.date);
+        if (dateCompare !== 0) {
+            return dateCompare;
+        }
+
+        return left.fileName.localeCompare(right.fileName);
+    });
+}
+
+function collectMergedFromEntries(group: StoredBloodworkReport[]): BloodworkMergedSource[] {
+    const entries: BloodworkMergedSource[] = [];
+
+    for (const source of group) {
+        if (source.lab.mergedFrom?.length) {
+            entries.push(...source.lab.mergedFrom.map(entry => ({
+                fileName: entry.fileName,
+                date: entry.date,
+                labName: entry.labName,
+                importLocation: entry.importLocation,
+                measurementCount: entry.measurementCount,
+            })));
+            continue;
+        }
+
+        entries.push({
+            fileName: source.sourceKey,
+            date: source.lab.date,
+            labName: source.lab.labName,
+            importLocation: source.lab.importLocation,
+            measurementCount: source.lab.measurements.length,
+        });
+    }
+
+    return dedupeMergedFromEntries(entries);
+}
+
+function compareSourceFreshness(left: StoredBloodworkReport, right: StoredBloodworkReport): number {
+    const dateCompare = left.lab.date.localeCompare(right.lab.date);
+    if (dateCompare !== 0) {
+        return dateCompare;
+    }
+
+    const measurementCountCompare = left.lab.measurements.length - right.lab.measurements.length;
+    if (measurementCountCompare !== 0) {
+        return measurementCountCompare;
+    }
+
+    return left.sourceKey.localeCompare(right.sourceKey);
+}
+
+function pickLatestDefined<T>(
+    values: Array<T | undefined>,
+    normalize?: (value: T) => T | undefined,
+): T | undefined {
+    for (let index = values.length - 1; index >= 0; index--) {
+        const candidate = values[index];
+        const value = candidate === undefined ? undefined : normalize ? normalize(candidate) : candidate;
+        if (value !== undefined) {
+            return value;
+        }
+    }
+
+    return undefined;
+}
+
+function mergeNotes(group: StoredBloodworkReport[]): string | undefined {
+    const byNormalizedValue = new Map<string, string>();
+
+    for (const source of group) {
+        const note = source.lab.notes?.trim();
+        if (!note) {
+            continue;
+        }
+
+        const key = note.toLowerCase();
+        if (!byNormalizedValue.has(key)) {
+            byNormalizedValue.set(key, note);
+        }
+    }
+
+    if (byNormalizedValue.size === 0) {
+        return undefined;
+    }
+
+    return Array.from(byNormalizedValue.values()).join('\n\n');
+}
+
+function scoreConsolidationMeasurement(measurement: BloodworkMeasurement): number {
+    let score = measurement.confidence ?? 0;
+
+    if (measurement.referenceRange) {
+        score += 0.08;
+    }
+    if (measurement.unit?.trim()) {
+        score += 0.08;
+    }
+    if (measurement.reviewStatus === 'accepted') {
+        score += 0.08;
+    }
+    if (measurement.reviewStatus === 'needs_review') {
+        score -= 0.12;
+    }
+    if (measurement.conflict) {
+        score -= 0.1;
+    }
+    if (typeof measurement.value === 'number' && Number.isFinite(measurement.value)) {
+        score += 0.05;
+    }
+
+    return score;
+}
+
+function mergeMeasurementsForGroup(group: StoredBloodworkReport[]): BloodworkMeasurement[] {
+    const selected = new Map<string, {
+        measurement: BloodworkMeasurement;
+        source: StoredBloodworkReport;
+        duplicateValues: BloodworkMeasurementDuplicateValue[];
+    }>();
+
+    for (const source of group) {
+        for (const sourceMeasurement of source.lab.measurements) {
+            const measurement = cloneMeasurement(sourceMeasurement);
+            const measurementKey = buildMeasurementNameKey(measurement.name);
+            if (!measurementKey) {
+                continue;
+            }
+
+            const incomingDuplicateValues = measurement.duplicateValues?.map(cloneDuplicateValue) ?? [];
+            delete measurement.duplicateValues;
+
+            const existing = selected.get(measurementKey);
+            if (!existing) {
+                selected.set(measurementKey, {
+                    measurement,
+                    source,
+                    duplicateValues: dedupeDuplicateValues(incomingDuplicateValues),
+                });
+                continue;
+            }
+
+            const existingScore = scoreConsolidationMeasurement(existing.measurement);
+            const incomingScore = scoreConsolidationMeasurement(measurement);
+            const shouldReplace =
+                incomingScore > existingScore ||
+                (Math.abs(incomingScore - existingScore) <= 1e-9 && compareSourceFreshness(source, existing.source) > 0);
+
+            const mergedDuplicateValues = dedupeDuplicateValues([
+                ...existing.duplicateValues,
+                buildDuplicateValueFromMeasurement(shouldReplace
+                    ? { measurement: existing.measurement, source: existing.source }
+                    : { measurement, source }),
+                ...incomingDuplicateValues,
+            ]);
+
+            selected.set(measurementKey, {
+                measurement: shouldReplace ? measurement : existing.measurement,
+                source: shouldReplace ? source : existing.source,
+                duplicateValues: mergedDuplicateValues,
+            });
+        }
+    }
+
+    const mergedMeasurements = Array.from(selected.values())
+        .map(({ measurement, duplicateValues }) => (
+            duplicateValues.length === 0
+                ? measurement
+                : {
+                    ...measurement,
+                    duplicateValues,
+                }
+        ))
+        .sort((left, right) => left.name.localeCompare(right.name));
+
+    return mergeUniqueMeasurements(mergedMeasurements);
+}
+
+function dateDifferenceInDays(leftDate: string, rightDate: string): number {
+    const [leftYear, leftMonth, leftDay] = leftDate.split('-').map(part => Number.parseInt(part, 10));
+    const [rightYear, rightMonth, rightDay] = rightDate.split('-').map(part => Number.parseInt(part, 10));
+    const leftTimestamp = Date.UTC(leftYear!, (leftMonth ?? 1) - 1, leftDay!);
+    const rightTimestamp = Date.UTC(rightYear!, (rightMonth ?? 1) - 1, rightDay!);
+
+    return Math.abs(Math.round((leftTimestamp - rightTimestamp) / (24 * 60 * 60 * 1000)));
+}
+
+function groupBloodworkReportsByDateWindow(reports: StoredBloodworkReport[]): StoredBloodworkReport[][] {
+    if (reports.length === 0) {
+        return [];
+    }
+
+    const sorted = [...reports].sort((left, right) => {
+        const dateCompare = right.lab.date.localeCompare(left.lab.date);
+        if (dateCompare !== 0) {
+            return dateCompare;
+        }
+
+        return right.sourceKey.localeCompare(left.sourceKey);
+    });
+
+    const groups: StoredBloodworkReport[][] = [];
+    let currentGroup: StoredBloodworkReport[] = [];
+    let currentGroupLatestDate: string | null = null;
+
+    for (const report of sorted) {
+        if (!currentGroupLatestDate) {
+            currentGroup = [report];
+            currentGroupLatestDate = report.lab.date;
+            continue;
+        }
+
+        if (dateDifferenceInDays(currentGroupLatestDate, report.lab.date) <= 14) {
+            currentGroup.push(report);
+            continue;
+        }
+
+        groups.push(currentGroup);
+        currentGroup = [report];
+        currentGroupLatestDate = report.lab.date;
+    }
+
+    if (currentGroup.length > 0) {
+        groups.push(currentGroup);
+    }
+
+    return groups.map(group =>
+        group.sort((left, right) => {
+            const dateCompare = left.lab.date.localeCompare(right.lab.date);
+            if (dateCompare !== 0) {
+                return dateCompare;
+            }
+
+            return left.sourceKey.localeCompare(right.sourceKey);
+        }),
+    );
+}
+
+function mergeBloodworkReportGroup(group: StoredBloodworkReport[]): {
+    targetSourceKey: string;
+    lab: BloodworkLab;
+} {
+    if (group.length === 0) {
+        throw new Error('Cannot merge an empty bloodwork group');
+    }
+
+    const orderedGroup = [...group].sort((left, right) => {
+        const dateCompare = left.lab.date.localeCompare(right.lab.date);
+        if (dateCompare !== 0) {
+            return dateCompare;
+        }
+
+        return left.sourceKey.localeCompare(right.sourceKey);
+    });
+
+    let primary = orderedGroup[0]!;
+    for (const source of orderedGroup.slice(1)) {
+        if (compareSourceFreshness(source, primary) > 0) {
+            primary = source;
+        }
+    }
+
+    const mergedFrom = collectMergedFromEntries(orderedGroup);
+    const mergedLab = bloodworkLabSchema.parse({
+        date: primary.lab.date,
+        collectionDate: primary.lab.collectionDate ?? pickLatestDefined(
+            orderedGroup.map(item => item.lab.collectionDate),
+            value => value.trim() || undefined,
+        ),
+        reportedDate: primary.lab.reportedDate ?? pickLatestDefined(
+            orderedGroup.map(item => item.lab.reportedDate),
+            value => value.trim() || undefined,
+        ),
+        receivedDate: primary.lab.receivedDate ?? pickLatestDefined(
+            orderedGroup.map(item => item.lab.receivedDate),
+            value => value.trim() || undefined,
+        ),
+        labName: primary.lab.labName,
+        location: primary.lab.location ?? pickLatestDefined(
+            orderedGroup.map(item => item.lab.location),
+            value => value.trim() || undefined,
+        ),
+        importLocation: primary.lab.importLocation ?? pickLatestDefined(
+            orderedGroup.map(item => item.lab.importLocation),
+            value => value.trim() || undefined,
+        ),
+        importLocationIsInferred:
+            primary.lab.importLocationIsInferred
+                ?? pickLatestDefined(orderedGroup.map(item => item.lab.importLocationIsInferred)),
+        weightKg: primary.lab.weightKg ?? pickLatestDefined(orderedGroup.map(item => item.lab.weightKg)),
+        measurements: mergeMeasurementsForGroup(orderedGroup),
+        mergedFrom: mergedFrom.length > 1 ? mergedFrom : undefined,
+        notes: mergeNotes(orderedGroup),
+    });
+
+    return {
+        targetSourceKey: primary.sourceKey,
+        lab: mergedLab,
+    };
+}
+
+async function listBloodworkReports(args: {
+    db?: VitalsDatabase;
+} = {}): Promise<StoredBloodworkReport[]> {
+    const db = args.db ?? getDatabase();
+    const reportRows = db.select().from(bloodworkReports).all();
+    if (reportRows.length === 0) {
+        return [];
+    }
+
+    const reportIds = reportRows.map(row => row.id);
+
+    const mergedSourceRows = db
+        .select()
+        .from(bloodworkMergedSources)
+        .where(inArray(bloodworkMergedSources.reportId, reportIds))
+        .all();
+
+    const resultRows = db.select({
+        id: bloodworkResults.id,
+        reportId: bloodworkResults.reportId,
+        sortOrder: bloodworkResults.sortOrder,
+        markerName: bloodworkMarkers.name,
+        category: bloodworkResults.category,
+        originalName: bloodworkResults.originalName,
+        valueText: bloodworkResults.valueText,
+        valueNumeric: bloodworkResults.valueNumeric,
+        unit: bloodworkResults.unit,
+        referenceRangeMin: bloodworkResults.referenceRangeMin,
+        referenceRangeMax: bloodworkResults.referenceRangeMax,
+        flag: bloodworkResults.flag,
+        note: bloodworkResults.note,
+        notes: bloodworkResults.notes,
+        originalValueText: bloodworkResults.originalValueText,
+        originalValueNumeric: bloodworkResults.originalValueNumeric,
+        originalUnit: bloodworkResults.originalUnit,
+        originalRangeMin: bloodworkResults.originalRangeMin,
+        originalRangeMax: bloodworkResults.originalRangeMax,
+        reviewStatus: bloodworkResults.reviewStatus,
+        confidence: bloodworkResults.confidence,
+        conflictReason: bloodworkResults.conflictReason,
+        conflictCandidateCount: bloodworkResults.conflictCandidateCount,
+    })
+        .from(bloodworkResults)
+        .innerJoin(bloodworkMarkers, eq(bloodworkResults.markerId, bloodworkMarkers.id))
+        .where(inArray(bloodworkResults.reportId, reportIds))
+        .all();
+
+    const resultIds = resultRows.map(row => row.id);
+
+    const duplicateRows = resultIds.length === 0
+        ? []
+        : db.select()
+            .from(bloodworkResultDuplicates)
+            .where(inArray(bloodworkResultDuplicates.resultId, resultIds))
+            .all();
+
+    const provenanceRows = resultIds.length === 0
+        ? []
+        : db.select()
+            .from(bloodworkResultProvenance)
+            .where(inArray(bloodworkResultProvenance.resultId, resultIds))
+            .all();
+
+    const mergedSourcesByReportId = new Map<number, typeof mergedSourceRows>();
+    for (const row of mergedSourceRows) {
+        const bucket = mergedSourcesByReportId.get(row.reportId) ?? [];
+        bucket.push(row);
+        mergedSourcesByReportId.set(row.reportId, bucket);
+    }
+
+    const duplicatesByResultId = new Map<number, typeof duplicateRows>();
+    for (const row of duplicateRows) {
+        const bucket = duplicatesByResultId.get(row.resultId) ?? [];
+        bucket.push(row);
+        duplicatesByResultId.set(row.resultId, bucket);
+    }
+
+    const provenanceByResultId = new Map<number, typeof provenanceRows>();
+    for (const row of provenanceRows) {
+        const bucket = provenanceByResultId.get(row.resultId) ?? [];
+        bucket.push(row);
+        provenanceByResultId.set(row.resultId, bucket);
+    }
+
+    const resultsByReportId = new Map<number, typeof resultRows>();
+    for (const row of resultRows) {
+        const bucket = resultsByReportId.get(row.reportId) ?? [];
+        bucket.push(row);
+        resultsByReportId.set(row.reportId, bucket);
+    }
+
+    return reportRows
+        .map(reportRow => {
+            const measurements = (resultsByReportId.get(reportRow.id) ?? [])
+                .sort((left, right) => left.sortOrder - right.sortOrder)
+                .map(resultRow => {
+                    const measurement: BloodworkMeasurement = {
+                        name: resultRow.markerName,
+                    };
+
+                    if (resultRow.category) {
+                        measurement.category = resultRow.category;
+                    }
+                    if (resultRow.originalName) {
+                        measurement.originalName = resultRow.originalName;
+                    }
+
+                    const value = toMeasurementValue(resultRow.valueNumeric, resultRow.valueText);
+                    if (value !== undefined) {
+                        measurement.value = value;
+                    }
+
+                    if (resultRow.unit) {
+                        measurement.unit = resultRow.unit;
+                    }
+
+                    const referenceRange = toReferenceRange(resultRow.referenceRangeMin, resultRow.referenceRangeMax);
+                    if (referenceRange) {
+                        measurement.referenceRange = referenceRange;
+                    }
+
+                    const originalValue = toMeasurementValue(resultRow.originalValueNumeric, resultRow.originalValueText);
+                    const originalRange = toReferenceRange(resultRow.originalRangeMin, resultRow.originalRangeMax);
+                    if (originalValue !== undefined || resultRow.originalUnit || originalRange) {
+                        measurement.original = {};
+                        if (originalValue !== undefined) {
+                            measurement.original.value = originalValue;
+                        }
+                        if (resultRow.originalUnit) {
+                            measurement.original.unit = resultRow.originalUnit;
+                        }
+                        if (originalRange) {
+                            measurement.original.referenceRange = originalRange;
+                        }
+                    }
+
+                    if (resultRow.flag) {
+                        measurement.flag = resultRow.flag;
+                    }
+                    if (resultRow.note) {
+                        measurement.note = resultRow.note;
+                    }
+                    if (resultRow.notes) {
+                        measurement.notes = resultRow.notes;
+                    }
+                    if (resultRow.reviewStatus) {
+                        measurement.reviewStatus = resultRow.reviewStatus;
+                    }
+                    if (resultRow.confidence !== null) {
+                        measurement.confidence = resultRow.confidence;
+                    }
+                    if (resultRow.conflictReason) {
+                        measurement.conflict = {
+                            reason: resultRow.conflictReason,
+                            candidateCount: resultRow.conflictCandidateCount ?? 0,
+                        };
+                    }
+
+                    const duplicates = (duplicatesByResultId.get(resultRow.id) ?? [])
+                        .sort((left, right) => left.sortOrder - right.sortOrder)
+                        .map(row => {
+                            const duplicateValue: BloodworkMeasurementDuplicateValue = {
+                                date: row.date,
+                            };
+
+                            const duplicateMeasurementValue = toMeasurementValue(row.valueNumeric, row.valueText);
+                            if (duplicateMeasurementValue !== undefined) {
+                                duplicateValue.value = duplicateMeasurementValue;
+                            }
+                            if (row.unit) {
+                                duplicateValue.unit = row.unit;
+                            }
+
+                            const duplicateRange = toReferenceRange(row.referenceRangeMin, row.referenceRangeMax);
+                            if (duplicateRange) {
+                                duplicateValue.referenceRange = duplicateRange;
+                            }
+
+                            if (row.flag) {
+                                duplicateValue.flag = row.flag;
+                            }
+                            if (row.note) {
+                                duplicateValue.note = row.note;
+                            }
+                            if (row.sourceFile) {
+                                duplicateValue.sourceFile = row.sourceFile;
+                            }
+                            if (row.sourceLabName) {
+                                duplicateValue.sourceLabName = row.sourceLabName;
+                            }
+                            if (row.importLocation) {
+                                duplicateValue.importLocation = row.importLocation;
+                            }
+
+                            return duplicateValue;
+                        });
+
+                    if (duplicates.length > 0) {
+                        measurement.duplicateValues = duplicates;
+                    }
+
+                    const provenance = (provenanceByResultId.get(resultRow.id) ?? [])
+                        .sort((left, right) => left.sortOrder - right.sortOrder)
+                        .map(row => {
+                            const entry: BloodworkMeasurementProvenance = {
+                                extractor: row.extractor,
+                                page: row.page,
+                            };
+                            if (row.rawName) {
+                                entry.rawName = row.rawName;
+                            }
+                            if (row.rawValue) {
+                                entry.rawValue = row.rawValue;
+                            }
+                            if (row.rawUnit) {
+                                entry.rawUnit = row.rawUnit;
+                            }
+                            if (row.rawRange) {
+                                entry.rawRange = row.rawRange;
+                            }
+                            if (row.confidence !== null) {
+                                entry.confidence = row.confidence;
+                            }
+
+                            return entry;
+                        });
+
+                    if (provenance.length > 0) {
+                        measurement.provenance = provenance;
+                    }
+
+                    return measurement;
+                });
+
+            const mergedFrom = (mergedSourcesByReportId.get(reportRow.id) ?? [])
+                .sort((left, right) => left.sortOrder - right.sortOrder)
+                .map(row => ({
+                    fileName: row.fileName,
+                    date: row.date,
+                    labName: row.labName,
+                    importLocation: row.importLocation ?? undefined,
+                    measurementCount: row.measurementCount ?? undefined,
+                }));
+
+            const lab = bloodworkLabSchema.parse({
+                date: reportRow.date,
+                collectionDate: reportRow.collectionDate ?? undefined,
+                reportedDate: reportRow.reportedDate ?? undefined,
+                receivedDate: reportRow.receivedDate ?? undefined,
+                labName: reportRow.labName,
+                location: reportRow.location ?? undefined,
+                importLocation: reportRow.importLocation ?? undefined,
+                importLocationIsInferred: reportRow.importLocationIsInferred || undefined,
+                weightKg: reportRow.weightKg ?? undefined,
+                measurements,
+                mergedFrom: mergedFrom.length > 0 ? mergedFrom : undefined,
+                notes: reportRow.notes ?? undefined,
+                reviewSummary:
+                    reportRow.reviewUnresolvedCount > 0 || reportRow.reviewReportFile
+                        ? {
+                            unresolvedCount: reportRow.reviewUnresolvedCount,
+                            reportFile: reportRow.reviewReportFile ?? undefined,
+                        }
+                        : undefined,
+            });
+
+            return {
+                reportId: reportRow.id,
+                sourceKey: reportRow.sourceFileName,
+                lab,
+            };
+        })
+        .sort((left, right) => {
+            const dateCompare = left.lab.date.localeCompare(right.lab.date);
+            if (dateCompare !== 0) {
+                return dateCompare;
+            }
+
+            return left.sourceKey.localeCompare(right.sourceKey);
+        });
+}
+
+async function resolveBloodworkSourceKey(args: {
+    lab: BloodworkLab;
+    sourcePath: string;
+    db?: VitalsDatabase;
+}): Promise<string> {
+    const db = args.db ?? getDatabase();
+    const baseSourceKey = buildBloodworkSourceKey(args.lab);
+    const existingReports = db.select({
+        sourceKey: bloodworkReports.sourceFileName,
+        importLocation: bloodworkReports.importLocation,
+    }).from(bloodworkReports).all();
+    const existingBySourceKey = new Map(existingReports.map(row => [row.sourceKey, row.importLocation ?? null]));
+
+    const existingImportLocation = existingBySourceKey.get(baseSourceKey);
+    if (existingImportLocation === undefined || existingImportLocation === args.sourcePath) {
+        return baseSourceKey;
+    }
+
+    const sourceSlug = slugifyForPath(path.basename(args.sourcePath, path.extname(args.sourcePath)));
+    const scopedBaseKey = `${baseSourceKey}_${sourceSlug}`;
+    const scopedImportLocation = existingBySourceKey.get(scopedBaseKey);
+    if (scopedImportLocation === undefined || scopedImportLocation === args.sourcePath) {
+        return scopedBaseKey;
+    }
+
+    let suffix = 2;
+    while (true) {
+        const candidate = `${scopedBaseKey}_${suffix}`;
+        const candidateImportLocation = existingBySourceKey.get(candidate);
+        if (candidateImportLocation === undefined || candidateImportLocation === args.sourcePath) {
+            return candidate;
+        }
+        suffix += 1;
+    }
+}
+
+async function upsertBloodworkReport(args: {
+    sourceKey: string;
+    lab: BloodworkLab;
+    db?: VitalsDatabase;
+}): Promise<number> {
+    const db = args.db ?? getDatabase();
+    assertUniqueMeasurementsInReport(args.sourceKey, args.lab);
+    const markerDefinitions = collectMarkerDefinitions([{ sourceKey: args.sourceKey, lab: args.lab }]);
+
+    const reportId = db.transaction(tx => {
+        const existingReports = tx.select({
+            id: bloodworkReports.id,
+        }).from(bloodworkReports).where(inArray(
+            bloodworkReports.sourceFileName,
+            [args.sourceKey],
+        )).all();
+
+        if (existingReports.length > 0) {
+            tx.delete(bloodworkReports).where(inArray(
+                bloodworkReports.id,
+                existingReports.map(report => report.id),
+            )).run();
+        }
+
+        if (markerDefinitions.length > 0) {
+            markerDefinitions.forEach(marker => {
+                tx.insert(bloodworkMarkers).values(marker).onConflictDoUpdate({
+                    target: bloodworkMarkers.key,
+                    set: {
+                        name: marker.name,
+                    },
+                }).run();
+            });
+        }
+
+        const markerRows = markerDefinitions.length === 0
+            ? []
+            : tx.select({
+                id: bloodworkMarkers.id,
+                key: bloodworkMarkers.key,
+            }).from(bloodworkMarkers).where(inArray(
+                bloodworkMarkers.key,
+                markerDefinitions.map(marker => marker.key),
+            )).all();
+
+        return insertBloodworkReport({
+            db: tx,
+            sourceKey: args.sourceKey,
+            lab: args.lab,
+            markerIdByKey: new Map(markerRows.map(row => [row.key, row.id])),
+        });
+    });
+
+    pruneUnusedMarkers(db);
+    return reportId;
+}
+
+async function deleteBloodworkReportsBySourceKeys(args: {
+    sourceKeys: string[];
+    db?: VitalsDatabase;
+}): Promise<number> {
+    const uniqueSourceKeys = Array.from(new Set(args.sourceKeys.map(value => value.trim()).filter(Boolean)));
+    if (uniqueSourceKeys.length === 0) {
+        return 0;
+    }
+
+    const db = args.db ?? getDatabase();
+    const rows = db.select({
+        id: bloodworkReports.id,
+    }).from(bloodworkReports).where(inArray(bloodworkReports.sourceFileName, uniqueSourceKeys)).all();
+
+    if (rows.length === 0) {
+        return 0;
+    }
+
+    db.delete(bloodworkReports).where(inArray(
+        bloodworkReports.id,
+        rows.map(row => row.id),
+    )).run();
+
+    pruneUnusedMarkers(db);
+    return rows.length;
+}
+
+async function createBloodworkImportReview(args: {
+    sourceKey: string;
+    sourcePdfPath: string;
+    unresolvedCount: number;
+    payload: unknown;
+    db?: VitalsDatabase;
+}): Promise<BloodworkImportReview> {
+    const db = args.db ?? getDatabase();
+    const row = db.insert(bloodworkImportReviews).values({
+        createdAt: new Date().toISOString(),
+        sourceKey: args.sourceKey,
+        sourcePdfPath: args.sourcePdfPath,
+        unresolvedCount: args.unresolvedCount,
+        status: 'pending',
+        payload: JSON.stringify(args.payload),
+        appliedAt: null,
+    }).returning().get();
+
+    return {
+        id: row.id,
+        createdAt: row.createdAt,
+        sourceKey: row.sourceKey,
+        sourcePdfPath: row.sourcePdfPath,
+        unresolvedCount: row.unresolvedCount,
+        status: row.status,
+        payload: JSON.parse(row.payload) as unknown,
+        appliedAt: row.appliedAt,
+    };
+}
+
+async function getBloodworkImportReview(args: {
+    id: number;
+    db?: VitalsDatabase;
+}): Promise<BloodworkImportReview | null> {
+    const db = args.db ?? getDatabase();
+    const row = db.select().from(bloodworkImportReviews).where(eq(bloodworkImportReviews.id, args.id)).get();
+    if (!row) {
+        return null;
+    }
+
+    return {
+        id: row.id,
+        createdAt: row.createdAt,
+        sourceKey: row.sourceKey,
+        sourcePdfPath: row.sourcePdfPath,
+        unresolvedCount: row.unresolvedCount,
+        status: row.status,
+        payload: JSON.parse(row.payload) as unknown,
+        appliedAt: row.appliedAt,
+    };
+}
+
+async function markBloodworkImportReviewApplied(args: {
+    id: number;
+    db?: VitalsDatabase;
+}): Promise<void> {
+    const db = args.db ?? getDatabase();
+    db.update(bloodworkImportReviews).set({
+        status: 'applied',
+        appliedAt: new Date().toISOString(),
+    }).where(eq(bloodworkImportReviews.id, args.id)).run();
+}
+
+async function consolidateBloodworkReports(args: {
+    selectedSourceKeys?: string[];
+    db?: VitalsDatabase;
+} = {}): Promise<ConsolidationSummary> {
+    const db = args.db ?? getDatabase();
+    const sourceReports = await listBloodworkReports({ db });
+    let groups = groupBloodworkReportsByDateWindow(sourceReports);
+
+    if (args.selectedSourceKeys?.length) {
+        const selectedSourceKeys = Array.from(new Set(
+            args.selectedSourceKeys.map(value => value.trim()).filter(Boolean),
+        ));
+        const bySourceKey = new Map(sourceReports.map(report => [report.sourceKey, report]));
+        const missing = selectedSourceKeys.filter(sourceKey => !bySourceKey.has(sourceKey));
+        if (missing.length > 0) {
+            throw new Error(`Selected bloodwork reports not found: ${missing.join(', ')}`);
+        }
+
+        const selectedReports = selectedSourceKeys.map(sourceKey => bySourceKey.get(sourceKey)!);
+        groups = groupBloodworkReportsByDateWindow(selectedReports);
+    }
+
+    const summary: ConsolidationSummary = {
+        groupsProcessed: groups.length,
+        mergedGroups: 0,
+        reportsBefore: sourceReports.length,
+        reportsAfter: sourceReports.length,
+        writtenSourceKeys: [],
+        removedSourceKeys: [],
+        groups: [],
+    };
+
+    for (const group of groups) {
+        const { targetSourceKey, lab } = mergeBloodworkReportGroup(group);
+
+        await upsertBloodworkReport({
+            sourceKey: targetSourceKey,
+            lab,
+            db,
+        });
+
+        summary.writtenSourceKeys.push(targetSourceKey);
+
+        if (group.length > 1) {
+            summary.mergedGroups += 1;
+        }
+
+        summary.groups.push({
+            targetSourceKey,
+            latestDate: lab.date,
+            sourceKeys: group.map(item => item.sourceKey),
+            sourceDates: group.map(item => item.lab.date),
+        });
+
+        const sourceKeysToRemove = group
+            .map(item => item.sourceKey)
+            .filter(sourceKey => sourceKey !== targetSourceKey);
+
+        if (sourceKeysToRemove.length > 0) {
+            await deleteBloodworkReportsBySourceKeys({
+                sourceKeys: sourceKeysToRemove,
+                db,
+            });
+            summary.removedSourceKeys.push(...sourceKeysToRemove);
+        }
+    }
+
+    summary.reportsAfter = (await listBloodworkReports({ db })).length;
+    return summary;
+}
 
 type CliOptions = {
     importAll: boolean;
@@ -1466,12 +3084,21 @@ function resolveGlossaryValidatorModelIds(primaryModelIds: string[]): string[] {
 function buildGlossaryLookup(glossary: BloodworkGlossary): Map<string, BloodworkGlossaryEntry> {
     const lookup = new Map<string, BloodworkGlossaryEntry>();
     for (const entry of glossary.entries) {
-        const keys = [entry.canonicalName, ...entry.aliases];
-        for (const key of keys) {
-            lookup.set(normalizeGlossaryNameKey(key), entry);
-        }
+        indexGlossaryEntry(lookup, entry);
     }
     return lookup;
+}
+
+function indexGlossaryEntry(
+    lookup: Map<string, BloodworkGlossaryEntry>,
+    entry: BloodworkGlossaryEntry,
+): void {
+    for (const name of [entry.canonicalName, ...entry.aliases]) {
+        const key = normalizeGlossaryNameKey(name);
+        if (key) {
+            lookup.set(key, entry);
+        }
+    }
 }
 
 function upsertAliasIntoGlossaryEntry(entry: BloodworkGlossaryEntry, alias: string): void {
@@ -1502,13 +3129,15 @@ function upsertCategoryAliasIntoGlossaryEntry(entry: BloodworkGlossaryEntry, ali
     }
 }
 
-function resolveEntryCanonicalCategoryFromMeasurement({
+function updateGlossaryEntryWithMeasurement({
     entry,
     measurement,
+    extraAliases = [],
     extraCategoryAliases = [],
 }: {
     entry: BloodworkGlossaryEntry;
     measurement: BloodworkMeasurement;
+    extraAliases?: string[];
     extraCategoryAliases?: string[];
 }): string {
     const existingCanonicalCategory = resolveCanonicalCategoryForMeasurement({
@@ -1538,60 +3167,6 @@ function resolveEntryCanonicalCategoryFromMeasurement({
         upsertCategoryAliasIntoGlossaryEntry(entry, alias);
     }
 
-    return entry.canonicalCategory;
-}
-
-function upsertUnitHintIntoGlossaryEntry(entry: BloodworkGlossaryEntry, unit: string | undefined): void {
-    if (!unit) {
-        return;
-    }
-    const trimmedUnit = unit.trim();
-    if (!trimmedUnit) {
-        return;
-    }
-    if (!entry.unitHints.some(existing => normalizeTextForMatch(existing) === normalizeTextForMatch(trimmedUnit))) {
-        entry.unitHints = sortUniqueStrings([...entry.unitHints, trimmedUnit]);
-    }
-}
-
-function upsertRangeIntoGlossaryEntry(entry: BloodworkGlossaryEntry, measurement: BloodworkMeasurement): void {
-    if (!measurement.referenceRange) {
-        return;
-    }
-    const nextRange: z.infer<typeof glossaryRangeSchema> = {
-        min: measurement.referenceRange.min,
-        max: measurement.referenceRange.max,
-        unit: measurement.unit?.trim() || undefined,
-    };
-    const hasRangeValue =
-        nextRange.min !== undefined ||
-        nextRange.max !== undefined;
-    if (!hasRangeValue) {
-        return;
-    }
-    const fingerprint = buildGlossaryRangeFingerprint(nextRange);
-    const existingFingerprints = new Set(entry.knownRanges.map(range => buildGlossaryRangeFingerprint(range)));
-    if (!existingFingerprints.has(fingerprint)) {
-        entry.knownRanges = [...entry.knownRanges, nextRange];
-    }
-}
-
-function updateGlossaryEntryWithMeasurement({
-    entry,
-    measurement,
-    extraAliases = [],
-    extraCategoryAliases = [],
-}: {
-    entry: BloodworkGlossaryEntry;
-    measurement: BloodworkMeasurement;
-    extraAliases?: string[];
-    extraCategoryAliases?: string[];
-}): string {
-    const canonicalCategory = resolveEntryCanonicalCategoryFromMeasurement({
-        entry,
-        measurement,
-        extraCategoryAliases,
-    });
     upsertAliasIntoGlossaryEntry(entry, measurement.name);
     if (measurement.originalName) {
         upsertAliasIntoGlossaryEntry(entry, measurement.originalName);
@@ -1599,39 +3174,27 @@ function updateGlossaryEntryWithMeasurement({
     for (const alias of extraAliases) {
         upsertAliasIntoGlossaryEntry(entry, alias);
     }
-    upsertUnitHintIntoGlossaryEntry(entry, measurement.unit);
-    upsertRangeIntoGlossaryEntry(entry, measurement);
-    return canonicalCategory;
-}
-
-function createGlossaryEntryFromMeasurement({
-    canonicalName,
-    measurement,
-}: {
-    canonicalName: string;
-    measurement: BloodworkMeasurement;
-}): BloodworkGlossaryEntry {
-    const canonicalCategory = resolveCanonicalCategoryForMeasurement({
-        measurementName: canonicalName,
-        category: measurement.category,
-    });
-    const entry: BloodworkGlossaryEntry = {
-        canonicalName,
-        canonicalCategory,
-        aliases: [],
-        categoryAliases: [],
-        knownRanges: [],
-        unitHints: [],
-    };
-    updateGlossaryEntryWithMeasurement({
-        entry,
-        measurement: {
-            ...measurement,
-            name: canonicalName,
-            category: canonicalCategory,
-        },
-    });
-    return entry;
+    if (measurement.unit?.trim()) {
+        const trimmedUnit = measurement.unit.trim();
+        if (!entry.unitHints.some(existing => normalizeTextForMatch(existing) === normalizeTextForMatch(trimmedUnit))) {
+            entry.unitHints = sortUniqueStrings([...entry.unitHints, trimmedUnit]);
+        }
+    }
+    if (measurement.referenceRange) {
+        const nextRange: z.infer<typeof glossaryRangeSchema> = {
+            min: measurement.referenceRange.min,
+            max: measurement.referenceRange.max,
+            unit: measurement.unit?.trim() || undefined,
+        };
+        if (nextRange.min !== undefined || nextRange.max !== undefined) {
+            const fingerprint = buildGlossaryRangeFingerprint(nextRange);
+            const existingFingerprints = new Set(entry.knownRanges.map(range => buildGlossaryRangeFingerprint(range)));
+            if (!existingFingerprints.has(fingerprint)) {
+                entry.knownRanges = [...entry.knownRanges, nextRange];
+            }
+        }
+    }
+    return entry.canonicalCategory;
 }
 
 function cleanMeasurementCandidate(measurement: BloodworkMeasurement): BloodworkMeasurement {
@@ -2818,48 +4381,6 @@ async function validateUnknownMeasurementsWithGlossaryModel({
     return decisions;
 }
 
-function findGlossaryEntryByName({
-    glossary,
-    lookup,
-    name,
-}: {
-    glossary: BloodworkGlossary;
-    lookup: Map<string, BloodworkGlossaryEntry>;
-    name: string;
-}): BloodworkGlossaryEntry | null {
-    const key = normalizeGlossaryNameKey(name);
-    if (!key) {
-        return null;
-    }
-    const existing = lookup.get(key);
-    if (existing) {
-        return existing;
-    }
-
-    const found = glossary.entries.find(entry => normalizeGlossaryNameKey(entry.canonicalName) === key);
-    if (!found) {
-        return null;
-    }
-    lookup.set(key, found);
-    return found;
-}
-
-function appendGlossaryEntry({
-    glossary,
-    lookup,
-    entry,
-}: {
-    glossary: BloodworkGlossary;
-    lookup: Map<string, BloodworkGlossaryEntry>;
-    entry: BloodworkGlossaryEntry;
-}): void {
-    glossary.entries.push(entry);
-    const keys = [entry.canonicalName, ...entry.aliases];
-    for (const key of keys) {
-        lookup.set(normalizeGlossaryNameKey(key), entry);
-    }
-}
-
 function createFallbackGlossaryDecision(
     measurement: BloodworkMeasurement,
 ): z.infer<typeof glossaryValidationDecisionSchema> | null {
@@ -2921,11 +4442,7 @@ function applyGlossaryDecision({
         if (!targetCanonicalName || !isEnglishGlossaryName(targetCanonicalName)) {
             return;
         }
-        const existingEntry = findGlossaryEntryByName({
-            glossary,
-            lookup,
-            name: targetCanonicalName,
-        });
+        const existingEntry = lookup.get(normalizeGlossaryNameKey(targetCanonicalName));
         if (!existingEntry) {
             return;
         }
@@ -2943,6 +4460,7 @@ function applyGlossaryDecision({
                 ...decisionCategoryAliases,
             ],
         });
+        indexGlossaryEntry(lookup, existingEntry);
         acceptedMeasurements.push({
             ...aliasedMeasurement,
             category: canonicalCategory,
@@ -2955,11 +4473,7 @@ function applyGlossaryDecision({
         return;
     }
 
-    const existingEntry = findGlossaryEntryByName({
-        glossary,
-        lookup,
-        name: canonicalName,
-    });
+    const existingEntry = lookup.get(normalizeGlossaryNameKey(canonicalName));
     const measurementWithCanonicalName = standardizeMeasurementUnit({
         ...measurement,
         name: canonicalName,
@@ -2977,25 +4491,32 @@ function applyGlossaryDecision({
             extraAliases: decision.aliases,
             extraCategoryAliases: decisionCategoryAliases,
         });
+        indexGlossaryEntry(lookup, existingEntry);
     } else {
-        const entry = createGlossaryEntryFromMeasurement({
+        const canonicalEntryCategory = resolveCanonicalCategoryForMeasurement({
+            measurementName: canonicalName,
+            category: measurementWithCanonicalName.category,
+        });
+        const entry: BloodworkGlossaryEntry = {
             canonicalName,
-            measurement: measurementWithCanonicalName,
-        });
-        if (decision.aliases) {
-            for (const alias of decision.aliases) {
-                upsertAliasIntoGlossaryEntry(entry, alias);
-            }
-        }
-        for (const alias of decisionCategoryAliases) {
-            upsertCategoryAliasIntoGlossaryEntry(entry, alias);
-        }
-        canonicalCategory = entry.canonicalCategory;
-        appendGlossaryEntry({
-            glossary,
-            lookup,
+            canonicalCategory: canonicalEntryCategory,
+            aliases: [],
+            categoryAliases: [],
+            knownRanges: [],
+            unitHints: [],
+        };
+        canonicalCategory = updateGlossaryEntryWithMeasurement({
             entry,
+            measurement: {
+                ...measurementWithCanonicalName,
+                name: canonicalName,
+                category: canonicalEntryCategory,
+            },
+            extraAliases: decision.aliases,
+            extraCategoryAliases: decisionCategoryAliases,
         });
+        glossary.entries.push(entry);
+        indexGlossaryEntry(lookup, entry);
     }
     acceptedMeasurements.push({
         ...measurementWithCanonicalName,
@@ -3032,18 +4553,10 @@ async function applyGlossaryValidationToMeasurements({
             continue;
         }
 
-        const knownEntryFromName = findGlossaryEntryByName({
-            glossary,
-            lookup,
-            name: normalizedMeasurement.name,
-        });
+        const knownEntryFromName = lookup.get(normalizeGlossaryNameKey(normalizedMeasurement.name));
         const knownEntryFromOriginal =
             normalizedMeasurement.originalName && isEnglishGlossaryName(normalizedMeasurement.originalName)
-                ? findGlossaryEntryByName({
-                    glossary,
-                    lookup,
-                    name: normalizedMeasurement.originalName,
-                })
+                ? lookup.get(normalizeGlossaryNameKey(normalizedMeasurement.originalName))
                 : null;
         const knownEntry = knownEntryFromName ?? knownEntryFromOriginal;
 
@@ -3056,6 +4569,7 @@ async function applyGlossaryValidationToMeasurements({
                 entry: knownEntry,
                 measurement: resolvedMeasurement,
             });
+            indexGlossaryEntry(lookup, knownEntry);
             accepted.push({
                 ...resolvedMeasurement,
                 category: canonicalCategory,
