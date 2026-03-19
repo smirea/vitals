@@ -6,6 +6,7 @@ import {
     createS3ClientIfNeeded,
     listBloodworkDataFiles,
 } from './bloodwork-import.ts';
+import { syncBloodworkDatabaseFromJson } from './bloodwork-db.ts';
 import { createScript } from './createScript.ts';
 import { PROJECT_DATA_DIR } from './project-paths.ts';
 
@@ -153,6 +154,11 @@ async function runBloodworkMerge(argv: string[] = process.argv.slice(2)): Promis
     if (consolidation.deletedKeys.length > 0) {
         console.info(`Deleted ${consolidation.deletedKeys.length} stale S3 object(s)`);
     }
+
+    const syncSummary = await syncBloodworkDatabaseFromJson();
+    console.info(
+        `Imported ${syncSummary.reportCount} report(s) into SQLite from ${syncSummary.scannedFileCount} JSON file(s)`,
+    );
 }
 
 export {

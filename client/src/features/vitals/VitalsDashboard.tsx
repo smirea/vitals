@@ -1,4 +1,7 @@
 import {
+    useQuery,
+} from '@tanstack/react-query';
+import {
     useCallback,
     useDeferredValue,
     useEffect,
@@ -12,6 +15,8 @@ import {
 import { ChartLineUp } from '@phosphor-icons/react';
 import { Alert, Empty, Spin } from 'antd';
 
+import { useTRPC } from '../../lib/trpc';
+import type { BloodworkDashboardPayload } from './api';
 import { CategoriesOverview } from './components/CategoriesOverview';
 import { MeaningfulChanges } from './components/MeaningfulChanges';
 import { VitalsControls } from './components/VitalsControls';
@@ -30,7 +35,7 @@ import {
     getMeasurementOverviewByKey,
     getMeasurementRangesTooltipByKey,
     getSixMonthMeaningfulChanges,
-    getOrderedLabs,
+    getOrderedReports,
     getPrunedSelectedRowKeys,
     getRowsMatchingOutOfRangeSources,
     getRowsWithVisibleData,
@@ -41,8 +46,6 @@ import {
     getVisibleSources,
 } from './model';
 import type {
-    ApiResponse,
-    BloodworkLab,
     VitalsRowModel,
 } from './types';
 import {
@@ -87,10 +90,8 @@ function useViewport() {
 export function VitalsDashboard() {
     const viewport = useViewport();
     const isMobileViewport = viewport.width < 900;
+    const trpc = useTRPC();
 
-    const [labs, setLabs] = useState<BloodworkLab[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
-    const [loadError, setLoadError] = useState<string | null>(null);
     const [measurementFilter, setMeasurementFilter] = useState('');
     const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>(() => readStoredSelectedRowKeys());
     const [starredMeasurementKeys, setStarredMeasurementKeys] = useState<string[]>(() => readStoredStarredMeasurementKeys());
@@ -105,35 +106,14 @@ export function VitalsDashboard() {
     const deferredMeasurementFilter = useDeferredValue(measurementFilter);
     const starredMeasurementSet = useMemo(() => new Set(starredMeasurementKeys), [starredMeasurementKeys]);
 
-    useEffect(() => {
-        const controller = new AbortController();
+    const dashboardQuery = useQuery(trpc.bloodwork.getDashboard.queryOptions());
+    const dashboard = dashboardQuery.data as BloodworkDashboardPayload | undefined;
+    const reports = dashboard?.reports ?? [];
+    const markers = dashboard?.markers ?? [];
+    const results = dashboard?.results ?? [];
 
-        async function loadLabs() {
-            try {
-                setIsLoading(true);
-                setLoadError(null);
-                const response = await fetch('/api/bloodwork', { signal: controller.signal });
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}`);
-                }
-                const payload = await response.json() as ApiResponse;
-                setLabs(payload.items ?? []);
-            } catch (error) {
-                if (controller.signal.aborted) return;
-                setLoadError(String(error));
-            } finally {
-                if (!controller.signal.aborted) {
-                    setIsLoading(false);
-                }
-            }
-        }
-
-        loadLabs();
-        return () => controller.abort();
-    }, []);
-
-    const orderedLabs = useMemo(() => getOrderedLabs(labs), [labs]);
-    const sources = useMemo(() => getSources(orderedLabs), [orderedLabs]);
+    const orderedReports = useMemo(() => getOrderedReports(reports), [reports]);
+    const sources = useMemo(() => getSources(orderedReports), [orderedReports]);
     const availableDates = useMemo(
         () => Array.from(new Set(sources.map(source => source.date))).sort((left, right) => left.localeCompare(right)),
         [sources],
@@ -181,9 +161,11 @@ export function VitalsDashboard() {
     }), [dateRangeEnd, dateRangeStart, sources]);
 
     const allMeasurementRows = useMemo(() => getAllMeasurementRows({
-        orderedLabs,
+        orderedReports,
+        markers,
+        results,
         sourceCount: sources.length,
-    }), [orderedLabs, sources.length]);
+    }), [markers, orderedReports, results, sources.length]);
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
@@ -446,7 +428,7 @@ export function VitalsDashboard() {
         ));
     }, []);
 
-    const hasAnyData = labs.length > 0;
+    const hasAnyData = reports.length > 0;
     const hasSelectedRows = selectedRows.length > 0;
     const showSplitLayout = hasSelectedRows && !isMobileViewport;
 
@@ -591,16 +573,16 @@ export function VitalsDashboard() {
 
     return (
         <main className='vitals-page'>
-            {isLoading ? (
+            {dashboardQuery.isLoading ? (
                 <section className='grid h-full w-full place-items-center border border-slate-300 bg-white'>
                     <Spin size='large' />
                 </section>
-            ) : loadError ? (
+            ) : dashboardQuery.error ? (
                 <Alert
                     type='error'
                     showIcon
                     title='Unable to load bloodwork data'
-                    description={loadError}
+                    description={dashboardQuery.error.message}
                 />
             ) : !hasAnyData ? (
                 <section className='grid h-full w-full place-items-center border border-slate-300 bg-white'>

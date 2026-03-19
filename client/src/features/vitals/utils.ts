@@ -1,4 +1,4 @@
-import type { MeasurementCell, BloodworkMeasurement } from './types';
+import type { BloodworkMeasurementRecord, MeasurementCell } from './types';
 
 export const DATE_FORMATTER = new Intl.DateTimeFormat('en-US', {
     month: 'short',
@@ -110,7 +110,7 @@ export function readStoredOutOfRangeSourceFilterIds(): string[] {
     }
 }
 
-export function parseNumericValue(value: number | string | undefined): number | null {
+export function parseNumericValue(value: number | string | null | undefined): number | null {
     if (typeof value === 'number' && Number.isFinite(value)) return value;
     if (typeof value !== 'string') return null;
 
@@ -195,18 +195,18 @@ export function formatPrettyDate(value: string): string {
     return DATE_FORMATTER.format(new Date(parsed));
 }
 
-export function normalizeCategoryLabel(value: string | undefined): string {
+export function normalizeCategoryLabel(value: string | null | undefined): string {
     const trimmed = value?.trim();
     return trimmed || UNCATEGORIZED_CATEGORY_LABEL;
 }
 
-export function formatCell(measurement: BloodworkMeasurement): MeasurementCell {
-    const valueText = measurement.value === undefined ? '' : String(measurement.value).trim();
-    const unitText = measurement.unit?.trim();
+export function formatCell(measurement: BloodworkMeasurementRecord): MeasurementCell {
+    const valueText = measurement.valueText?.trim() ?? '';
+    const unitText = measurement.unit?.trim() ?? '';
     const display = [valueText, unitText].filter(Boolean).join(' ').trim() || '—';
-    const rangeMin = parseNumericValue(measurement.referenceRange?.min);
-    const rangeMax = parseNumericValue(measurement.referenceRange?.max);
-    const numericValue = parseNumericValue(measurement.value);
+    const rangeMin = measurement.referenceRangeMin;
+    const rangeMax = measurement.referenceRangeMax;
+    const numericValue = measurement.valueNumeric ?? parseNumericValue(valueText);
     const rangeVisualization = getRangeVisualization({
         numericValue,
         rangeMin,
@@ -243,7 +243,7 @@ export function formatCell(measurement: BloodworkMeasurement): MeasurementCell {
         rangeBandLeft,
         rangeBandWidth,
         unit: unitText || undefined,
-        flag: measurement.flag,
+        flag: measurement.flag ?? undefined,
         note: measurement.note?.trim() || undefined,
     };
 }

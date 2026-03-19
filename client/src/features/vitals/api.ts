@@ -1,0 +1,10 @@
+import type { inferRouterOutputs } from '@trpc/server';
+
+import type { AppRouter } from 'server/trpc/index.ts';
+
+type RouterOutput = inferRouterOutputs<AppRouter>;
+
+export type BloodworkDashboardPayload = RouterOutput['bloodwork']['getDashboard'];
+export type BloodworkDashboardReport = BloodworkDashboardPayload['reports'][number];
+export type BloodworkDashboardMarker = BloodworkDashboardPayload['markers'][number];
+export type BloodworkDashboardResult = BloodworkDashboardPayload['results'][number];

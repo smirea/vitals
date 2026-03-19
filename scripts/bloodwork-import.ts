@@ -27,6 +27,7 @@ import {
     PROJECT_GLOSSARY_PATH,
     PROJECT_TO_IMPORT_DIR,
 } from './project-paths.ts';
+import { syncBloodworkDatabaseFromJson } from './bloodwork-db.ts';
 
 const DEFAULT_S3_BUCKET = 'stefan-life';
 const DEFAULT_S3_PREFIX = 'vitals';
@@ -5419,12 +5420,16 @@ async function runBloodworkImporter(argv: string[] = process.argv.slice(2)): Pro
             s3Bucket,
             s3Prefix,
         });
+        const syncSummary = await syncBloodworkDatabaseFromJson();
         if (result.outputPath) {
             console.info(`Wrote ${result.outputPath}`);
         }
         if (result.s3Key) {
             console.info(`Uploaded s3://${s3Bucket}/${result.s3Key}`);
         }
+        console.info(
+            `Imported ${syncSummary.reportCount} report(s) into SQLite from ${syncSummary.scannedFileCount} JSON file(s)`,
+        );
         return;
     }
 
@@ -5458,6 +5463,10 @@ async function runBloodworkImporter(argv: string[] = process.argv.slice(2)): Pro
         if (consolidation.deletedKeys.length > 0) {
             console.info(`Deleted ${consolidation.deletedKeys.length} stale S3 object(s)`);
         }
+        const syncSummary = await syncBloodworkDatabaseFromJson();
+        console.info(
+            `Imported ${syncSummary.reportCount} report(s) into SQLite from ${syncSummary.scannedFileCount} JSON file(s)`,
+        );
         return;
     }
 
@@ -5559,6 +5568,10 @@ async function runBloodworkImporter(argv: string[] = process.argv.slice(2)): Pro
     if (consolidation.deletedKeys.length > 0) {
         console.info(`Deleted ${consolidation.deletedKeys.length} stale S3 object(s)`);
     }
+    const syncSummary = await syncBloodworkDatabaseFromJson();
+    console.info(
+        `Imported ${syncSummary.reportCount} report(s) into SQLite from ${syncSummary.scannedFileCount} JSON file(s)`,
+    );
 }
 
 export {

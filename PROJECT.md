@@ -18,7 +18,7 @@ Pick the next most important feature to work on, implement it fully and test it 
 - [x] data sync: downloads data from s3
     - [x] create a script to download data from the bucket via `scripts/download-data.ts`
     - [x] script only downloads what has changed
-    - [x] when the server starts it would automatically call this script
+    - [x] importing synced JSON also refreshes the local SQLite database
 - [x] historical dashboard: client application to analyze the data
     - [x] optimized for web, but also usable on mobile
     - [x] use ant-design components
@@ -43,6 +43,13 @@ Pick the next most important feature to work on, implement it fully and test it 
     - [x] block canonical writes on unresolved conflicts unless `--allow-unresolved` is provided, and write review reports to `data/review`
     - [x] add `--approve-review` workflow to finalize unresolved reports
     - [x] add optional `--textract-fallback` integration for low-confidence extraction fallback
+- [x] sqlite + tRPC bloodwork data layer
+    - [x] add Bun SQLite + Drizzle schema for normalized bloodwork tables
+    - [x] add a script to import current bloodwork JSON files into SQLite
+    - [x] replace the `/bloodwork` JSON endpoint with tRPC + React Query
+    - [x] expose read-only generic table access under `table.<name>.(findMany|findOne|count)`
+    - [x] refactor the bloodwork dashboard to consume normalized `reports`, `markers`, and `results`
+    - [x] add scripts for DB push and bloodwork DB import
 
 # Notes:
 - Importer defaults to `google/gemini-3-flash-preview` and validates output through the shared `BloodworkLab` schema.
@@ -72,6 +79,10 @@ Pick the next most important feature to work on, implement it fully and test it 
 - Lab date headers now show a flag/count badge for out-of-range measurements; clicking badges applies additive out-of-range row filters for selected labs and highlights those columns.
 - Selected out-of-range lab column filters are now persisted and restored from localStorage across reloads.
 - Client app shell now uses TanStack Router with a persistent left navigation; `/` is a home stub and the bloodwork dashboard lives under `/bloodwork`.
+- Bloodwork data now lives in `data/vitals.sqlite` by default (override with `VITALS_DB_PATH`) and is accessed through Bun SQLite + Drizzle.
+- The database is the app source of truth; scripts that create or sync bloodwork JSON now import that JSON into SQLite, and server startup only runs `drizzle-kit push`.
+- The bloodwork UI now loads through tRPC + React Query; the main dashboard query returns normalized `reports`, `markers`, and `results`.
+- Read-only generic table access is exposed through tRPC under `table.<tableName>.findMany`, `.findOne`, and `.count`.
 
 ## Active iteration requirements (2026-02-13)
 

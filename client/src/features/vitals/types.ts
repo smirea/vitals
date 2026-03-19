@@ -1,56 +1,21 @@
-export type BloodworkMeasurement = {
+export type MeasurementFlag = 'low' | 'high' | 'normal' | 'abnormal' | 'critical' | 'unknown';
+
+export type BloodworkMeasurementRecord = {
+    key: string;
     name: string;
-    originalName?: string;
-    category?: string;
-    value?: number | string;
-    unit?: string;
-    referenceRange?: {
-        min?: number;
-        max?: number;
-    };
-    flag?: 'low' | 'high' | 'normal' | 'abnormal' | 'critical' | 'unknown';
-    note?: string;
-    reviewStatus?: 'accepted' | 'needs_review';
-    confidence?: number;
-    provenance?: Array<{
-        extractor: 'layout_text' | 'textract' | 'llm_normalizer';
-        page: number;
-        rawName?: string;
-        rawValue?: string;
-        rawUnit?: string;
-        rawRange?: string;
-        confidence?: number;
-    }>;
-    conflict?: {
-        reason: string;
-        candidateCount: number;
-    };
-};
-
-export type BloodworkLab = {
-    date: string;
-    collectionDate?: string;
-    reportedDate?: string;
-    receivedDate?: string;
-    labName: string;
-    location?: string;
-    importLocation?: string;
-    importLocationIsInferred?: boolean;
-    weightKg?: number;
-    measurements: BloodworkMeasurement[];
-    notes?: string;
-    reviewSummary?: {
-        unresolvedCount: number;
-        reportFile?: string;
-    };
-};
-
-export type ApiResponse = {
-    items: BloodworkLab[];
+    category: string | null;
+    valueText: string | null;
+    valueNumeric: number | null;
+    unit: string | null;
+    referenceRangeMin: number | null;
+    referenceRangeMax: number | null;
+    flag: MeasurementFlag | null;
+    note: string | null;
 };
 
 export type SourceColumn = {
     id: string;
+    reportId: number;
     date: string;
     prettyDate: string;
     index: number;
@@ -70,7 +35,7 @@ export type MeasurementCell = {
     rangeBandLeft: number;
     rangeBandWidth: number;
     unit?: string;
-    flag?: BloodworkMeasurement['flag'];
+    flag?: MeasurementFlag;
     note?: string;
 };
 

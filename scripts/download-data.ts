@@ -3,6 +3,7 @@ import path from 'path';
 
 import { GetObjectCommand, ListObjectsV2Command, S3Client, type _Object } from '@aws-sdk/client-s3';
 
+import { syncBloodworkDatabaseFromJson } from './bloodwork-db.ts';
 import { createScript } from './createScript.ts';
 import { PROJECT_DATA_DIR } from './project-paths.ts';
 
@@ -230,6 +231,12 @@ async function runDownloadDataSync(): Promise<SyncSummary> {
     console.info(
         `Data sync finished: scanned=${summary.scanned}, downloaded=${summary.downloaded}, skipped=${summary.skipped}`,
     );
+    if (summary.downloaded > 0) {
+        const dbSummary = await syncBloodworkDatabaseFromJson();
+        console.info(
+            `Imported ${dbSummary.reportCount} report(s) into SQLite from ${dbSummary.scannedFileCount} JSON file(s)`,
+        );
+    }
     return summary;
 }
 
