@@ -1,6 +1,17 @@
-import { VitalsDashboard } from './features/vitals/VitalsDashboard';
-import './features/vitals/vitals.css';
+import { RouterProvider, createRouter } from '@tanstack/react-router'
+import { routeTree } from './routeTree.gen'
+
+const router = createRouter({
+    routeTree,
+    defaultPreload: 'intent',
+})
+
+declare module '@tanstack/react-router' {
+    interface Register {
+        router: typeof router
+    }
+}
 
 export default function App() {
-    return <VitalsDashboard />;
+    return <RouterProvider router={router} />
 }

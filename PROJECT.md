@@ -71,6 +71,7 @@ Pick the next most important feature to work on, implement it fully and test it 
 - Fixed sticky header backgrounds for measurement/overview columns, enabled wrapped measurement names, and removed desktop outer padding to use full viewport space.
 - Lab date headers now show a flag/count badge for out-of-range measurements; clicking badges applies additive out-of-range row filters for selected labs and highlights those columns.
 - Selected out-of-range lab column filters are now persisted and restored from localStorage across reloads.
+- Client app shell now uses TanStack Router with a persistent left navigation; `/` is a home stub and the bloodwork dashboard lives under `/bloodwork`.
 
 ## Active iteration requirements (2026-02-13)
 
