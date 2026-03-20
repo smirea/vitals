@@ -330,6 +330,40 @@ function readFileAsDataUrl(file: File) {
   });
 }
 
+function buildPastedImageFileName(file: File, index: number) {
+  if (file.name.trim()) {
+    return file.name;
+  }
+
+  const fileExtension = file.type.split("/")[1] || "png";
+  return `pasted-image-${Date.now()}-${index}.${fileExtension}`;
+}
+
+async function filesToFormImages(files: File[]) {
+  return Promise.all(
+    files.map(async (file, index) => ({
+      uid: `pasted-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 10)}`,
+      fileName: buildPastedImageFileName(file, index),
+      dataUrl: await readFileAsDataUrl(file),
+    }) satisfies PillImageFormValue),
+  );
+}
+
+function getPastedImageFiles(event: ClipboardEvent) {
+  const clipboardItems = Array.from(event.clipboardData?.items ?? [])
+    .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file !== null);
+
+  if (clipboardItems.length > 0) {
+    return clipboardItems;
+  }
+
+  return Array.from(event.clipboardData?.files ?? []).filter((file) =>
+    file.type.startsWith("image/"),
+  );
+}
+
 function renderComponents(components: PillComponent[]) {
   if (components.length === 0) {
     return <Typography.Text type="secondary">No components</Typography.Text>;
@@ -569,6 +603,42 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
       form.setFieldValue("periods", nextPeriods);
     }
   }, [form, watchedDefaultUnit, watchedDefaultValue, watchedPeriods]);
+
+  useEffect(() => {
+    if (!isDrawerOpen) {
+      return;
+    }
+
+    const onPaste = (event: ClipboardEvent) => {
+      const pastedFiles = getPastedImageFiles(event);
+      if (pastedFiles.length === 0) {
+        return;
+      }
+
+      event.preventDefault();
+
+      void (async () => {
+        try {
+          const nextImages = await filesToFormImages(pastedFiles);
+          const currentImages = (form.getFieldValue("images") ?? []) as PillImageFormValue[];
+          form.setFieldValue("images", [...currentImages, ...nextImages]);
+          message.success(
+            pastedFiles.length === 1
+              ? "Pasted 1 image."
+              : `Pasted ${pastedFiles.length} images.`,
+          );
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : "Unable to process pasted images.");
+        }
+      })();
+    };
+
+    window.addEventListener("paste", onPaste);
+
+    return () => {
+      window.removeEventListener("paste", onPaste);
+    };
+  }, [form, isDrawerOpen]);
 
   function resetPillForm() {
     form.resetFields();
