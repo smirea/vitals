@@ -1,6 +1,7 @@
 import {
 	ArrowDownOutlined,
 	ArrowUpOutlined,
+	CopyOutlined,
 	DeleteOutlined,
 	EditOutlined,
 	PlusOutlined,
@@ -65,7 +66,7 @@ export const Route = createFileRoute('/pills')({
 	component: PillsRouteComponent,
 });
 
-type PillTiming = 'morning' | 'afternoon' | 'evening' | 'random';
+type PillTiming = 'morning' | 'afternoon' | 'evening';
 
 type PillImageFormValue = {
 	id?: number;
@@ -121,11 +122,20 @@ type NotTrackedPillRow = {
 	pill: PillRecord;
 };
 
+type PillExportTableName = 'futurePills' | 'activePills' | 'notTrackedPills' | 'pastPills';
+type PillExportRow = {
+	components?: Record<string, string>;
+	note?: string;
+	tags?: string[];
+	startDate?: string;
+	endDate?: string;
+	timing?: string;
+};
+
 const timingOptions = [
 	{ label: 'Morning', value: 'morning' },
 	{ label: 'Afternoon', value: 'afternoon' },
 	{ label: 'Evening', value: 'evening' },
-	{ label: 'Random', value: 'random' },
 ] as const;
 
 function PillsRouteComponent() {
@@ -313,13 +323,10 @@ function PillsRouteComponent() {
 		const nextPeriods = watchedPeriods.map(period => ({
 			...period,
 			count: normalizePeriodCount(period.count),
-			timing: period.timing ?? getNewPeriodDefaults({ periods: watchedPeriods }).timing,
 		}));
 
 		const hasChanged = nextPeriods.some(
-			(period, index) =>
-				period.count !== watchedPeriods[index]?.count ||
-				period.timing !== watchedPeriods[index]?.timing,
+			(period, index) => period.count !== watchedPeriods[index]?.count,
 		);
 
 		if (hasChanged) {
@@ -442,6 +449,21 @@ function PillsRouteComponent() {
 		);
 	}
 
+	async function handleExport() {
+		try {
+			const exportPayload = buildPillsExport({
+				futureRows,
+				activeRows,
+				notTrackedRows,
+				pastRows,
+			});
+			await copyTextToClipboard(JSON.stringify(exportPayload, null, '\t'));
+			message.success('Pills export copied to clipboard.');
+		} catch (error) {
+			message.error(error instanceof Error ? error.message : 'Unable to export pills.');
+		}
+	}
+
 	function handleAutocompleteSelect(_: string, option: { pill?: PillRecord }) {
 		if (!option.pill) {
 			return;
@@ -560,13 +582,7 @@ function PillsRouteComponent() {
 
 			const remainingPeriods = (form.getFieldValue('periods') ?? []) as PillPeriodFormValue[];
 			if (remainingPeriods.length === 0 && !isEditMode) {
-				form.setFieldValue('periods', [
-					createBlankPeriod(
-						getNewPeriodDefaults({
-							periods: [],
-						}),
-					),
-				]);
+				form.setFieldValue('periods', [createBlankPeriod()]);
 			}
 
 			message.success(
@@ -712,7 +728,8 @@ function PillsRouteComponent() {
 		{
 			title: 'Components',
 			key: 'components',
-			render: (_: unknown, row: ActivePillRow) => renderComponents(row.pill.components),
+			render: (_: unknown, row: ActivePillRow) =>
+				renderComponents(row.pill.components, row.activePeriod.count),
 			onCell: row =>
 				row.pill.components.length > 0
 					? {
@@ -769,7 +786,8 @@ function PillsRouteComponent() {
 		{
 			title: 'Components',
 			key: 'components',
-			render: (_: unknown, row: FuturePillRow) => renderComponents(row.pill.components),
+			render: (_: unknown, row: FuturePillRow) =>
+				renderComponents(row.pill.components, row.futurePeriod.count),
 			onCell: row =>
 				row.pill.components.length > 0
 					? {
@@ -823,7 +841,8 @@ function PillsRouteComponent() {
 		{
 			title: 'Components',
 			key: 'components',
-			render: (_: unknown, row: PastPillRow) => renderComponents(row.pill.components),
+			render: (_: unknown, row: PastPillRow) =>
+				renderComponents(row.pill.components, row.period.count),
 			onCell: row =>
 				row.pill.components.length > 0
 					? {
@@ -882,7 +901,8 @@ function PillsRouteComponent() {
 
 	const activeTableExpandable = {
 		expandedRowKeys: expandedComponentRowKeys,
-		expandedRowRender: (row: ActivePillRow) => renderExpandedComponents(row.pill.components),
+		expandedRowRender: (row: ActivePillRow) =>
+			renderExpandedComponents(row.pill.components, row.activePeriod.count),
 		onExpandedRowsChange: (keys: readonly Key[]) => {
 			setExpandedComponentRowKeys(keys.map(key => String(key)));
 		},
@@ -892,7 +912,8 @@ function PillsRouteComponent() {
 
 	const futureTableExpandable = {
 		expandedRowKeys: expandedComponentRowKeys,
-		expandedRowRender: (row: FuturePillRow) => renderExpandedComponents(row.pill.components),
+		expandedRowRender: (row: FuturePillRow) =>
+			renderExpandedComponents(row.pill.components, row.futurePeriod.count),
 		onExpandedRowsChange: (keys: readonly Key[]) => {
 			setExpandedComponentRowKeys(keys.map(key => String(key)));
 		},
@@ -902,7 +923,8 @@ function PillsRouteComponent() {
 
 	const pastTableExpandable = {
 		expandedRowKeys: expandedComponentRowKeys,
-		expandedRowRender: (row: PastPillRow) => renderExpandedComponents(row.pill.components),
+		expandedRowRender: (row: PastPillRow) =>
+			renderExpandedComponents(row.pill.components, row.period.count),
 		onExpandedRowsChange: (keys: readonly Key[]) => {
 			setExpandedComponentRowKeys(keys.map(key => String(key)));
 		},
@@ -925,9 +947,21 @@ function PillsRouteComponent() {
 			<PageNav
 				title='Pills'
 				actions={
-					<Button type='primary' size='large' icon={<PlusOutlined />} onClick={openNewPillDrawer}>
-						Log pill
-					</Button>
+					<Space>
+						<Button
+							size='large'
+							icon={<CopyOutlined />}
+							onClick={() => {
+								void handleExport();
+							}}
+							disabled={dashboardQuery.isLoading}
+						>
+							Export
+						</Button>
+						<Button type='primary' size='large' icon={<PlusOutlined />} onClick={openNewPillDrawer}>
+							Log pill
+						</Button>
+					</Space>
 				}
 			/>
 
@@ -1273,12 +1307,10 @@ function PillsRouteComponent() {
 											title: 'Timing',
 											width: 140,
 											render: (_: unknown, field) => (
-												<Form.Item
-													name={[field.name, 'timing']}
-													rules={[{ required: true, message: 'Required' }]}
-													style={{ marginBottom: 0 }}
-												>
+												<Form.Item name={[field.name, 'timing']} style={{ marginBottom: 0 }}>
 													<Select
+														allowClear
+														placeholder='Optional'
 														options={timingOptions as unknown as { label: string; value: string }[]}
 													/>
 												</Form.Item>
@@ -1331,15 +1363,7 @@ function PillsRouteComponent() {
 								<Button
 									size='small'
 									icon={<PlusOutlined />}
-									onClick={() =>
-										add(
-											createBlankPeriod(
-												getNewPeriodDefaults({
-													periods: (form.getFieldValue('periods') ?? []) as PillPeriodFormValue[],
-												}),
-											),
-										)
-									}
+									onClick={() => add(createBlankPeriod())}
 								>
 									Add another range
 								</Button>
@@ -1440,40 +1464,12 @@ function getTodayDateString() {
 	return dayjs().format(DATE_FORMAT);
 }
 
-function createBlankPeriod(defaults?: { timing?: PillTiming }): PillPeriodFormValue {
+function createBlankPeriod(): PillPeriodFormValue {
 	return {
 		startDate: getTodayDateString(),
 		endDate: '',
 		count: 1,
-		timing: defaults?.timing ?? 'random',
 		tagNames: [],
-	};
-}
-
-function getLatestTrackedPeriodDefaults(periods: PillPeriodFormValue[]) {
-	const periodsWithStartDate = periods.filter(period => period.startDate);
-	if (periodsWithStartDate.length === 0) {
-		return null;
-	}
-
-	const latestPeriod = [...periodsWithStartDate]
-		.sort((left, right) => (left.startDate ?? '').localeCompare(right.startDate ?? ''))
-		.at(-1);
-
-	if (!latestPeriod) {
-		return null;
-	}
-
-	return {
-		timing: latestPeriod.timing ?? 'random',
-	};
-}
-
-function getNewPeriodDefaults(args: { periods?: PillPeriodFormValue[] }) {
-	const latestTrackedPeriodDefaults = getLatestTrackedPeriodDefaults(args.periods ?? []);
-
-	return {
-		timing: latestTrackedPeriodDefaults?.timing || 'random',
 	};
 }
 
@@ -1483,7 +1479,7 @@ function getPillPeriodFormValues(pill: PillRecord) {
 		startDate: period.startDate,
 		endDate: period.endDate ?? '',
 		count: normalizePeriodCount(period.count),
-		timing: period.timing ?? 'random',
+		timing: period.timing ?? undefined,
 		tagNames: period.tags.map(tag => tag.name),
 	}));
 }
@@ -1497,7 +1493,7 @@ function createEmptyFormValues(): PillFormValues {
 		note: '',
 		images: [],
 		components: [{ name: '', value: '', unit: '' }],
-		periods: [createBlankPeriod({ timing: 'random' })],
+		periods: [createBlankPeriod()],
 	};
 }
 
@@ -1575,7 +1571,7 @@ function multiplyServingValue(value: string | null | undefined, count: number | 
 }
 
 function formatTiming(timing?: PillTiming | null) {
-	if (!timing || timing === 'random') {
+	if (!timing) {
 		return '';
 	}
 
@@ -1656,16 +1652,7 @@ function pillToFormValues(
 						unit: component.unit ?? '',
 					}))
 				: [{ name: '', value: '', unit: '' }],
-		periods: shouldAppendNewPeriod
-			? [
-					...periodFormValues,
-					createBlankPeriod(
-						getNewPeriodDefaults({
-							periods: periodFormValues,
-						}),
-					),
-				]
-			: periodFormValues,
+		periods: shouldAppendNewPeriod ? [...periodFormValues, createBlankPeriod()] : periodFormValues,
 	};
 }
 
@@ -1788,7 +1775,7 @@ function isValidPastedUrl(value: string) {
 	}
 }
 
-function renderComponents(components: PillComponent[]) {
+function renderComponents(components: PillComponent[], count = 1) {
 	if (components.length === 0) {
 		return <Typography.Text type='secondary'>No components</Typography.Text>;
 	}
@@ -1798,7 +1785,8 @@ function renderComponents(components: PillComponent[]) {
 	return (
 		<Space direction='vertical' size={0}>
 			<Typography.Text>
-				{firstComponent.name}: {formatServing(firstComponent.value, firstComponent.unit)}
+				{firstComponent.name}:{' '}
+				{formatServing(multiplyServingValue(firstComponent.value, count), firstComponent.unit)}
 			</Typography.Text>
 			{remainingComponents.length > 0 ? (
 				<Typography.Text type='secondary'>+{remainingComponents.length} more</Typography.Text>
@@ -1807,7 +1795,7 @@ function renderComponents(components: PillComponent[]) {
 	);
 }
 
-function renderExpandedComponents(components: PillComponent[]) {
+function renderExpandedComponents(components: PillComponent[], count = 1) {
 	return (
 		<Table
 			size='small'
@@ -1825,7 +1813,7 @@ function renderExpandedComponents(components: PillComponent[]) {
 					key: 'value',
 					width: 180,
 					render: (_: unknown, component: PillComponent) =>
-						formatServing(component.value, component.unit),
+						formatServing(multiplyServingValue(component.value, count), component.unit),
 				},
 			]}
 		/>
@@ -1853,6 +1841,157 @@ function renderImages(images: PillImage[]) {
 			</div>
 		</Image.PreviewGroup>
 	);
+}
+
+function buildPillsExport(args: {
+	futureRows: FuturePillRow[];
+	activeRows: ActivePillRow[];
+	notTrackedRows: NotTrackedPillRow[];
+	pastRows: PastPillRow[];
+}): Partial<Record<PillExportTableName, Record<string, PillExportRow>>> {
+	const exportSections: Partial<Record<PillExportTableName, Record<string, PillExportRow>>> = {};
+	const futurePills = buildPillExportTable(
+		args.futureRows.map(row => ({
+			pill: row.pill,
+			count: row.futurePeriod.count,
+			tags: row.futurePeriod.tags,
+			startDate: row.futurePeriod.startDate,
+			endDate: row.futurePeriod.endDate ?? undefined,
+			timing: row.futurePeriod.timing,
+		})),
+	);
+	const activePills = buildPillExportTable(
+		args.activeRows.map(row => ({
+			pill: row.pill,
+			count: row.activePeriod.count,
+			tags: row.activePeriod.tags,
+			startDate: row.activePeriod.startDate,
+			endDate: row.activePeriod.endDate ?? undefined,
+			timing: row.activePeriod.timing,
+		})),
+	);
+	const notTrackedPills = buildPillExportTable(
+		args.notTrackedRows.map(row => ({
+			pill: row.pill,
+			count: 1,
+			tags: [],
+		})),
+	);
+	const pastPills = buildPillExportTable(
+		args.pastRows.map(row => ({
+			pill: row.pill,
+			count: row.period.count,
+			tags: row.period.tags,
+			startDate: row.period.startDate,
+			endDate: row.period.endDate ?? undefined,
+			timing: row.period.timing,
+		})),
+	);
+
+	if (Object.keys(futurePills).length > 0) {
+		exportSections.futurePills = futurePills;
+	}
+	if (Object.keys(activePills).length > 0) {
+		exportSections.activePills = activePills;
+	}
+	if (Object.keys(notTrackedPills).length > 0) {
+		exportSections.notTrackedPills = notTrackedPills;
+	}
+	if (Object.keys(pastPills).length > 0) {
+		exportSections.pastPills = pastPills;
+	}
+
+	return exportSections;
+}
+
+function buildPillExportTable(
+	rows: Array<{
+		pill: PillRecord;
+		count: number;
+		tags: PillPeriod['tags'];
+		startDate?: string;
+		endDate?: string;
+		timing?: PillPeriod['timing'];
+	}>,
+) {
+	return Object.fromEntries(
+		rows.map(({ pill, count, tags, startDate, endDate, timing }) => [
+			`${pill.name} - ${formatServing(multiplyServingValue(pill.value, count), pill.unit)}`,
+			buildPillExportRow({
+				pill,
+				count,
+				tags,
+				startDate,
+				endDate,
+				timing,
+			}),
+		]),
+	);
+}
+
+function buildPillExportRow(args: {
+	pill: PillRecord;
+	count: number;
+	tags: PillPeriod['tags'];
+	startDate?: string;
+	endDate?: string;
+	timing?: PillPeriod['timing'];
+}): PillExportRow {
+	const exportRow: PillExportRow = {};
+
+	if (args.pill.components.length > 0) {
+		exportRow.components = Object.fromEntries(
+			args.pill.components.map(component => [
+				component.name,
+				formatServing(multiplyServingValue(component.value, args.count), component.unit),
+			]),
+		);
+	}
+	if (args.pill.note) {
+		exportRow.note = args.pill.note;
+	}
+	if (args.tags.length > 0) {
+		exportRow.tags = args.tags.map(tag => `${tag.name}:${tag.note ?? ''}`);
+	}
+	if (args.startDate) {
+		exportRow.startDate = args.startDate;
+	}
+	if (args.endDate) {
+		exportRow.endDate = args.endDate;
+	}
+	if (args.timing) {
+		exportRow.timing = args.timing;
+	}
+
+	return exportRow;
+}
+
+async function copyTextToClipboard(value: string) {
+	if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+		await navigator.clipboard.writeText(value);
+		return;
+	}
+
+	if (typeof document === 'undefined') {
+		throw new Error('Clipboard is unavailable in this environment.');
+	}
+
+	const textArea = document.createElement('textarea');
+	textArea.value = value;
+	textArea.setAttribute('readonly', '');
+	textArea.style.position = 'fixed';
+	textArea.style.opacity = '0';
+	document.body.appendChild(textArea);
+	textArea.select();
+
+	try {
+		const didCopy = document.execCommand('copy');
+		if (!didCopy) {
+			throw new Error('Clipboard copy failed.');
+		}
+	} finally {
+		textArea.remove();
+	}
 }
 
 function formatRelativeDate(value: string) {

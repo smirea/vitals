@@ -5,7 +5,7 @@ const measurementFlagValues = ['low', 'high', 'normal', 'abnormal', 'critical', 
 const reviewStatusValues = ['accepted', 'needs_review'] as const;
 const provenanceExtractorValues = ['layout_text', 'textract', 'llm_normalizer'] as const;
 const importReviewStatusValues = ['pending', 'applied'] as const;
-const pillTimingValues = ['morning', 'afternoon', 'evening', 'random'] as const;
+const pillTimingValues = ['morning', 'afternoon', 'evening'] as const;
 
 export const bloodworkReports = sqliteTable(
 	'bloodwork_reports',
@@ -220,7 +220,7 @@ export const pillPeriods = sqliteTable(
 		startDate: text('start_date').notNull(),
 		endDate: text('end_date'),
 		count: real('count').notNull().default(1),
-		timing: text('timing', { enum: pillTimingValues }).notNull().default('random'),
+		timing: text('timing', { enum: pillTimingValues }),
 	},
 	table => [index('pill_periods_pill_start_idx').on(table.pillId, table.startDate, table.id)],
 );

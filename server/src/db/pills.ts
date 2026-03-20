@@ -31,14 +31,14 @@ const pillComponentInputSchema = z.object({
 	unit: z.string().trim().optional().default(''),
 });
 
-const pillTimingSchema = z.enum(['morning', 'afternoon', 'evening', 'random']);
+const pillTimingSchema = z.enum(['morning', 'afternoon', 'evening']);
 
 const pillPeriodInputSchema = z.object({
 	id: z.number().int().positive().optional(),
 	startDate: z.string().trim().optional().default(''),
 	endDate: z.string().trim().optional().default(''),
 	count: z.number().positive().optional().default(1),
-	timing: pillTimingSchema.default('random'),
+	timing: pillTimingSchema.optional(),
 	tagNames: z.array(z.string().trim()).max(50).default([]),
 });
 
@@ -182,7 +182,7 @@ function sanitizePillPeriods(args: { input: z.infer<typeof pillUpsertInputSchema
 			startDate: period.startDate.trim(),
 			endDate: normalizeOptionalText(period.endDate),
 			count: period.count,
-			timing: period.timing,
+			timing: period.timing ?? null,
 			tagNames: [
 				...new Map(
 					period.tagNames
@@ -197,7 +197,7 @@ function sanitizePillPeriods(args: { input: z.infer<typeof pillUpsertInputSchema
 				period.startDate.length > 0 ||
 				period.endDate !== null ||
 				period.count !== 1 ||
-				period.timing !== 'random' ||
+				period.timing !== null ||
 				period.tagNames.length > 0,
 		)
 		.map(period => {
@@ -206,9 +206,6 @@ function sanitizePillPeriods(args: { input: z.infer<typeof pillUpsertInputSchema
 			}
 			if (!Number.isFinite(period.count) || period.count <= 0) {
 				throw new Error('Each saved pill period must include a positive count.');
-			}
-			if (!period.timing) {
-				throw new Error('Each saved pill period must include a timing.');
 			}
 
 			return period;
@@ -244,6 +241,12 @@ function parseDataUrl(dataUrl: string) {
 	};
 }
 
+function normalizeStoredPillTiming(
+	value: string | null | undefined,
+): z.infer<typeof pillTimingSchema> | null {
+	return value === 'morning' || value === 'afternoon' || value === 'evening' ? value : null;
+}
+
 function buildPillsPayload(args: {
 	pillRows: PillRow[];
 	componentRows: PillComponentRow[];
@@ -276,7 +279,7 @@ function buildPillsPayload(args: {
 			startDate: string;
 			endDate: string | null;
 			count: number;
-			timing: z.infer<typeof pillTimingSchema>;
+			timing: z.infer<typeof pillTimingSchema> | null;
 			tags: Array<{
 				id: number;
 				name: string;
@@ -344,7 +347,7 @@ function buildPillsPayload(args: {
 			startDate: row.startDate,
 			endDate: row.endDate,
 			count: row.count,
-			timing: row.timing ?? 'random',
+			timing: normalizeStoredPillTiming(row.timing),
 			tags: periodTags.sort((left, right) => left.name.localeCompare(right.name)),
 		});
 		periodMap.set(row.pillId, list);
