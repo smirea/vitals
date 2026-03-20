@@ -300,6 +300,13 @@ function PillsRouteComponent() {
         }
 
         const onPaste = (event: ClipboardEvent) => {
+            const pastedText = event.clipboardData?.getData('text')?.trim() ?? ''
+            if (isValidPastedUrl(pastedText)) {
+                event.preventDefault()
+                form.setFieldValue('url', pastedText)
+                return
+            }
+
             const pastedFiles = getPastedImageFiles(event)
             if (pastedFiles.length === 0) {
                 return
@@ -1474,6 +1481,19 @@ function getPastedImageFiles(event: ClipboardEvent) {
     return Array.from(event.clipboardData?.files ?? []).filter(file =>
         file.type.startsWith('image/'),
     )
+}
+
+function isValidPastedUrl(value: string) {
+    if (!value) {
+        return false
+    }
+
+    try {
+        const url = new URL(value)
+        return url.protocol === 'http:' || url.protocol === 'https:'
+    } catch {
+        return false
+    }
 }
 
 function renderComponents(components: PillComponent[]) {
