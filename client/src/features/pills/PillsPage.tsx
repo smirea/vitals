@@ -86,6 +86,17 @@ type PillsPageProps = {
   onEditPillChange: (editPillId: number | null) => void;
 };
 
+type ActivePillRow = {
+  pill: PillRecord;
+  activePeriod: PillPeriod;
+};
+
+type PastPillRow = {
+  key: string;
+  pill: PillRecord;
+  period: PillPeriod;
+};
+
 const timingOptions = [
   { label: "Morning", value: "morning" },
   { label: "Afternoon", value: "afternoon" },
@@ -174,25 +185,17 @@ function formatServing(value?: string | null, unit?: string | null) {
   return text || "Not set";
 }
 
-function getLatestPeriod(pill: PillRecord) {
+function getActivePeriod(pill: PillRecord) {
+  const today = getTodayDateString();
+
   return [...pill.periods]
+    .filter((period) => !period.endDate || period.endDate > today)
     .sort((left, right) => left.startDate.localeCompare(right.startDate))
-    .at(-1);
+    .at(-1) ?? null;
 }
 
-function formatPeriodLabel(
-  period: Pick<PillPeriod, "startDate" | "endDate" | "valueOverride" | "unitOverride" | "timing">,
-) {
-  const rangeText = period.endDate
-    ? `${period.startDate} to ${period.endDate}`
-    : `${period.startDate} to ongoing`;
-  const overrideText =
-    period.valueOverride || period.unitOverride
-      ? ` (${formatServing(period.valueOverride, period.unitOverride)})`
-      : "";
-  const timingText = period.timing ? ` · ${period.timing}` : "";
-
-  return `${rangeText}${timingText}${overrideText}`;
+function formatPeriodRange(period: Pick<PillPeriod, "startDate" | "endDate">) {
+  return period.endDate ? `${period.startDate} to ${period.endDate}` : `${period.startDate} to ongoing`;
 }
 
 function createImageUid(
@@ -368,26 +371,6 @@ function renderExpandedComponents(components: PillComponent[]) {
   );
 }
 
-function renderPeriods(periods: PillPeriod[]) {
-  if (periods.length === 0) {
-    return <Typography.Text type="secondary">No date ranges</Typography.Text>;
-  }
-
-  return (
-    <Space direction="vertical" size={4}>
-      {periods.map((period) => (
-        <Tag
-          key={period.id}
-          color={period.endDate ? "default" : "green"}
-          className="me-0 whitespace-normal py-1"
-        >
-          {formatPeriodLabel(period)}
-        </Tag>
-      ))}
-    </Space>
-  );
-}
-
 function renderImages(images: PillImage[]) {
   if (images.length === 0) {
     return <Typography.Text type="secondary">No images</Typography.Text>;
@@ -415,18 +398,20 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [form] = Form.useForm<PillFormValues>();
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isCreateDrawerOpen, setIsCreateDrawerOpen] = useState(false);
   const [pillQuery, setPillQuery] = useState("");
-  const [isOpenedFromEdit, setIsOpenedFromEdit] = useState(false);
   const [hydratedEditPillId, setHydratedEditPillId] = useState<number | null>(null);
   const [deletingPeriodId, setDeletingPeriodId] = useState<number | null>(null);
   const [isSaveDisabled, setIsSaveDisabled] = useState(true);
-  const [expandedComponentRowKeys, setExpandedComponentRowKeys] = useState<number[]>([]);
+  const [expandedComponentRowKeys, setExpandedComponentRowKeys] = useState<string[]>([]);
   const deferredPillQuery = useDeferredValue(pillQuery);
+  const watchedFormValues = Form.useWatch([], form) as PillFormValues | undefined;
   const watchedImages = (Form.useWatch("images", form) ?? []) as PillImageFormValue[];
   const watchedDefaultValue = Form.useWatch("value", form) ?? "";
   const watchedDefaultUnit = Form.useWatch("unit", form) ?? "";
   const watchedPeriods = (Form.useWatch("periods", form) ?? []) as PillPeriodFormValue[];
+  const isEditMode = editPillId !== null;
+  const isDrawerRequestedOpen = isCreateDrawerOpen || isEditMode;
 
   const dashboardQuery = useQuery(trpc.pills.getDashboard.queryOptions());
   const searchQuery = useQuery({
@@ -434,7 +419,7 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
       query: deferredPillQuery,
       limit: 8,
     }),
-    enabled: isDrawerOpen,
+    enabled: isDrawerRequestedOpen,
   });
 
   const extractionMutation = useMutation({
@@ -461,9 +446,8 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
     ...trpc.pills.upsert.mutationOptions(),
     onSuccess: () => {
       void queryClient.invalidateQueries();
-      setIsDrawerOpen(false);
+      setIsCreateDrawerOpen(false);
       setPillQuery("");
-      setIsOpenedFromEdit(false);
       setHydratedEditPillId(null);
       onEditPillChange(null);
       resetPillForm();
@@ -503,7 +487,37 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
   const activePills = dashboard?.activePills ?? [];
   const pastPills = dashboard?.pastPills ?? [];
   const totals = dashboard?.totals ?? { all: 0, active: 0, past: 0 };
-  const isEditMode = editPillId !== null;
+  const editedPill = useMemo(
+    () => dashboard?.pills.find((pill) => pill.id === editPillId) ?? null,
+    [dashboard?.pills, editPillId],
+  );
+  const isDrawerOpen =
+    isCreateDrawerOpen || (editPillId !== null && (dashboardQuery.isLoading || editedPill !== null));
+  const activeRows = useMemo<ActivePillRow[]>(
+    () =>
+      activePills
+        .map((pill) => ({
+          pill,
+          activePeriod: getActivePeriod(pill),
+        }))
+        .filter((row): row is ActivePillRow => row.activePeriod !== null),
+    [activePills],
+  );
+  const pastRows = useMemo<PastPillRow[]>(
+    () =>
+      pastPills
+        .flatMap((pill) =>
+          pill.periods
+            .filter((period) => period.endDate)
+            .map((period) => ({
+              key: `${pill.id}-${period.id}`,
+              pill,
+              period,
+            })),
+        )
+        .sort((left, right) => right.period.startDate.localeCompare(left.period.startDate)),
+    [pastPills],
+  );
 
   useEffect(() => {
     let isCancelled = false;
@@ -520,7 +534,7 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
     return () => {
       isCancelled = true;
     };
-  }, [form, watchedDefaultUnit, watchedDefaultValue, watchedImages, watchedPeriods]);
+  }, [form, watchedFormValues]);
 
   useEffect(() => {
     if (watchedPeriods.length === 0) {
@@ -563,36 +577,32 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
   useEffect(() => {
     if (editPillId === null) {
       setHydratedEditPillId(null);
-
-      if (isOpenedFromEdit) {
-        setIsDrawerOpen(false);
-        setIsOpenedFromEdit(false);
-        resetPillForm();
-      }
-
       return;
     }
 
-    setIsDrawerOpen(true);
-    setIsOpenedFromEdit(true);
+    if (dashboardQuery.isLoading) {
+      return;
+    }
 
     if (hydratedEditPillId === editPillId) {
       return;
     }
 
-    const pill = dashboard?.pills.find((currentPill) => currentPill.id === editPillId);
-    if (!pill) {
+    if (!editedPill) {
+      setPillQuery("");
+      setHydratedEditPillId(null);
+      onEditPillChange(null);
+      resetPillForm();
       return;
     }
 
-    setPillQuery(pill.name);
-    form.setFieldsValue(pillToFormValues(pill));
+    setPillQuery(editedPill.name);
+    form.setFieldsValue(pillToFormValues(editedPill));
     setHydratedEditPillId(editPillId);
-  }, [dashboard?.pills, editPillId, form, hydratedEditPillId, isOpenedFromEdit]);
+  }, [dashboardQuery.isLoading, editPillId, editedPill, form, hydratedEditPillId, onEditPillChange]);
 
   function openNewPillDrawer() {
-    setIsDrawerOpen(true);
-    setIsOpenedFromEdit(false);
+    setIsCreateDrawerOpen(true);
     setHydratedEditPillId(null);
     setPillQuery("");
     onEditPillChange(null);
@@ -600,26 +610,24 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
   }
 
   function openExistingPillDrawer(pill: PillRecord) {
-    setIsDrawerOpen(true);
-    setIsOpenedFromEdit(true);
+    setIsCreateDrawerOpen(false);
     setHydratedEditPillId(null);
     onEditPillChange(pill.id);
   }
 
   function handleCloseDrawer() {
-    setIsDrawerOpen(false);
+    setIsCreateDrawerOpen(false);
     setPillQuery("");
-    setIsOpenedFromEdit(false);
     setHydratedEditPillId(null);
     onEditPillChange(null);
     resetPillForm();
   }
 
-  function toggleExpandedComponentsRow(pillId: number) {
+  function toggleExpandedComponentsRow(rowKey: string) {
     setExpandedComponentRowKeys((currentKeys) =>
-      currentKeys.includes(pillId)
-        ? currentKeys.filter((currentKey) => currentKey !== pillId)
-        : [...currentKeys, pillId],
+      currentKeys.includes(rowKey)
+        ? currentKeys.filter((currentKey) => currentKey !== rowKey)
+        : [...currentKeys, rowKey],
     );
   }
 
@@ -750,76 +758,80 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
     } catch {}
   }
 
-  const baseColumns: TableColumnsType<PillRecord> = [
+  const activeColumns: TableColumnsType<ActivePillRow> = [
     {
       title: "Pill",
       key: "name",
       width: 220,
-      render: (_: unknown, pill: PillRecord) => (
+      render: (_: unknown, row: ActivePillRow) => (
         <div className="space-y-2">
           <Button
             type="link"
             size="small"
             className="!px-0 !font-semibold"
             icon={<EditOutlined />}
-            onClick={() => openExistingPillDrawer(pill)}
+            onClick={() => openExistingPillDrawer(row.pill)}
           >
-            {pill.name}
+            {row.pill.name}
           </Button>
           <div className="flex flex-wrap gap-1.5">
-            {pill.images.length > 0 ? (
-              <Tag className="me-0 rounded-full">Images {pill.images.length}</Tag>
+            {row.pill.images.length > 0 ? (
+              <Tag className="me-0 rounded-full">Images {row.pill.images.length}</Tag>
             ) : null}
-            <Tag
-              color={pill.periods.some((period) => !period.endDate) ? "green" : "default"}
-              className="me-0 rounded-full"
-            >
-              {pill.periods.length} ranges
+            <Tag color="green" className="me-0 rounded-full">
+              {row.pill.periods.length} ranges
             </Tag>
           </div>
         </div>
       ),
     },
     {
-      title: "Default Serving",
-      key: "serving",
+      title: "Amount",
+      key: "amount",
       width: 160,
-      render: (_: unknown, pill: PillRecord) => (
-        <Typography.Text>{formatServing(pill.value, pill.unit)}</Typography.Text>
-      ),
+      render: (_: unknown, row: ActivePillRow) => {
+        return (
+          <Typography.Text>
+            {formatServing(
+              row.activePeriod.valueOverride ?? row.pill.value,
+              row.activePeriod.unitOverride ?? row.pill.unit,
+            )}
+          </Typography.Text>
+        );
+      },
+    },
+    {
+      title: "Started",
+      key: "started",
+      width: 140,
+      render: (_: unknown, row: ActivePillRow) => <Typography.Text>{row.activePeriod.startDate}</Typography.Text>,
     },
     {
       title: "Components",
       key: "components",
       width: 360,
-      render: (_: unknown, pill: PillRecord) => renderComponents(pill.components),
-      onCell: (pill) =>
-        pill.components.length > 0
+      render: (_: unknown, row: ActivePillRow) => renderComponents(row.pill.components),
+      onCell: (row) =>
+        row.pill.components.length > 0
           ? {
               onClick: () => {
-                toggleExpandedComponentsRow(pill.id);
+                toggleExpandedComponentsRow(String(row.pill.id));
               },
               style: { cursor: "pointer" },
             }
           : {},
     },
     {
-      title: "Date Ranges",
-      key: "periods",
-      width: 320,
-      render: (_: unknown, pill: PillRecord) => renderPeriods(pill.periods),
-    },
-    {
       title: "Note",
       key: "note",
       width: 260,
-      render: (_: unknown, pill: PillRecord) =>
-        pill.note ? (
+      render: (_: unknown, row: ActivePillRow) =>
+        row.pill.note ? (
           <Typography.Paragraph
             ellipsis={{ rows: 4, expandable: true, symbol: "more" }}
             className="!mb-0 whitespace-pre-wrap"
           >
-            {pill.note}
+            {row.pill.note}
           </Typography.Paragraph>
         ) : (
           <Typography.Text type="secondary">No note</Typography.Text>
@@ -829,40 +841,109 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
       title: "Images",
       key: "images",
       width: 220,
-      render: (_: unknown, pill: PillRecord) => renderImages(pill.images),
+      render: (_: unknown, row: ActivePillRow) => renderImages(row.pill.images),
     },
   ];
 
-  const activeColumns: TableColumnsType<PillRecord> = [
-    baseColumns[0],
+  const pastColumns: TableColumnsType<PastPillRow> = [
+    {
+      title: "Pill",
+      key: "name",
+      width: 220,
+      render: (_: unknown, row: PastPillRow) => (
+        <div className="space-y-2">
+          <Button
+            type="link"
+            size="small"
+            className="!px-0 !font-semibold"
+            icon={<EditOutlined />}
+            onClick={() => openExistingPillDrawer(row.pill)}
+          >
+            {row.pill.name}
+          </Button>
+          <div className="flex flex-wrap gap-1.5">
+            {row.pill.images.length > 0 ? (
+              <Tag className="me-0 rounded-full">Images {row.pill.images.length}</Tag>
+            ) : null}
+            <Tag className="me-0 rounded-full">{row.pill.periods.length} ranges</Tag>
+          </div>
+        </div>
+      ),
+    },
     {
       title: "Amount",
       key: "amount",
       width: 160,
-      render: (_: unknown, pill: PillRecord) => {
-        const latestPeriod = getLatestPeriod(pill);
-        return (
-          <Typography.Text>
-            {formatServing(
-              latestPeriod?.valueOverride ?? pill.value,
-              latestPeriod?.unitOverride ?? pill.unit,
-            )}
-          </Typography.Text>
-        );
-      },
+      render: (_: unknown, row: PastPillRow) => (
+        <Typography.Text>
+          {formatServing(row.period.valueOverride ?? row.pill.value, row.period.unitOverride ?? row.pill.unit)}
+        </Typography.Text>
+      ),
     },
-    ...baseColumns.slice(2),
+    {
+      title: "Period",
+      key: "period",
+      width: 200,
+      render: (_: unknown, row: PastPillRow) => (
+        <Typography.Text>{formatPeriodRange(row.period)}</Typography.Text>
+      ),
+    },
+    {
+      title: "Components",
+      key: "components",
+      width: 360,
+      render: (_: unknown, row: PastPillRow) => renderComponents(row.pill.components),
+      onCell: (row) =>
+        row.pill.components.length > 0
+          ? {
+              onClick: () => {
+                toggleExpandedComponentsRow(row.key);
+              },
+              style: { cursor: "pointer" },
+            }
+          : {},
+    },
+    {
+      title: "Note",
+      key: "note",
+      width: 260,
+      render: (_: unknown, row: PastPillRow) =>
+        row.pill.note ? (
+          <Typography.Paragraph
+            ellipsis={{ rows: 4, expandable: true, symbol: "more" }}
+            className="!mb-0 whitespace-pre-wrap"
+          >
+            {row.pill.note}
+          </Typography.Paragraph>
+        ) : (
+          <Typography.Text type="secondary">No note</Typography.Text>
+        ),
+    },
+    {
+      title: "Images",
+      key: "images",
+      width: 220,
+      render: (_: unknown, row: PastPillRow) => renderImages(row.pill.images),
+    },
   ];
 
-  const pastColumns = activeColumns;
-
-  const tableExpandable = {
+  const activeTableExpandable = {
     expandedRowKeys: expandedComponentRowKeys,
-    expandedRowRender: (pill: PillRecord) => renderExpandedComponents(pill.components),
+    expandedRowRender: (row: ActivePillRow) => renderExpandedComponents(row.pill.components),
     onExpandedRowsChange: (keys: readonly Key[]) => {
-      setExpandedComponentRowKeys(keys.map((key) => Number(key)));
+      setExpandedComponentRowKeys(keys.map((key) => String(key)));
     },
-    rowExpandable: (pill: PillRecord) => pill.components.length > 0,
+    rowExpandable: (row: ActivePillRow) => row.pill.components.length > 0,
+    showExpandColumn: false,
+  };
+
+  const pastTableExpandable = {
+    expandedRowKeys: expandedComponentRowKeys,
+    expandedRowRender: (row: PastPillRow) => renderExpandedComponents(row.pill.components),
+    onExpandedRowsChange: (keys: readonly Key[]) => {
+      setExpandedComponentRowKeys(keys.map((key) => String(key)));
+    },
+    rowExpandable: (row: PastPillRow) => row.pill.components.length > 0,
     showExpandColumn: false,
   };
 
@@ -907,14 +988,14 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
           extra={<Typography.Text type="secondary">{activePills.length} rows</Typography.Text>}
         >
           <Table
-            rowKey="id"
+            rowKey={(row) => String(row.pill.id)}
             size="small"
             columns={activeColumns}
-            dataSource={activePills}
+            dataSource={activeRows}
             loading={dashboardQuery.isLoading}
             pagination={false}
             scroll={{ x: 1500 }}
-            expandable={tableExpandable}
+            expandable={activeTableExpandable}
             locale={{
               emptyText: (
                 <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No active pills yet" />
@@ -926,17 +1007,17 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
         <Card
           title="Past pills"
           className="shadow-sm"
-          extra={<Typography.Text type="secondary">{pastPills.length} rows</Typography.Text>}
+          extra={<Typography.Text type="secondary">{pastRows.length} rows</Typography.Text>}
         >
           <Table
-            rowKey="id"
+            rowKey="key"
             size="small"
             columns={pastColumns}
-            dataSource={pastPills}
+            dataSource={pastRows}
             loading={dashboardQuery.isLoading}
             pagination={false}
             scroll={{ x: 1500 }}
-            expandable={tableExpandable}
+            expandable={pastTableExpandable}
             locale={{
               emptyText: (
                 <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No past pills yet" />
