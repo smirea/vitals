@@ -201,14 +201,10 @@ body,
     border: 1px solid transparent;
 }
 
-.pills-form-grid {
+.pills-primary-fields {
     display: grid;
     gap: 12px;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.pills-form-grid-full {
-    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1.8fr) minmax(120px, 0.7fr) minmax(160px, 0.9fr);
 }
 
 .pills-images-header {

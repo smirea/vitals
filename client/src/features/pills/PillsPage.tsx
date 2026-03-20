@@ -1024,12 +1024,11 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
             <Input />
           </Form.Item>
 
-          <div className='pills-form-grid'>
+          <div className='pills-primary-fields'>
             <Form.Item
               label="Pill name"
               name="name"
               rules={[{ required: true, message: "Enter a pill name." }]}
-              className='pills-form-grid-full'
             >
               <AutoComplete
                 options={autocompleteOptions}
