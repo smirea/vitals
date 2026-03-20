@@ -4,15 +4,20 @@ import { and, asc, eq, inArray, like, or } from "drizzle-orm";
 import { z } from "zod";
 
 import type { VitalsDatabase } from "server/db/client.ts";
+import { ensureTagsByNames } from "server/db/tags.ts";
 import {
   type PillComponentRow,
   type PillImageRow,
   type PillPeriodRow,
+  type PillPeriodTagRow,
   type PillRow,
+  type TagRow,
   pillComponents,
   pillImages,
   pillPeriods,
+  pillPeriodTags,
   pills,
+  tags,
 } from "server/db/schema.ts";
 
 const pillImageInputSchema = z.object({
@@ -35,6 +40,7 @@ const pillPeriodInputSchema = z.object({
   valueOverride: z.string().trim().optional().default(""),
   unitOverride: z.string().trim().optional().default(""),
   timing: pillTimingSchema.default("random"),
+  tagNames: z.array(z.string().trim()).max(50).default([]),
 });
 
 export const pillUpsertInputSchema = z.object({
@@ -183,6 +189,12 @@ function sanitizePillPeriods(args: {
       valueOverride: normalizeOptionalText(period.valueOverride) ?? defaultValue,
       unitOverride: normalizeOptionalText(period.unitOverride) ?? defaultUnit,
       timing: period.timing,
+      tagNames: [...new Map(
+        period.tagNames
+          .map((tagName) => tagName.trim())
+          .filter(Boolean)
+          .map((tagName) => [tagName.toLocaleLowerCase(), tagName]),
+      ).values()],
     }))
     .filter(
       (period) =>
@@ -190,7 +202,8 @@ function sanitizePillPeriods(args: {
         period.endDate !== null ||
         period.valueOverride.length > 0 ||
         period.unitOverride.length > 0 ||
-        period.timing !== "random",
+        period.timing !== "random" ||
+        period.tagNames.length > 0,
     )
     .map((period) => {
       if (!period.startDate) {
@@ -244,6 +257,8 @@ function buildPillsPayload(args: {
   componentRows: PillComponentRow[];
   imageRows: PillImageRow[];
   periodRows: PillPeriodRow[];
+  tagRows: TagRow[];
+  periodTagRows: PillPeriodTagRow[];
 }) {
   const componentMap = new Map<
     number,
@@ -271,8 +286,23 @@ function buildPillsPayload(args: {
       valueOverride: string | null;
       unitOverride: string | null;
       timing: z.infer<typeof pillTimingSchema>;
+      tags: Array<{
+        id: number;
+        name: string;
+        color: string;
+        note: string | null;
+        createdDate: string;
+      }>;
     }>
   >();
+  const tagsById = new Map(args.tagRows.map((row) => [row.id, row]));
+  const tagsByPeriodId = new Map<number, Array<{
+    id: number;
+    name: string;
+    color: string;
+    note: string | null;
+    createdDate: string;
+  }>>();
 
   for (const row of args.componentRows) {
     const list = componentMap.get(row.pillId) ?? [];
@@ -295,8 +325,26 @@ function buildPillsPayload(args: {
     imageMap.set(row.pillId, list);
   }
 
+  for (const row of args.periodTagRows) {
+    const tag = tagsById.get(row.tagId);
+    if (!tag) {
+      continue;
+    }
+
+    const list = tagsByPeriodId.get(row.pillPeriodId) ?? [];
+    list.push({
+      id: tag.id,
+      name: tag.name,
+      color: tag.color,
+      note: tag.note,
+      createdDate: tag.createdDate,
+    });
+    tagsByPeriodId.set(row.pillPeriodId, list);
+  }
+
   for (const row of args.periodRows) {
     const list = periodMap.get(row.pillId) ?? [];
+    const periodTags = tagsByPeriodId.get(row.id) ?? [];
     list.push({
       id: row.id,
       startDate: row.startDate,
@@ -304,6 +352,7 @@ function buildPillsPayload(args: {
       valueOverride: row.valueOverride,
       unitOverride: row.unitOverride,
       timing: row.timing ?? "random",
+      tags: periodTags.sort((left, right) => left.name.localeCompare(right.name)),
     });
     periodMap.set(row.pillId, list);
   }
@@ -386,12 +435,34 @@ function getPillRecords(db: PillsReadDb, pillIds?: number[]) {
     .where(inArray(pillPeriods.pillId, resolvedPillIds))
     .orderBy(asc(pillPeriods.pillId), asc(pillPeriods.startDate), asc(pillPeriods.id))
     .all();
+  const periodIds = periodRows.map((row) => row.id);
+  const periodTagRows =
+    periodIds.length === 0
+      ? []
+      : db
+          .select()
+          .from(pillPeriodTags)
+          .where(inArray(pillPeriodTags.pillPeriodId, periodIds))
+          .orderBy(asc(pillPeriodTags.pillPeriodId), asc(pillPeriodTags.tagId), asc(pillPeriodTags.id))
+          .all();
+  const tagIds = [...new Set(periodTagRows.map((row) => row.tagId))];
+  const tagRows =
+    tagIds.length === 0
+      ? []
+      : db
+          .select()
+          .from(tags)
+          .where(inArray(tags.id, tagIds))
+          .orderBy(asc(tags.name), asc(tags.id))
+          .all();
 
   return buildPillsPayload({
     pillRows,
     componentRows,
     imageRows,
     periodRows,
+    tagRows,
+    periodTagRows,
   });
 }
 
@@ -452,6 +523,13 @@ export function upsertPill(db: VitalsDatabase, input: z.infer<typeof pillUpsertI
   try {
     return db.transaction((tx) => {
       let pillId = input.id ?? null;
+      const resolvedTags = ensureTagsByNames(
+        tx,
+        periods.flatMap((period) => period.tagNames),
+      );
+      const tagsByName = new Map(
+        resolvedTags.map((tag) => [tag.name.toLocaleLowerCase(), tag]),
+      );
 
       if (pillId !== null) {
         const existingPill = tx
@@ -527,6 +605,8 @@ export function upsertPill(db: VitalsDatabase, input: z.infer<typeof pillUpsertI
       }
 
       for (const period of periods) {
+        let pillPeriodId = period.id ?? null;
+
         if (period.id) {
           const existingPeriod = tx
             .select({
@@ -550,19 +630,43 @@ export function upsertPill(db: VitalsDatabase, input: z.infer<typeof pillUpsertI
             })
             .where(eq(pillPeriods.id, period.id))
             .run();
+          pillPeriodId = period.id;
+        } else {
+          const insertedPeriod = tx.insert(pillPeriods)
+            .values({
+              pillId,
+              startDate: period.startDate,
+              endDate: period.endDate,
+              valueOverride: period.valueOverride,
+              unitOverride: period.unitOverride,
+              timing: period.timing,
+            })
+            .returning({
+              id: pillPeriods.id,
+            })
+            .get();
+
+          pillPeriodId = insertedPeriod.id;
+        }
+
+        if (pillPeriodId === null) {
           continue;
         }
 
-        tx.insert(pillPeriods)
-          .values({
-            pillId,
-            startDate: period.startDate,
-            endDate: period.endDate,
-            valueOverride: period.valueOverride,
-            unitOverride: period.unitOverride,
-            timing: period.timing,
-          })
-          .run();
+        tx.delete(pillPeriodTags).where(eq(pillPeriodTags.pillPeriodId, pillPeriodId)).run();
+
+        const resolvedPeriodTags = period.tagNames
+          .map((tagName) => tagsByName.get(tagName.toLocaleLowerCase()))
+          .filter((tag): tag is TagRow => Boolean(tag));
+
+        if (resolvedPeriodTags.length > 0) {
+          tx.insert(pillPeriodTags)
+            .values(resolvedPeriodTags.map((tag) => ({
+              pillPeriodId,
+              tagId: tag.id,
+            })))
+            .run();
+        }
       }
 
       return getPillRecords(tx, [pillId])[0];

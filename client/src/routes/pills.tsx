@@ -4,12 +4,14 @@ import {
     DeleteOutlined,
     EditOutlined,
     PlusOutlined,
+    TagOutlined,
     UploadOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import {
     AutoComplete,
+    Badge,
     Button,
     Card,
     DatePicker,
@@ -19,9 +21,11 @@ import {
     Form,
     Image,
     Input,
+    Popover,
     Select,
     Space,
     Spin,
+    Tag,
     Table,
     Typography,
     Upload,
@@ -81,6 +85,7 @@ type PillPeriodFormValue = {
     valueOverride?: string
     unitOverride?: string
     timing?: PillTiming
+    tagNames?: string[]
 }
 
 type PillFormValues = {
@@ -135,6 +140,7 @@ function PillsRouteComponent() {
     const [deletingPeriodId, setDeletingPeriodId] = useState<number | null>(null)
     const [isSaveDisabled, setIsSaveDisabled] = useState(true)
     const [expandedComponentRowKeys, setExpandedComponentRowKeys] = useState<string[]>([])
+    const [openPeriodTagEditorKey, setOpenPeriodTagEditorKey] = useState<string | null>(null)
     const deferredPillQuery = useDeferredValue(pillQuery)
     const watchedFormValues = Form.useWatch([], form) as PillFormValues | undefined
     const watchedImages = (Form.useWatch('images', form) ?? []) as PillImageFormValue[]
@@ -145,6 +151,7 @@ function PillsRouteComponent() {
     const isDrawerRequestedOpen = isCreateDrawerOpen || isEditMode
 
     const dashboardQuery = useQuery(trpc.pills.getDashboard.queryOptions())
+    const tagsQuery = useQuery(trpc.tags.list.queryOptions())
     const searchQuery = useQuery({
         ...trpc.pills.search.queryOptions({
             query: deferredPillQuery,
@@ -178,6 +185,7 @@ function PillsRouteComponent() {
         onSuccess: () => {
             void queryClient.invalidateQueries()
             setIsCreateDrawerOpen(false)
+            setOpenPeriodTagEditorKey(null)
             onEditPillChange(null)
             message.success('Pill saved.')
         },
@@ -200,6 +208,7 @@ function PillsRouteComponent() {
     })
 
     const dashboard = dashboardQuery.data
+    const availableTags = tagsQuery.data ?? []
     const searchResults = (searchQuery.data ?? []) as PillRecord[]
 
     const autocompleteOptions = useMemo(
@@ -209,6 +218,13 @@ function PillsRouteComponent() {
             pill: result,
         })),
         [searchResults],
+    )
+    const tagAutocompleteOptions = useMemo(
+        () => availableTags.map(tag => ({
+            label: tag.name,
+            value: tag.name,
+        })),
+        [availableTags],
     )
 
     const allPills = dashboard?.pills ?? []
@@ -377,6 +393,7 @@ function PillsRouteComponent() {
         setIsCreateDrawerOpen(true)
         setHydratedEditPillId(null)
         setPillQuery('')
+        setOpenPeriodTagEditorKey(null)
         onEditPillChange(null)
         resetPillForm()
     }
@@ -384,11 +401,13 @@ function PillsRouteComponent() {
     function openExistingPillDrawer(pill: PillRecord) {
         setIsCreateDrawerOpen(false)
         setHydratedEditPillId(null)
+        setOpenPeriodTagEditorKey(null)
         onEditPillChange(pill.id)
     }
 
     function handleCloseDrawer() {
         setIsCreateDrawerOpen(false)
+        setOpenPeriodTagEditorKey(null)
         onEditPillChange(null)
     }
 
@@ -474,6 +493,12 @@ function PillsRouteComponent() {
     }
 
     async function handleSubmit(values: PillFormValues) {
+        const submittedPeriods = ((form.getFieldValue('periods') ?? values.periods) as PillPeriodFormValue[])
+            .map(period => ({
+                ...period,
+                tagNames: normalizeTagNames(period.tagNames ?? []),
+            }))
+
         await upsertMutation.mutateAsync({
             id: values.id,
             name: values.name,
@@ -483,7 +508,7 @@ function PillsRouteComponent() {
             note: values.note,
             images: getImagePayload(values.images),
             components: values.components,
-            periods: values.periods,
+            periods: submittedPeriods,
         })
     }
 
@@ -492,6 +517,7 @@ function PillsRouteComponent() {
         fieldIndex: number,
         remove: (index: number | number[]) => void,
     ) {
+        setOpenPeriodTagEditorKey(null)
         setDeletingPeriodId(periodId)
 
         try {
@@ -528,20 +554,110 @@ function PillsRouteComponent() {
         } catch {}
     }
 
-    const activeColumns: TableColumnsType<ActivePillRow> = [
-        {
-            title: 'Pill',
-            key: 'name',
-            render: (_: unknown, row: ActivePillRow) => (
+    function handlePeriodTagNamesChange(fieldIndex: number, values: string[]) {
+        form.setFieldValue(['periods', fieldIndex, 'tagNames'], normalizeTagNames(values))
+    }
+
+    function renderPeriodTagEditor(fieldIndex: number) {
+        const rowValue = watchedPeriods[fieldIndex]
+        const currentTagNames = rowValue?.tagNames ?? []
+        const editorKey = getPeriodTagEditorKey(fieldIndex, rowValue)
+
+        return (
+            <Popover
+                trigger='click'
+                open={openPeriodTagEditorKey === editorKey}
+                onOpenChange={open => {
+                    setOpenPeriodTagEditorKey(open ? editorKey : null)
+                }}
+                placement='leftTop'
+                destroyOnHidden
+                content={(
+                    <Space direction='vertical' size={8} style={{ width: 280 }}>
+                        <Typography.Text strong>Tags</Typography.Text>
+                        <Select
+                            mode='tags'
+                            value={currentTagNames}
+                            options={tagAutocompleteOptions}
+                            placeholder='Type to attach or create tags'
+                            style={{ width: '100%' }}
+                            getPopupContainer={trigger => trigger.parentElement ?? document.body}
+                            onChange={values => {
+                                handlePeriodTagNamesChange(fieldIndex, values)
+                            }}
+                            tokenSeparators={[',']}
+                        />
+                        <div>
+                            {currentTagNames.length > 0 ? (
+                                <Space size={[4, 4]} wrap>
+                                    {currentTagNames.map(tagName => {
+                                        const tagRecord = availableTags.find(tag => tag.name === tagName)
+
+                                        return (
+                                            <Tag key={tagName} color={tagRecord?.color}>
+                                                {tagName}
+                                            </Tag>
+                                        )
+                                    })}
+                                </Space>
+                            ) : (
+                                <Typography.Text type='secondary'>
+                                    No tags attached to this date range yet.
+                                </Typography.Text>
+                            )}
+                        </div>
+                    </Space>
+                )}
+            >
+                <Badge count={currentTagNames.length} size='small' offset={[-2, 2]}>
+                    <Button
+                        size='small'
+                        icon={<TagOutlined />}
+                        aria-label='Edit date range tags'
+                        title={formatPeriodTagButtonTitle(currentTagNames)}
+                    />
+                </Badge>
+            </Popover>
+        )
+    }
+
+    function renderPillNameCell(pill: PillRecord, tagNames: string[]) {
+        return (
+            <Space direction='vertical' size={4}>
                 <Button
                     type='link'
                     size='small'
                     className='pills-link-button'
                     icon={<EditOutlined />}
-                    onClick={() => openExistingPillDrawer(row.pill)}
+                    onClick={() => openExistingPillDrawer(pill)}
                 >
-                    {row.pill.name}
+                    {pill.name}
                 </Button>
+
+                {tagNames.length > 0 ? (
+                    <Space size={[4, 4]} wrap>
+                        {tagNames.map(tagName => {
+                            const tagRecord = availableTags.find(tag => tag.name === tagName)
+
+                            return (
+                                <Tag key={`${pill.id}-${tagName}`} color={tagRecord?.color}>
+                                    {tagName}
+                                </Tag>
+                            )
+                        })}
+                    </Space>
+                ) : null}
+            </Space>
+        )
+    }
+
+    const activeColumns: TableColumnsType<ActivePillRow> = [
+        {
+            title: 'Pill',
+            key: 'name',
+            render: (_: unknown, row: ActivePillRow) => renderPillNameCell(
+                row.pill,
+                row.activePeriod.tags.map(tag => tag.name),
             ),
         },
         {
@@ -595,16 +711,9 @@ function PillsRouteComponent() {
         {
             title: 'Pill',
             key: 'name',
-            render: (_: unknown, row: PastPillRow) => (
-                <Button
-                    type='link'
-                    size='small'
-                    className='pills-link-button'
-                    icon={<EditOutlined />}
-                    onClick={() => openExistingPillDrawer(row.pill)}
-                >
-                    {row.pill.name}
-                </Button>
+            render: (_: unknown, row: PastPillRow) => renderPillNameCell(
+                row.pill,
+                row.period.tags.map(tag => tag.name),
             ),
         },
         {
@@ -655,17 +764,7 @@ function PillsRouteComponent() {
         {
             title: 'Pill',
             key: 'name',
-            render: (_: unknown, row: NotTrackedPillRow) => (
-                <Button
-                    type='link'
-                    size='small'
-                    className='pills-link-button'
-                    icon={<EditOutlined />}
-                    onClick={() => openExistingPillDrawer(row.pill)}
-                >
-                    {row.pill.name}
-                </Button>
-            ),
+            render: (_: unknown, row: NotTrackedPillRow) => renderPillNameCell(row.pill, []),
         },
         {
             title: 'Amount',
@@ -819,6 +918,7 @@ function PillsRouteComponent() {
 
                     setPillQuery('')
                     setHydratedEditPillId(null)
+                    setOpenPeriodTagEditorKey(null)
                     resetPillForm()
                 }}
                 destroyOnHidden={false}
@@ -1093,28 +1193,44 @@ function PillsRouteComponent() {
                                             ),
                                         },
                                         {
-                                            width: 110,
+                                            width: 170,
                                             render: (_: unknown, field) => {
-                                                const rowValue = form.getFieldValue(['periods', field.name]) as
+                                                const rowValue = watchedPeriods[field.name] as
                                                     | PillPeriodFormValue
                                                     | undefined
                                                 const isSavedRow = Boolean(rowValue?.id)
 
                                                 return (
-                                                    <Button
-                                                        size='small'
-                                                        danger
-                                                        icon={<DeleteOutlined />}
-                                                        loading={isSavedRow && deletingPeriodId === rowValue?.id}
-                                                        onClick={() => {
-                                                            if (isSavedRow && rowValue?.id) {
-                                                                void handleDeleteSavedPeriod(rowValue.id, field.name, remove)
-                                                                return
-                                                            }
+                                                    <Space size='small'>
+                                                        <Form.Item
+                                                            name={[field.name, 'tagNames']}
+                                                            hidden
+                                                            style={{ marginBottom: 0 }}
+                                                            getValueProps={value => ({
+                                                                value: value ?? [],
+                                                            })}
+                                                        >
+                                                            <Select mode='multiple' />
+                                                        </Form.Item>
 
-                                                            remove(field.name)
-                                                        }}
-                                                    />
+                                                        {renderPeriodTagEditor(field.name)}
+
+                                                        <Button
+                                                            size='small'
+                                                            danger
+                                                            icon={<DeleteOutlined />}
+                                                            loading={isSavedRow && deletingPeriodId === rowValue?.id}
+                                                            onClick={() => {
+                                                                if (isSavedRow && rowValue?.id) {
+                                                                    void handleDeleteSavedPeriod(rowValue.id, field.name, remove)
+                                                                    return
+                                                                }
+
+                                                                remove(field.name)
+                                                                setOpenPeriodTagEditorKey(null)
+                                                            }}
+                                                        />
+                                                    </Space>
                                                 )
                                             },
                                         },
@@ -1244,6 +1360,7 @@ function createBlankPeriod(defaults?: {
         valueOverride: defaults?.value ?? '',
         unitOverride: defaults?.unit ?? '',
         timing: defaults?.timing ?? 'random',
+        tagNames: [],
     }
 }
 
@@ -1290,6 +1407,7 @@ function getPillPeriodFormValues(pill: PillRecord) {
         valueOverride: period.valueOverride ?? pill.value ?? '',
         unitOverride: period.unitOverride ?? pill.unit ?? '',
         timing: period.timing ?? 'random',
+        tagNames: period.tags.map(tag => tag.name),
     }))
 }
 
@@ -1304,6 +1422,36 @@ function createEmptyFormValues(): PillFormValues {
         components: [{ name: '', value: '', unit: '' }],
         periods: [createBlankPeriod({ value: '', unit: '', timing: 'random' })],
     }
+}
+
+function getPeriodTagEditorKey(fieldIndex: number, period: PillPeriodFormValue | undefined) {
+    return period?.id ? `period-${period.id}` : `draft-${fieldIndex}`
+}
+
+function normalizeTagNames(values: string[]) {
+    const namesByKey = new Map<string, string>()
+
+    for (const rawValue of values) {
+        const value = rawValue.trim()
+        if (!value) {
+            continue
+        }
+
+        const key = value.toLocaleLowerCase()
+        if (!namesByKey.has(key)) {
+            namesByKey.set(key, value)
+        }
+    }
+
+    return [...namesByKey.values()]
+}
+
+function formatPeriodTagButtonTitle(tagNames: string[]) {
+    if (tagNames.length === 0) {
+        return 'Edit date range tags'
+    }
+
+    return `Tags: ${tagNames.join(', ')}`
 }
 
 function formatServing(value?: string | null, unit?: string | null) {

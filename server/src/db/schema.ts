@@ -179,6 +179,27 @@ export const pillPeriods = sqliteTable('pill_periods', {
     index('pill_periods_pill_start_idx').on(table.pillId, table.startDate, table.id),
 ]);
 
+export const tags = sqliteTable('tags', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    name: text('name').notNull(),
+    color: text('color').notNull(),
+    note: text('note'),
+    createdDate: text('created_date').notNull(),
+}, table => [
+    uniqueIndex('tags_name_idx').on(table.name),
+    index('tags_created_date_idx').on(table.createdDate),
+]);
+
+export const pillPeriodTags = sqliteTable('pill_period_tags', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    pillPeriodId: integer('pill_period_id').notNull().references(() => pillPeriods.id, { onDelete: 'cascade' }),
+    tagId: integer('tag_id').notNull().references(() => tags.id, { onDelete: 'cascade' }),
+}, table => [
+    uniqueIndex('pill_period_tags_period_tag_idx').on(table.pillPeriodId, table.tagId),
+    index('pill_period_tags_period_idx').on(table.pillPeriodId, table.id),
+    index('pill_period_tags_tag_idx').on(table.tagId, table.id),
+]);
+
 export const bloodworkReportsRelations = relations(bloodworkReports, ({ many }) => ({
     results: many(bloodworkResults),
     mergedSources: many(bloodworkMergedSources),
@@ -242,10 +263,26 @@ export const pillImagesRelations = relations(pillImages, ({ one }) => ({
     }),
 }));
 
-export const pillPeriodsRelations = relations(pillPeriods, ({ one }) => ({
+export const pillPeriodsRelations = relations(pillPeriods, ({ one, many }) => ({
     pill: one(pills, {
         fields: [pillPeriods.pillId],
         references: [pills.id],
+    }),
+    tagLinks: many(pillPeriodTags),
+}));
+
+export const tagsRelations = relations(tags, ({ many }) => ({
+    pillPeriodLinks: many(pillPeriodTags),
+}));
+
+export const pillPeriodTagsRelations = relations(pillPeriodTags, ({ one }) => ({
+    pillPeriod: one(pillPeriods, {
+        fields: [pillPeriodTags.pillPeriodId],
+        references: [pillPeriods.id],
+    }),
+    tag: one(tags, {
+        fields: [pillPeriodTags.tagId],
+        references: [tags.id],
     }),
 }));
 
@@ -265,6 +302,8 @@ export const appTables = {
     pillComponents,
     pillImages,
     pillPeriods,
+    tags,
+    pillPeriodTags,
 } as const;
 
 export const schema = {
@@ -279,6 +318,8 @@ export const schema = {
     pillComponentsRelations,
     pillImagesRelations,
     pillPeriodsRelations,
+    tagsRelations,
+    pillPeriodTagsRelations,
 };
 
 export type BloodworkReportRow = typeof bloodworkReports.$inferSelect;
@@ -292,3 +333,5 @@ export type PillRow = typeof pills.$inferSelect;
 export type PillComponentRow = typeof pillComponents.$inferSelect;
 export type PillImageRow = typeof pillImages.$inferSelect;
 export type PillPeriodRow = typeof pillPeriods.$inferSelect;
+export type TagRow = typeof tags.$inferSelect;
+export type PillPeriodTagRow = typeof pillPeriodTags.$inferSelect;

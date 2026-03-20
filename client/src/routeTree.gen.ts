@@ -9,10 +9,16 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as TagsRouteImport } from './routes/tags'
 import { Route as PillsRouteImport } from './routes/pills'
 import { Route as BloodworkRouteImport } from './routes/bloodwork'
 import { Route as IndexRouteImport } from './routes/index'
 
+const TagsRoute = TagsRouteImport.update({
+  id: '/tags',
+  path: '/tags',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PillsRoute = PillsRouteImport.update({
   id: '/pills',
   path: '/pills',
@@ -33,34 +39,45 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/bloodwork': typeof BloodworkRoute
   '/pills': typeof PillsRoute
+  '/tags': typeof TagsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/bloodwork': typeof BloodworkRoute
   '/pills': typeof PillsRoute
+  '/tags': typeof TagsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/bloodwork': typeof BloodworkRoute
   '/pills': typeof PillsRoute
+  '/tags': typeof TagsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/bloodwork' | '/pills'
+  fullPaths: '/' | '/bloodwork' | '/pills' | '/tags'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/bloodwork' | '/pills'
-  id: '__root__' | '/' | '/bloodwork' | '/pills'
+  to: '/' | '/bloodwork' | '/pills' | '/tags'
+  id: '__root__' | '/' | '/bloodwork' | '/pills' | '/tags'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   BloodworkRoute: typeof BloodworkRoute
   PillsRoute: typeof PillsRoute
+  TagsRoute: typeof TagsRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/tags': {
+      id: '/tags'
+      path: '/tags'
+      fullPath: '/tags'
+      preLoaderRoute: typeof TagsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/pills': {
       id: '/pills'
       path: '/pills'
@@ -89,6 +106,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   BloodworkRoute: BloodworkRoute,
   PillsRoute: PillsRoute,
+  TagsRoute: TagsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

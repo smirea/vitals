@@ -14,5 +14,7 @@ export type PillRecord = PillsDashboardPayload['pills'][number];
 export type PillComponent = PillRecord['components'][number];
 export type PillImage = PillRecord['images'][number];
 export type PillPeriod = PillRecord['periods'][number];
+export type PillTag = PillPeriod['tags'][number];
 export type PillSearchResult = RouterOutput['pills']['search'][number];
 export type PillExtractionResult = RouterOutput['pills']['extractFromImages'];
+export type TagRecord = RouterOutput['tags']['list'][number];

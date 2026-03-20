@@ -4,6 +4,7 @@ import {
     HomeOutlined,
     MedicineBoxOutlined,
     MoonOutlined,
+    TagsOutlined,
 } from '@ant-design/icons'
 import { Link, useRouterState } from '@tanstack/react-router'
 import { Menu, Switch, Typography, theme as antdTheme } from 'antd'
@@ -28,6 +29,12 @@ const navigationItems = [
         to: '/pills',
         label: 'Pills',
         icon: <ExperimentOutlined />,
+    },
+    {
+        key: '/tags',
+        to: '/tags',
+        label: 'Tags',
+        icon: <TagsOutlined />,
     },
 ] as const
 
