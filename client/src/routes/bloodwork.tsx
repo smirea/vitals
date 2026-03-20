@@ -404,7 +404,11 @@ function BloodworkPage() {
     )
 
     const tableScrollY = useMemo(
-        () => Math.max(viewport.height - (showSplitLayout ? 390 : 470), 320),
+        () => (
+            showSplitLayout
+                ? Math.max(viewport.height - 390, 320)
+                : Math.max(viewport.height, 420)
+        ),
         [showSplitLayout, viewport.height],
     )
 
@@ -474,7 +478,7 @@ function BloodworkPage() {
                     <span>Trend view</span>
                 </Flex>
             )}
-            styles={{ body: { padding: 16 } }}
+            styles={{ body: { padding: 12 } }}
         >
             {chartSeries.length > 0 ? (
                 <TrendChart series={chartSeries} orderedSources={chartSources} isMobile={isMobileViewport} />
@@ -485,7 +489,7 @@ function BloodworkPage() {
     )
 
     const tablePanel = (
-        <Flex vertical gap={16}>
+        <div>
             <CategoriesOverview items={categoryOverview} />
             <MeaningfulChanges items={sixMonthChanges} />
             <VitalsControls
@@ -517,14 +521,14 @@ function BloodworkPage() {
                 onToggleStar={onToggleStar}
                 onToggleOutOfRangeSourceFilter={onToggleOutOfRangeSourceFilter}
             />
-        </Flex>
+        </div>
     )
 
     return (
         <main
             style={{
                 minHeight: '100dvh',
-                padding: 16,
+                padding: 0,
                 background: token.colorBgLayout,
             }}
         >
