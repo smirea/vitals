@@ -1,18 +1,8 @@
 import { ChartLineUp } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { Alert, Empty, Spin, theme as antdTheme } from 'antd'
-import {
-    type ChangeEvent,
-    type CSSProperties,
-    useCallback,
-    useDeferredValue,
-    useEffect,
-    useLayoutEffect,
-    useMemo,
-    useRef,
-    useState,
-} from 'react'
+import { Alert, Card, Empty, Flex, Splitter, Spin, theme as antdTheme } from 'antd'
+import { type ChangeEvent, useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react'
 
 import { CategoriesOverview, MeaningfulChanges, TrendChart, VitalsControls, VitalsTable } from './bloodwork/_components'
 import {
@@ -37,15 +27,11 @@ import {
     getTableRows,
     getTableSources,
     getVisibleSources,
-} from './bloodwork/_bloodwork'
-import type { VitalsRowModel } from './bloodwork/_bloodwork'
-import {
     GROUP_BY_CATEGORY_STORAGE_KEY,
     MEASUREMENT_COLUMN_WIDTH,
     MIN_CHART_PANE_WIDTH,
     OUT_OF_RANGE_SOURCE_FILTERS_STORAGE_KEY,
     OVERVIEW_COLUMN_WIDTH,
-    RESIZER_WIDTH,
     readStoredGroupByCategory,
     readStoredOutOfRangeSourceFilterIds,
     readStoredSelectedRowKeys,
@@ -55,10 +41,10 @@ import {
     SOURCE_COLUMN_WIDTH,
     STARRED_MEASUREMENTS_STORAGE_KEY,
     clamp,
+    type VitalsRowModel,
 } from './bloodwork/_bloodwork'
 import type { BloodworkDashboardPayload } from '../utils/api'
 import { useTRPC } from '../utils/trpc'
-import './bloodwork/bloodwork.css'
 
 export const Route = createFileRoute('/bloodwork')({
     component: BloodworkPage,
@@ -77,10 +63,7 @@ function BloodworkPage() {
     const [dateRangeEnd, setDateRangeEnd] = useState('')
     const [groupByCategory, setGroupByCategory] = useState(() => readStoredGroupByCategory())
     const [outOfRangeSourceFilterIds, setOutOfRangeSourceFilterIds] = useState<string[]>(() => readStoredOutOfRangeSourceFilterIds())
-    const [tablePaneWidth, setTablePaneWidth] = useState(0)
-    const [isResizing, setIsResizing] = useState(false)
 
-    const workspaceRef = useRef<HTMLDivElement | null>(null)
     const deferredMeasurementFilter = useDeferredValue(measurementFilter)
     const starredMeasurementSet = useMemo(() => new Set(starredMeasurementKeys), [starredMeasurementKeys])
 
@@ -342,8 +325,8 @@ function BloodworkPage() {
         setDateRangeEnd(nextEndDate)
     }, [availableDates])
 
-    const onGroupByCategoryChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
-        setGroupByCategory(event.target.checked)
+    const onGroupByCategoryChange = useCallback((checked: boolean) => {
+        setGroupByCategory(checked)
     }, [])
 
     const onToggleRow = useCallback((key: string, checked: boolean) => {
@@ -410,63 +393,6 @@ function BloodworkPage() {
     const hasSelectedRows = selectedRows.length > 0
     const showSplitLayout = hasSelectedRows && !isMobileViewport
 
-    const clampTablePaneWidth = useCallback((nextWidth: number) => {
-        const workspace = workspaceRef.current
-        if (!workspace) return nextWidth
-
-        const totalWidth = workspace.getBoundingClientRect().width
-        const minTablePaneWidth = Math.max(340, Math.min(560, totalWidth * 0.4))
-        const maxTablePaneWidth = Math.max(minTablePaneWidth, totalWidth - MIN_CHART_PANE_WIDTH - RESIZER_WIDTH)
-
-        return clamp(nextWidth, minTablePaneWidth, maxTablePaneWidth)
-    }, [])
-
-    useLayoutEffect(() => {
-        if (!showSplitLayout) return
-        const workspace = workspaceRef.current
-        if (!workspace) return
-
-        const totalWidth = workspace.getBoundingClientRect().width
-        const preferredWidth = totalWidth * 0.66
-
-        setTablePaneWidth(previous => clampTablePaneWidth(previous > 0 ? previous : preferredWidth))
-    }, [clampTablePaneWidth, showSplitLayout, viewport.width])
-
-    useEffect(() => {
-        if (!showSplitLayout || !isResizing) return
-
-        const onMouseMove = (event: MouseEvent) => {
-            const workspace = workspaceRef.current
-            if (!workspace) return
-            const bounds = workspace.getBoundingClientRect()
-            setTablePaneWidth(clampTablePaneWidth(event.clientX - bounds.left))
-        }
-
-        const onMouseUp = () => setIsResizing(false)
-
-        window.addEventListener('mousemove', onMouseMove)
-        window.addEventListener('mouseup', onMouseUp)
-
-        return () => {
-            window.removeEventListener('mousemove', onMouseMove)
-            window.removeEventListener('mouseup', onMouseUp)
-        }
-    }, [clampTablePaneWidth, isResizing, showSplitLayout])
-
-    useEffect(() => {
-        if (!isResizing) return
-
-        const previousCursor = document.body.style.cursor
-        const previousUserSelect = document.body.style.userSelect
-        document.body.style.cursor = 'col-resize'
-        document.body.style.userSelect = 'none'
-
-        return () => {
-            document.body.style.cursor = previousCursor
-            document.body.style.userSelect = previousUserSelect
-        }
-    }, [isResizing])
-
     const tableScrollX = useMemo(
         () => (
             SELECTION_COLUMN_WIDTH +
@@ -477,14 +403,10 @@ function BloodworkPage() {
         [tableSources.length],
     )
 
-    const resolvedTablePaneWidth = useMemo(() => {
-        if (!showSplitLayout) {
-            return 0
-        }
-        const workspaceWidth = workspaceRef.current?.getBoundingClientRect().width ?? viewport.width
-        const preferredWidth = tablePaneWidth > 0 ? tablePaneWidth : workspaceWidth * 0.66
-        return clampTablePaneWidth(preferredWidth)
-    }, [clampTablePaneWidth, showSplitLayout, tablePaneWidth, viewport.width])
+    const tableScrollY = useMemo(
+        () => Math.max(viewport.height - (showSplitLayout ? 390 : 470), 320),
+        [showSplitLayout, viewport.height],
+    )
 
     const csvMeasurementRows = useMemo(
         () => tableRows.filter((row): row is VitalsRowModel => row.rowType === 'measurement'),
@@ -543,163 +465,116 @@ function BloodworkPage() {
         window.setTimeout(() => URL.revokeObjectURL(href), 0)
     }, [csvMeasurementRows, isDownloadCsvDisabled, measurementOverviewByKey, tableSources])
 
-    const chartContent = useMemo(() => (
-        chartSeries.length > 0
-            ? <TrendChart series={chartSeries} orderedSources={chartSources} isMobile={isMobileViewport} />
-            : (
-                <div>
-                    <Empty description='No numeric values in the selected rows for this date range.' />
-                </div>
-            )
-    ), [chartSeries, chartSources, isMobileViewport])
+    const chartCard = (
+        <Card
+            size='small'
+            title={(
+                <Flex align='center' gap={8}>
+                    <ChartLineUp size={18} weight='duotone' />
+                    <span>Trend view</span>
+                </Flex>
+            )}
+            styles={{ body: { padding: 16 } }}
+        >
+            {chartSeries.length > 0 ? (
+                <TrendChart series={chartSeries} orderedSources={chartSources} isMobile={isMobileViewport} />
+            ) : (
+                <Empty description='No numeric values in the selected rows for this date range.' />
+            )}
+        </Card>
+    )
 
-    const vitalsThemeStyle: CSSProperties = {
-        ['--vitals-bg-layout' as string]: token.colorBgLayout,
-        ['--vitals-bg-container' as string]: token.colorBgContainer,
-        ['--vitals-bg-subtle' as string]: token.colorFillAlter,
-        ['--vitals-bg-muted' as string]: token.colorFillSecondary,
-        ['--vitals-bg-hover' as string]: token.colorFillTertiary,
-        ['--vitals-bg-row-alt' as string]: token.colorFillQuaternary,
-        ['--vitals-border' as string]: token.colorBorder,
-        ['--vitals-border-secondary' as string]: token.colorBorderSecondary,
-        ['--vitals-text' as string]: token.colorText,
-        ['--vitals-text-secondary' as string]: token.colorTextSecondary,
-        ['--vitals-text-tertiary' as string]: token.colorTextTertiary,
-        ['--vitals-primary-bg' as string]: token.colorPrimaryBg,
-        ['--vitals-primary-bg-hover' as string]: token.colorPrimaryBgHover,
-        ['--vitals-primary-border' as string]: token.colorPrimaryBorder,
-        ['--vitals-success' as string]: token.colorSuccess,
-        ['--vitals-success-bg' as string]: token.colorSuccessBg,
-        ['--vitals-success-border' as string]: token.colorSuccessBorder,
-        ['--vitals-error' as string]: token.colorError,
-        ['--vitals-error-bg' as string]: token.colorErrorBg,
-        ['--vitals-error-bg-hover' as string]: token.colorErrorBgHover,
-        ['--vitals-error-border' as string]: token.colorErrorBorder,
-        ['--vitals-warning' as string]: token.colorWarning,
-        ['--vitals-warning-bg' as string]: token.colorWarningBg,
-        ['--vitals-warning-border' as string]: token.colorWarningBorder,
-        ['--vitals-white' as string]: token.colorWhite,
-    }
+    const tablePanel = (
+        <Flex vertical gap={16}>
+            <CategoriesOverview items={categoryOverview} />
+            <MeaningfulChanges items={sixMonthChanges} />
+            <VitalsControls
+                measurementFilter={measurementFilter}
+                onMeasurementFilterChange={onMeasurementFilterChange}
+                availableDates={availableDates}
+                dateRangeValue={dateRangeSliderValue}
+                onDateRangeSliderChange={onDateRangeSliderChange}
+                groupByCategory={groupByCategory}
+                onGroupByCategoryChange={onGroupByCategoryChange}
+                onDownloadCsv={onDownloadCsv}
+                isDownloadCsvDisabled={isDownloadCsvDisabled}
+            />
+            <VitalsTable
+                rows={tableRows}
+                tableSources={tableSources}
+                outOfRangeSourceFilterIdSet={outOfRangeSourceFilterIdSet}
+                outOfRangeMeasurementCountBySourceId={outOfRangeMeasurementCountBySourceId}
+                selectedRowKeySet={selectedRowKeySet}
+                categorySelectionByName={categorySelectionByName}
+                starredMeasurementSet={starredMeasurementSet}
+                measurementOverviewByKey={measurementOverviewByKey}
+                measurementRangesTooltipByKey={measurementRangesTooltipByKey}
+                tableScrollX={tableScrollX}
+                tableScrollY={tableScrollY}
+                onToggleRow={onToggleRow}
+                onToggleAllRows={onToggleAllRows}
+                onToggleCategory={onToggleCategory}
+                onToggleStar={onToggleStar}
+                onToggleOutOfRangeSourceFilter={onToggleOutOfRangeSourceFilter}
+            />
+        </Flex>
+    )
 
     return (
-        <main className='vitals-page' style={vitalsThemeStyle}>
+        <main
+            style={{
+                minHeight: '100dvh',
+                padding: 16,
+                background: token.colorBgLayout,
+            }}
+        >
             {dashboardQuery.isLoading ? (
-                <section
-                    style={{ borderColor: token.colorBorder, background: token.colorBgContainer }}
-                >
-                    <Spin size='large' />
-                </section>
+                <Card styles={{ body: { padding: 24 } }}>
+                    <Flex justify='center' align='center' style={{ minHeight: '50vh' }}>
+                        <Spin size='large' />
+                    </Flex>
+                </Card>
             ) : dashboardQuery.error ? (
                 <Alert
                     type='error'
                     showIcon
-                    title='Unable to load bloodwork data'
+                    message='Unable to load bloodwork data'
                     description={dashboardQuery.error.message}
                 />
             ) : !hasAnyData ? (
-                <section
-                    style={{ borderColor: token.colorBorder, background: token.colorBgContainer }}
+                <Card styles={{ body: { padding: 24 } }}>
+                    <Flex justify='center' align='center' style={{ minHeight: '50vh' }}>
+                        <Empty description='No bloodwork data found yet.' />
+                    </Flex>
+                </Card>
+            ) : showSplitLayout ? (
+                <Splitter
+                    style={{ height: Math.max(viewport.height - 32, 680) }}
+                    styles={{
+                        root: { height: Math.max(viewport.height - 32, 680) },
+                        panel: { overflow: 'hidden' },
+                        dragger: {
+                            default: { background: token.colorFillSecondary },
+                            active: { background: token.colorPrimary },
+                        },
+                    }}
                 >
-                    <Empty description='No bloodwork data found yet.' />
-                </section>
+                    <Splitter.Panel defaultSize='68%' min={560}>
+                        <div style={{ height: '100%', overflowY: 'auto', paddingRight: 12 }}>
+                            {tablePanel}
+                        </div>
+                    </Splitter.Panel>
+                    <Splitter.Panel min={MIN_CHART_PANE_WIDTH}>
+                        <div style={{ height: '100%', overflowY: 'auto', paddingLeft: 12 }}>
+                            {chartCard}
+                        </div>
+                    </Splitter.Panel>
+                </Splitter>
             ) : (
-                <>
-                    <section
-                        ref={workspaceRef}
-                        className='vitals-workspace'
-                        style={{
-                            gridTemplateColumns: showSplitLayout
-                                ? `${Math.round(resolvedTablePaneWidth)}px ${RESIZER_WIDTH}px minmax(${MIN_CHART_PANE_WIDTH}px, 1fr)`
-                                : '1fr',
-                        }}
-                    >
-                        <section
-                            style={{ borderColor: token.colorBorder, background: token.colorBgContainer }}
-                        >
-                            <CategoriesOverview items={categoryOverview} />
-                            <MeaningfulChanges items={sixMonthChanges} />
-
-                            <VitalsControls
-                                measurementFilter={measurementFilter}
-                                onMeasurementFilterChange={onMeasurementFilterChange}
-                                availableDates={availableDates}
-                                dateRangeValue={dateRangeSliderValue}
-                                onDateRangeSliderChange={onDateRangeSliderChange}
-                                groupByCategory={groupByCategory}
-                                onGroupByCategoryChange={onGroupByCategoryChange}
-                                onDownloadCsv={onDownloadCsv}
-                                isDownloadCsvDisabled={isDownloadCsvDisabled}
-                            />
-
-                            <VitalsTable
-                                rows={tableRows}
-                                tableSources={tableSources}
-                                outOfRangeSourceFilterIdSet={outOfRangeSourceFilterIdSet}
-                                outOfRangeMeasurementCountBySourceId={outOfRangeMeasurementCountBySourceId}
-                                selectedRowKeySet={selectedRowKeySet}
-                                categorySelectionByName={categorySelectionByName}
-                                starredMeasurementSet={starredMeasurementSet}
-                                measurementOverviewByKey={measurementOverviewByKey}
-                                measurementRangesTooltipByKey={measurementRangesTooltipByKey}
-                                tableScrollX={tableScrollX}
-                                onToggleRow={onToggleRow}
-                                onToggleAllRows={onToggleAllRows}
-                                onToggleCategory={onToggleCategory}
-                                onToggleStar={onToggleStar}
-                                onToggleOutOfRangeSourceFilter={onToggleOutOfRangeSourceFilter}
-                            />
-                        </section>
-
-                        {showSplitLayout && (
-                            <div
-                                role='separator'
-                                aria-label='Resize table and chart panels'
-                                aria-orientation='vertical'
-                                onMouseDown={event => {
-                                    event.preventDefault()
-                                    setIsResizing(true)
-                                }}
-                                style={{ background: token.colorFillSecondary }}
-                            >
-                                <span
-                                    style={{ background: token.colorTextTertiary }}
-                                />
-                            </div>
-                        )}
-
-                        {showSplitLayout && (
-                            <section
-                                style={{
-                                    borderColor: token.colorBorder,
-                                    background: token.colorBgContainer,
-                                    borderLeftWidth: 0,
-                                }}
-                            >
-                                <div
-                                    style={{ borderColor: token.colorBorder }}
-                                >
-                                    <ChartLineUp size={18} weight='duotone' />
-                                    <strong>Trend view</strong>
-                                </div>
-                                {chartContent}
-                            </section>
-                        )}
-                    </section>
-
-                    {hasSelectedRows && isMobileViewport && (
-                        <section
-                            style={{ borderColor: token.colorBorder, background: token.colorBgContainer }}
-                        >
-                            <div
-                                style={{ borderColor: token.colorBorder }}
-                            >
-                                <ChartLineUp size={18} weight='duotone' />
-                                <strong>Trend view</strong>
-                            </div>
-                            {chartContent}
-                        </section>
-                    )}
-                </>
+                <Flex vertical gap={16}>
+                    {tablePanel}
+                    {hasSelectedRows ? chartCard : null}
+                </Flex>
             )}
         </main>
     )

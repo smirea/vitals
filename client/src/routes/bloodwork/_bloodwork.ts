@@ -127,27 +127,6 @@ export type TrendChartDatum = {
     [key: string]: string | number | boolean | null;
 };
 
-export type SelectionState = {
-    selectedRowKeys: string[];
-    selectedRowKeySet: Set<string>;
-};
-
-export type VitalsViewModel = {
-    sources: SourceColumn[];
-    visibleSources: SourceColumn[];
-    chartSources: SourceColumn[];
-    tableSources: SourceColumn[];
-    allMeasurementRows: VitalsRowModel[];
-    filteredMeasurementRows: VitalsRowModel[];
-    tableRows: VitalsDisplayRow[];
-    measurementKeysByCategory: Map<string, string[]>;
-    categorySelectionByName: Map<string, CategorySelectionState>;
-    selectedRows: VitalsRowModel[];
-    measurementOverviewByKey: Map<string, MeasurementOverviewTally>;
-    measurementRangesTooltipByKey: Map<string, string>;
-    chartSeries: ChartSeriesModel[];
-};
-
 export const DATE_FORMATTER = new Intl.DateTimeFormat('en-US', {
     month: 'short',
     day: 'numeric',
@@ -155,7 +134,6 @@ export const DATE_FORMATTER = new Intl.DateTimeFormat('en-US', {
     timeZone: 'UTC',
 });
 
-export const RESIZER_WIDTH = 10;
 export const MIN_CHART_PANE_WIDTH = 300;
 export const SELECTION_COLUMN_WIDTH = 52;
 export const MEASUREMENT_COLUMN_WIDTH = 250;
