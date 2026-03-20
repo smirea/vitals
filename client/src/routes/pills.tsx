@@ -531,7 +531,6 @@ function PillsRouteComponent() {
         {
             title: 'Pill',
             key: 'name',
-            width: 220,
             render: (_: unknown, row: ActivePillRow) => (
                 <Button
                     type='link'
@@ -547,7 +546,6 @@ function PillsRouteComponent() {
         {
             title: 'Amount',
             key: 'amount',
-            width: 160,
             render: (_: unknown, row: ActivePillRow) => (
                 <Typography.Text>
                     {formatServing(
@@ -560,13 +558,11 @@ function PillsRouteComponent() {
         {
             title: 'Started',
             key: 'started',
-            width: 140,
             render: (_: unknown, row: ActivePillRow) => <Typography.Text>{row.activePeriod.startDate}</Typography.Text>,
         },
         {
             title: 'Components',
             key: 'components',
-            width: 360,
             render: (_: unknown, row: ActivePillRow) => renderComponents(row.pill.components),
             onCell: row =>
                 row.pill.components.length > 0
@@ -581,7 +577,6 @@ function PillsRouteComponent() {
         {
             title: 'Images',
             key: 'images',
-            width: 220,
             render: (_: unknown, row: ActivePillRow) => renderImages(row.pill.images),
         },
     ]
@@ -590,7 +585,6 @@ function PillsRouteComponent() {
         {
             title: 'Pill',
             key: 'name',
-            width: 220,
             render: (_: unknown, row: PastPillRow) => (
                 <Button
                     type='link'
@@ -606,7 +600,6 @@ function PillsRouteComponent() {
         {
             title: 'Amount',
             key: 'amount',
-            width: 160,
             render: (_: unknown, row: PastPillRow) => (
                 <Typography.Text>
                     {formatServing(row.period.valueOverride ?? row.pill.value, row.period.unitOverride ?? row.pill.unit)}
@@ -616,7 +609,6 @@ function PillsRouteComponent() {
         {
             title: 'Period',
             key: 'period',
-            width: 200,
             render: (_: unknown, row: PastPillRow) => (
                 <Typography.Text>{formatPeriodRange(row.period)}</Typography.Text>
             ),
@@ -624,7 +616,6 @@ function PillsRouteComponent() {
         {
             title: 'Components',
             key: 'components',
-            width: 360,
             render: (_: unknown, row: PastPillRow) => renderComponents(row.pill.components),
             onCell: row =>
                 row.pill.components.length > 0
@@ -639,7 +630,6 @@ function PillsRouteComponent() {
         {
             title: 'Images',
             key: 'images',
-            width: 220,
             render: (_: unknown, row: PastPillRow) => renderImages(row.pill.images),
         },
     ]
@@ -648,7 +638,6 @@ function PillsRouteComponent() {
         {
             title: 'Pill',
             key: 'name',
-            width: 220,
             render: (_: unknown, row: NotTrackedPillRow) => (
                 <Button
                     type='link'
@@ -664,7 +653,6 @@ function PillsRouteComponent() {
         {
             title: 'Amount',
             key: 'amount',
-            width: 160,
             render: (_: unknown, row: NotTrackedPillRow) => (
                 <Typography.Text>{formatServing(row.pill.value, row.pill.unit)}</Typography.Text>
             ),
@@ -672,7 +660,6 @@ function PillsRouteComponent() {
         {
             title: 'Components',
             key: 'components',
-            width: 360,
             render: (_: unknown, row: NotTrackedPillRow) => renderComponents(row.pill.components),
             onCell: row =>
                 row.pill.components.length > 0
@@ -687,7 +674,6 @@ function PillsRouteComponent() {
         {
             title: 'Images',
             key: 'images',
-            width: 220,
             render: (_: unknown, row: NotTrackedPillRow) => renderImages(row.pill.images),
         },
     ]
@@ -748,7 +734,6 @@ function PillsRouteComponent() {
                         dataSource={activeRows}
                         loading={dashboardQuery.isLoading}
                         pagination={false}
-                        scroll={{ x: 1500 }}
                         expandable={activeTableExpandable}
                         locale={{
                             emptyText: (
@@ -769,7 +754,6 @@ function PillsRouteComponent() {
                         dataSource={notTrackedRows}
                         loading={dashboardQuery.isLoading}
                         pagination={false}
-                        scroll={{ x: 1500 }}
                         expandable={notTrackedTableExpandable}
                         locale={{
                             emptyText: (
@@ -790,7 +774,6 @@ function PillsRouteComponent() {
                         dataSource={pastRows}
                         loading={dashboardQuery.isLoading}
                         pagination={false}
-                        scroll={{ x: 1500 }}
                         expandable={pastTableExpandable}
                         locale={{
                             emptyText: (
