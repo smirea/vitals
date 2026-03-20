@@ -22,7 +22,6 @@ import {
     Select,
     Space,
     Spin,
-    Statistic,
     Table,
     Typography,
     Upload,
@@ -43,6 +42,7 @@ import type {
     PillPeriod,
     PillRecord,
 } from '../utils/api'
+import { PageNav } from '../components/PageNav'
 import { useTRPC } from '../utils/trpc'
 
 const pillsSearchSchema = z.object({
@@ -213,7 +213,6 @@ function PillsRouteComponent() {
     const allPills = dashboard?.pills ?? []
     const activePills = dashboard?.activePills ?? []
     const pastPills = dashboard?.pastPills ?? []
-    const totals = dashboard?.totals ?? { all: 0, active: 0, past: 0 }
     const editedPill = useMemo(
         () => allPills.find(pill => pill.id === editPillId) ?? null,
         [allPills, editPillId],
@@ -721,42 +720,16 @@ function PillsRouteComponent() {
             className='pills-page'
             style={{ background: token.colorBgLayout }}
         >
+            <PageNav
+                title='Pills'
+                actions={(
+                    <Button type='primary' size='large' icon={<PlusOutlined />} onClick={openNewPillDrawer}>
+                        Log pill
+                    </Button>
+                )}
+            />
+
             <div className='pills-page-inner'>
-                <Card>
-                    <div className='pills-hero'>
-                        <div className='pills-hero-copy'>
-                            <Typography.Title level={2} className='pills-hero-title'>
-                                Pills
-                            </Typography.Title>
-                            <Typography.Paragraph
-                                className='pills-hero-description'
-                                style={{ color: token.colorTextSecondary }}
-                            >
-                                Log canonical pills, track every period they were taken, and keep the supplement
-                                facts plus label images together.
-                            </Typography.Paragraph>
-                        </div>
-
-                        <Button type='primary' size='large' icon={<PlusOutlined />} onClick={openNewPillDrawer}>
-                            Log pill
-                        </Button>
-                    </div>
-
-                    <Divider className='pills-section-divider' />
-
-                    <div className='pills-stats'>
-                        <Card size='small' style={{ background: token.colorFillAlter }}>
-                            <Statistic title='All Pills' value={totals.all} />
-                        </Card>
-                        <Card size='small' style={{ background: token.colorSuccessBg }}>
-                            <Statistic title='Active Pills' value={totals.active} />
-                        </Card>
-                        <Card size='small' style={{ background: token.colorFillAlter }}>
-                            <Statistic title='Past Pills' value={totals.past} />
-                        </Card>
-                    </div>
-                </Card>
-
                 <Card
                     title='Active pills'
                     extra={<Typography.Text type='secondary'>{activePills.length} rows</Typography.Text>}
