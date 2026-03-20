@@ -21,6 +21,7 @@ import {
     Form,
     Image,
     Input,
+    InputNumber,
     Popover,
     Select,
     Space,
@@ -82,8 +83,7 @@ type PillPeriodFormValue = {
     id?: number
     startDate?: string
     endDate?: string
-    valueOverride?: string
-    unitOverride?: string
+    count?: number
     timing?: PillTiming
     tagNames?: string[]
 }
@@ -149,8 +149,6 @@ function PillsRouteComponent() {
     const deferredPillQuery = useDeferredValue(pillQuery)
     const watchedFormValues = Form.useWatch([], form) as PillFormValues | undefined
     const watchedImages = (Form.useWatch('images', form) ?? []) as PillImageFormValue[]
-    const watchedDefaultValue = Form.useWatch('value', form) ?? ''
-    const watchedDefaultUnit = Form.useWatch('unit', form) ?? ''
     const watchedPeriods = (Form.useWatch('periods', form) ?? []) as PillPeriodFormValue[]
     const isEditMode = editPillId !== null
     const isDrawerRequestedOpen = isCreateDrawerOpen || isEditMode
@@ -302,30 +300,22 @@ function PillsRouteComponent() {
             return
         }
 
-        const latestDefaults = getNewPeriodDefaults({
-            canonicalValue: watchedDefaultValue,
-            canonicalUnit: watchedDefaultUnit,
-            periods: watchedPeriods,
-        })
-
         const nextPeriods = watchedPeriods.map(period => ({
             ...period,
-            valueOverride: period.valueOverride?.trim() ? period.valueOverride : latestDefaults.value,
-            unitOverride: period.unitOverride?.trim() ? period.unitOverride : latestDefaults.unit,
-            timing: period.timing ?? latestDefaults.timing,
+            count: normalizePeriodCount(period.count),
+            timing: period.timing ?? getNewPeriodDefaults({ periods: watchedPeriods }).timing,
         }))
 
         const hasChanged = nextPeriods.some(
             (period, index) =>
-                period.valueOverride !== watchedPeriods[index]?.valueOverride ||
-                period.unitOverride !== watchedPeriods[index]?.unitOverride ||
+                period.count !== watchedPeriods[index]?.count ||
                 period.timing !== watchedPeriods[index]?.timing,
         )
 
         if (hasChanged) {
             form.setFieldValue('periods', nextPeriods)
         }
-    }, [form, watchedDefaultUnit, watchedDefaultValue, watchedPeriods])
+    }, [form, watchedPeriods])
 
     useEffect(() => {
         if (!isDrawerOpen) {
@@ -512,6 +502,7 @@ function PillsRouteComponent() {
         const submittedPeriods = ((form.getFieldValue('periods') ?? values.periods) as PillPeriodFormValue[])
             .map(period => ({
                 ...period,
+                count: normalizePeriodCount(period.count),
                 tagNames: normalizeTagNames(period.tagNames ?? []),
             }))
 
@@ -554,8 +545,6 @@ function PillsRouteComponent() {
                 form.setFieldValue('periods', [
                     createBlankPeriod(
                         getNewPeriodDefaults({
-                            canonicalValue: form.getFieldValue('value') ?? '',
-                            canonicalUnit: form.getFieldValue('unit') ?? '',
                             periods: [],
                         }),
                     ),
@@ -682,8 +671,8 @@ function PillsRouteComponent() {
             render: (_: unknown, row: ActivePillRow) => (
                 <Typography.Text>
                     {formatServing(
-                        row.activePeriod.valueOverride ?? row.pill.value,
-                        row.activePeriod.unitOverride ?? row.pill.unit,
+                        multiplyServingValue(row.pill.value, row.activePeriod.count),
+                        row.pill.unit,
                     )}
                 </Typography.Text>
             ),
@@ -738,8 +727,8 @@ function PillsRouteComponent() {
             render: (_: unknown, row: FuturePillRow) => (
                 <Typography.Text>
                     {formatServing(
-                        row.futurePeriod.valueOverride ?? row.pill.value,
-                        row.futurePeriod.unitOverride ?? row.pill.unit,
+                        multiplyServingValue(row.pill.value, row.futurePeriod.count),
+                        row.pill.unit,
                     )}
                 </Typography.Text>
             ),
@@ -793,7 +782,7 @@ function PillsRouteComponent() {
             key: 'amount',
             render: (_: unknown, row: PastPillRow) => (
                 <Typography.Text>
-                    {formatServing(row.period.valueOverride ?? row.pill.value, row.period.unitOverride ?? row.pill.unit)}
+                    {formatServing(multiplyServingValue(row.pill.value, row.period.count), row.pill.unit)}
                 </Typography.Text>
             ),
         },
@@ -1251,28 +1240,20 @@ function PillsRouteComponent() {
                                             ),
                                         },
                                         {
-                                            title: 'Value',
-                                            width: 110,
-                                            render: (_: unknown, field) => (
-                                                <Form.Item
-                                                    name={[field.name, 'valueOverride']}
-                                                    rules={[{ required: true, message: 'Required' }]}
-                                                    style={{ marginBottom: 0 }}
-                                                >
-                                                    <Input placeholder='Amount' />
-                                                </Form.Item>
-                                            ),
-                                        },
-                                        {
-                                            title: 'Unit',
+                                            title: 'Count',
                                             width: 120,
                                             render: (_: unknown, field) => (
                                                 <Form.Item
-                                                    name={[field.name, 'unitOverride']}
+                                                    name={[field.name, 'count']}
                                                     rules={[{ required: true, message: 'Required' }]}
                                                     style={{ marginBottom: 0 }}
                                                 >
-                                                    <Input placeholder='Unit' />
+                                                    <InputNumber
+                                                        min={0.01}
+                                                        step={0.5}
+                                                        placeholder='Count'
+                                                        style={{ width: '100%' }}
+                                                    />
                                                 </Form.Item>
                                             ),
                                         },
@@ -1343,8 +1324,6 @@ function PillsRouteComponent() {
                                         add(
                                             createBlankPeriod(
                                                 getNewPeriodDefaults({
-                                                    canonicalValue: form.getFieldValue('value') ?? '',
-                                                    canonicalUnit: form.getFieldValue('unit') ?? '',
                                                     periods: (form.getFieldValue('periods') ?? []) as PillPeriodFormValue[],
                                                 }),
                                             ),
@@ -1449,15 +1428,12 @@ function getTodayDateString() {
 }
 
 function createBlankPeriod(defaults?: {
-    value?: string
-    unit?: string
     timing?: PillTiming
 }): PillPeriodFormValue {
     return {
         startDate: getTodayDateString(),
         endDate: '',
-        valueOverride: defaults?.value ?? '',
-        unitOverride: defaults?.unit ?? '',
+        count: 1,
         timing: defaults?.timing ?? 'random',
         tagNames: [],
     }
@@ -1478,22 +1454,16 @@ function getLatestTrackedPeriodDefaults(periods: PillPeriodFormValue[]) {
     }
 
     return {
-        value: latestPeriod.valueOverride?.trim() ?? '',
-        unit: latestPeriod.unitOverride?.trim() ?? '',
         timing: latestPeriod.timing ?? 'random',
     }
 }
 
 function getNewPeriodDefaults(args: {
-    canonicalValue?: string
-    canonicalUnit?: string
     periods?: PillPeriodFormValue[]
 }) {
     const latestTrackedPeriodDefaults = getLatestTrackedPeriodDefaults(args.periods ?? [])
 
     return {
-        value: latestTrackedPeriodDefaults?.value || args.canonicalValue?.trim() || '',
-        unit: latestTrackedPeriodDefaults?.unit || args.canonicalUnit?.trim() || '',
         timing: latestTrackedPeriodDefaults?.timing || 'random',
     }
 }
@@ -1503,8 +1473,7 @@ function getPillPeriodFormValues(pill: PillRecord) {
         id: period.id,
         startDate: period.startDate,
         endDate: period.endDate ?? '',
-        valueOverride: period.valueOverride ?? pill.value ?? '',
-        unitOverride: period.unitOverride ?? pill.unit ?? '',
+        count: normalizePeriodCount(period.count),
         timing: period.timing ?? 'random',
         tagNames: period.tags.map(tag => tag.name),
     }))
@@ -1519,7 +1488,7 @@ function createEmptyFormValues(): PillFormValues {
         note: '',
         images: [],
         components: [{ name: '', value: '', unit: '' }],
-        periods: [createBlankPeriod({ value: '', unit: '', timing: 'random' })],
+        periods: [createBlankPeriod({ timing: 'random' })],
     }
 }
 
@@ -1556,6 +1525,32 @@ function formatPeriodTagButtonTitle(tagNames: string[]) {
 function formatServing(value?: string | null, unit?: string | null) {
     const text = [value?.trim(), unit?.trim()].filter(Boolean).join(' ')
     return text || 'Not set'
+}
+
+function normalizePeriodCount(value: number | null | undefined) {
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 1
+}
+
+function formatNumericValue(value: number) {
+    return Number.isInteger(value) ? String(value) : Number(value.toFixed(4)).toString()
+}
+
+function multiplyServingValue(value: string | null | undefined, count: number | null | undefined) {
+    const trimmedValue = value?.trim() ?? ''
+    const normalizedCount = normalizePeriodCount(count)
+
+    if (!trimmedValue) {
+        return ''
+    }
+
+    const numericValue = Number(trimmedValue.replace(/,/g, ''))
+    if (!Number.isFinite(numericValue)) {
+        return normalizedCount === 1
+            ? trimmedValue
+            : `${formatNumericValue(normalizedCount)} × ${trimmedValue}`
+    }
+
+    return formatNumericValue(numericValue * normalizedCount)
 }
 
 function formatTiming(timing?: PillTiming | null) {
@@ -1639,8 +1634,6 @@ function pillToFormValues(
                 ...periodFormValues,
                 createBlankPeriod(
                     getNewPeriodDefaults({
-                        canonicalValue: pill.value ?? '',
-                        canonicalUnit: pill.unit ?? '',
                         periods: periodFormValues,
                     }),
                 ),

@@ -37,8 +37,7 @@ const pillPeriodInputSchema = z.object({
   id: z.number().int().positive().optional(),
   startDate: z.string().trim().optional().default(""),
   endDate: z.string().trim().optional().default(""),
-  valueOverride: z.string().trim().optional().default(""),
-  unitOverride: z.string().trim().optional().default(""),
+  count: z.number().positive().optional().default(1),
   timing: pillTimingSchema.default("random"),
   tagNames: z.array(z.string().trim()).max(50).default([]),
 });
@@ -176,18 +175,15 @@ function sanitizePillComponents(input: z.infer<typeof pillUpsertInputSchema>["co
 
 function sanitizePillPeriods(args: {
   input: z.infer<typeof pillUpsertInputSchema>["periods"];
-  defaultValue: string;
-  defaultUnit: string;
 }) {
-  const { input, defaultValue, defaultUnit } = args;
+  const { input } = args;
 
   return input
     .map((period) => ({
       id: period.id,
       startDate: period.startDate.trim(),
       endDate: normalizeOptionalText(period.endDate),
-      valueOverride: normalizeOptionalText(period.valueOverride) ?? defaultValue,
-      unitOverride: normalizeOptionalText(period.unitOverride) ?? defaultUnit,
+      count: period.count,
       timing: period.timing,
       tagNames: [...new Map(
         period.tagNames
@@ -200,8 +196,7 @@ function sanitizePillPeriods(args: {
       (period) =>
         period.startDate.length > 0 ||
         period.endDate !== null ||
-        period.valueOverride.length > 0 ||
-        period.unitOverride.length > 0 ||
+        period.count !== 1 ||
         period.timing !== "random" ||
         period.tagNames.length > 0,
     )
@@ -209,11 +204,8 @@ function sanitizePillPeriods(args: {
       if (!period.startDate) {
         throw new Error("Each saved pill period must include a start date.");
       }
-      if (!period.valueOverride) {
-        throw new Error("Each saved pill period must include a value.");
-      }
-      if (!period.unitOverride) {
-        throw new Error("Each saved pill period must include a unit.");
+      if (!Number.isFinite(period.count) || period.count <= 0) {
+        throw new Error("Each saved pill period must include a positive count.");
       }
       if (!period.timing) {
         throw new Error("Each saved pill period must include a timing.");
@@ -283,8 +275,7 @@ function buildPillsPayload(args: {
       id: number;
       startDate: string;
       endDate: string | null;
-      valueOverride: string | null;
-      unitOverride: string | null;
+      count: number;
       timing: z.infer<typeof pillTimingSchema>;
       tags: Array<{
         id: number;
@@ -349,8 +340,7 @@ function buildPillsPayload(args: {
       id: row.id,
       startDate: row.startDate,
       endDate: row.endDate,
-      valueOverride: row.valueOverride,
-      unitOverride: row.unitOverride,
+      count: row.count,
       timing: row.timing ?? "random",
       tags: periodTags.sort((left, right) => left.name.localeCompare(right.name)),
     });
@@ -516,8 +506,6 @@ export function upsertPill(db: VitalsDatabase, input: z.infer<typeof pillUpsertI
   const components = sanitizePillComponents(input.components);
   const periods = sanitizePillPeriods({
     input: input.periods,
-    defaultValue: normalizedValue,
-    defaultUnit: normalizedUnit,
   });
 
   if (periods.length === 0) {
@@ -634,8 +622,7 @@ export function upsertPill(db: VitalsDatabase, input: z.infer<typeof pillUpsertI
             .set({
               startDate: period.startDate,
               endDate: period.endDate,
-              valueOverride: period.valueOverride,
-              unitOverride: period.unitOverride,
+              count: period.count,
               timing: period.timing,
             })
             .where(eq(pillPeriods.id, period.id))
@@ -647,8 +634,7 @@ export function upsertPill(db: VitalsDatabase, input: z.infer<typeof pillUpsertI
               pillId,
               startDate: period.startDate,
               endDate: period.endDate,
-              valueOverride: period.valueOverride,
-              unitOverride: period.unitOverride,
+              count: period.count,
               timing: period.timing,
             })
             .returning({

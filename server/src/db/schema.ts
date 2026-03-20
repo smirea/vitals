@@ -172,8 +172,7 @@ export const pillPeriods = sqliteTable('pill_periods', {
     pillId: integer('pill_id').notNull().references(() => pills.id, { onDelete: 'cascade' }),
     startDate: text('start_date').notNull(),
     endDate: text('end_date'),
-    valueOverride: text('value_override'),
-    unitOverride: text('unit_override'),
+    count: real('count').notNull().default(1),
     timing: text('timing', { enum: pillTimingValues }).notNull().default('random'),
 }, table => [
     index('pill_periods_pill_start_idx').on(table.pillId, table.startDate, table.id),
