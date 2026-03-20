@@ -2,8 +2,11 @@ pre-commit:
   parallel: true
   commands:
     oxlint:
-      glob: "*.{js,ts,jsx,tsx}"
+      glob: '*.{js,ts,jsx,tsx}'
       run: bunx oxlint --fix {staged_files}
+      stage_fixed: true
+    oxfmt:
+      run: bunx oxfmt --ignore-path .oxfmtignore --no-error-on-unmatched-pattern {staged_files}
       stage_fixed: true
     typecheck:
       run: bunx --bun tsgo --noEmit
