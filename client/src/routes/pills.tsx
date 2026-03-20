@@ -30,6 +30,7 @@ import {
 } from 'antd'
 import type { FormInstance, TableColumnsType } from 'antd'
 import type { UploadChangeParam, UploadFile, UploadProps } from 'antd/es/upload/interface'
+import { formatDistanceToNow, parseISO } from 'date-fns'
 import dayjs from 'dayjs'
 import type { Key } from 'react'
 import { useDeferredValue, useEffect, useMemo, useState } from 'react'
@@ -556,9 +557,18 @@ function PillsRouteComponent() {
             ),
         },
         {
+            title: 'Timing',
+            key: 'timing',
+            render: (_: unknown, row: ActivePillRow) => (
+                <Typography.Text>{formatTiming(row.activePeriod.timing)}</Typography.Text>
+            ),
+        },
+        {
             title: 'Started',
             key: 'started',
-            render: (_: unknown, row: ActivePillRow) => <Typography.Text>{row.activePeriod.startDate}</Typography.Text>,
+            render: (_: unknown, row: ActivePillRow) => (
+                <Typography.Text>{formatRelativeDate(row.activePeriod.startDate)}</Typography.Text>
+            ),
         },
         {
             title: 'Components',
@@ -604,6 +614,13 @@ function PillsRouteComponent() {
                 <Typography.Text>
                     {formatServing(row.period.valueOverride ?? row.pill.value, row.period.unitOverride ?? row.pill.unit)}
                 </Typography.Text>
+            ),
+        },
+        {
+            title: 'Timing',
+            key: 'timing',
+            render: (_: unknown, row: PastPillRow) => (
+                <Typography.Text>{formatTiming(row.period.timing)}</Typography.Text>
             ),
         },
         {
@@ -656,6 +673,11 @@ function PillsRouteComponent() {
             render: (_: unknown, row: NotTrackedPillRow) => (
                 <Typography.Text>{formatServing(row.pill.value, row.pill.unit)}</Typography.Text>
             ),
+        },
+        {
+            title: 'Timing',
+            key: 'timing',
+            render: () => <Typography.Text />,
         },
         {
             title: 'Components',
@@ -1289,6 +1311,14 @@ function formatServing(value?: string | null, unit?: string | null) {
     return text || 'Not set'
 }
 
+function formatTiming(timing?: PillTiming | null) {
+    if (!timing || timing === 'random') {
+        return ''
+    }
+
+    return timing.charAt(0).toUpperCase() + timing.slice(1)
+}
+
 function getActivePeriod(pill: PillRecord) {
     const today = getTodayDateString()
 
@@ -1544,4 +1574,12 @@ function renderImages(images: PillImage[]) {
             </div>
         </Image.PreviewGroup>
     )
+}
+
+function formatRelativeDate(value: string) {
+    try {
+        return formatDistanceToNow(parseISO(value), { addSuffix: true })
+    } catch {
+        return value
+    }
 }
