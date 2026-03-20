@@ -7,10 +7,10 @@ import { createRouter } from './shared.ts';
 export { createTrpcContext, publicProcedure } from './shared.ts';
 
 export const appRouter = createRouter({
-    bloodwork: bloodworkRouter,
-    pills: pillsRouter,
-    tags: tagsRouter,
-    table: tableRouter,
+	bloodwork: bloodworkRouter,
+	pills: pillsRouter,
+	tags: tagsRouter,
+	table: tableRouter,
 });
 
 export type AppRouter = typeof appRouter;

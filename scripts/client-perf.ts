@@ -4,23 +4,23 @@ import path from 'path';
 import { createScript } from './createScript.ts';
 
 type PerfRunResult = {
-    selectMs: number;
-    unselectMs: number;
-    ungroupMs: number;
-    regroupMs: number;
-    shortFilterMs: number;
-    clearFilterMs: number;
-    longTaskMaxMs: number;
-    longTaskTotalMs: number;
+	selectMs: number;
+	unselectMs: number;
+	ungroupMs: number;
+	regroupMs: number;
+	shortFilterMs: number;
+	clearFilterMs: number;
+	longTaskMaxMs: number;
+	longTaskTotalMs: number;
 };
 
 type PerfSummary = {
-    runs: number;
-    threshold: number;
-    medians: PerfRunResult;
-    p90: PerfRunResult;
-    max: PerfRunResult;
-    pass: boolean;
+	runs: number;
+	threshold: number;
+	medians: PerfRunResult;
+	p90: PerfRunResult;
+	max: PerfRunResult;
+	pass: boolean;
 };
 
 const PERF_PROBE_CODE = `async page => {
@@ -136,226 +136,235 @@ const PERF_PROBE_CODE = `async page => {
 }`;
 
 function parseArgs(argv: string[]) {
-    const values: Record<string, string> = {};
+	const values: Record<string, string> = {};
 
-    for (let index = 0; index < argv.length; index += 1) {
-        const token = argv[index];
-        if (!token.startsWith('--')) continue;
+	for (let index = 0; index < argv.length; index += 1) {
+		const token = argv[index];
+		if (!token.startsWith('--')) continue;
 
-        const maybeValue = argv[index + 1];
-        if (!maybeValue || maybeValue.startsWith('--')) {
-            values[token.slice(2)] = 'true';
-            continue;
-        }
+		const maybeValue = argv[index + 1];
+		if (!maybeValue || maybeValue.startsWith('--')) {
+			values[token.slice(2)] = 'true';
+			continue;
+		}
 
-        values[token.slice(2)] = maybeValue;
-        index += 1;
-    }
+		values[token.slice(2)] = maybeValue;
+		index += 1;
+	}
 
-    return {
-        url: values.url ?? 'http://localhost:3000',
-        runs: Number(values.runs ?? 10),
-        threshold: Number(values.threshold ?? 250),
-        session: values.session ?? `vitals-perf-${Date.now()}`,
-        jsonOnly: values.json === 'true',
-    };
+	return {
+		url: values.url ?? 'http://localhost:3000',
+		runs: Number(values.runs ?? 10),
+		threshold: Number(values.threshold ?? 250),
+		session: values.session ?? `vitals-perf-${Date.now()}`,
+		jsonOnly: values.json === 'true',
+	};
 }
 
 function runPwCli({
-    pwcli,
-    session,
-    args,
+	pwcli,
+	session,
+	args,
 }: {
-    pwcli: string;
-    session: string;
-    args: string[];
+	pwcli: string;
+	session: string;
+	args: string[];
 }): string {
-    const command = [pwcli, '--session', session, ...args];
-    const proc = Bun.spawnSync(command, {
-        stdout: 'pipe',
-        stderr: 'pipe',
-        stdin: 'ignore',
-        cwd: process.cwd(),
-        env: process.env,
-    });
+	const command = [pwcli, '--session', session, ...args];
+	const proc = Bun.spawnSync(command, {
+		stdout: 'pipe',
+		stderr: 'pipe',
+		stdin: 'ignore',
+		cwd: process.cwd(),
+		env: process.env,
+	});
 
-    const stdout = proc.stdout.toString();
-    const stderr = proc.stderr.toString();
+	const stdout = proc.stdout.toString();
+	const stderr = proc.stderr.toString();
 
-    if (proc.exitCode !== 0) {
-        throw new Error([
-            `Playwright CLI command failed: ${command.join(' ')}`,
-            stdout.trim(),
-            stderr.trim(),
-        ].filter(Boolean).join('\n'));
-    }
+	if (proc.exitCode !== 0) {
+		throw new Error(
+			[`Playwright CLI command failed: ${command.join(' ')}`, stdout.trim(), stderr.trim()]
+				.filter(Boolean)
+				.join('\n'),
+		);
+	}
 
-    return stdout;
+	return stdout;
 }
 
 function parseResultJson(output: string): PerfRunResult {
-    const match = output.match(/### Result\n([\s\S]*?)\n### Ran Playwright code/);
-    if (!match?.[1]) {
-        throw new Error(`Could not parse result from Playwright output:\n${output}`);
-    }
+	const match = output.match(/### Result\n([\s\S]*?)\n### Ran Playwright code/);
+	if (!match?.[1]) {
+		throw new Error(`Could not parse result from Playwright output:\n${output}`);
+	}
 
-    return JSON.parse(match[1]) as PerfRunResult;
+	return JSON.parse(match[1]) as PerfRunResult;
 }
 
 function median(values: number[]): number {
-    if (values.length === 0) return 0;
-    const sorted = [...values].sort((left, right) => left - right);
-    const middle = Math.floor(sorted.length / 2);
-    if (sorted.length % 2 === 0) {
-        return (sorted[middle - 1] + sorted[middle]) / 2;
-    }
-    return sorted[middle];
+	if (values.length === 0) return 0;
+	const sorted = [...values].sort((left, right) => left - right);
+	const middle = Math.floor(sorted.length / 2);
+	if (sorted.length % 2 === 0) {
+		return (sorted[middle - 1] + sorted[middle]) / 2;
+	}
+	return sorted[middle];
 }
 
 function percentile(values: number[], pct: number): number {
-    if (values.length === 0) return 0;
-    const sorted = [...values].sort((left, right) => left - right);
-    const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil((pct / 100) * sorted.length) - 1));
-    return sorted[index] ?? 0;
+	if (values.length === 0) return 0;
+	const sorted = [...values].sort((left, right) => left - right);
+	const index = Math.min(
+		sorted.length - 1,
+		Math.max(0, Math.ceil((pct / 100) * sorted.length) - 1),
+	);
+	return sorted[index] ?? 0;
 }
 
 function maxValue(values: number[]): number {
-    return values.length > 0 ? Math.max(...values) : 0;
+	return values.length > 0 ? Math.max(...values) : 0;
 }
 
 function summarize(results: PerfRunResult[], threshold: number): PerfSummary {
-    const metricKeys = Object.keys(results[0] ?? {
-        selectMs: 0,
-        unselectMs: 0,
-        ungroupMs: 0,
-        regroupMs: 0,
-        shortFilterMs: 0,
-        clearFilterMs: 0,
-        longTaskMaxMs: 0,
-        longTaskTotalMs: 0,
-    }) as Array<keyof PerfRunResult>;
+	const metricKeys = Object.keys(
+		results[0] ?? {
+			selectMs: 0,
+			unselectMs: 0,
+			ungroupMs: 0,
+			regroupMs: 0,
+			shortFilterMs: 0,
+			clearFilterMs: 0,
+			longTaskMaxMs: 0,
+			longTaskTotalMs: 0,
+		},
+	) as Array<keyof PerfRunResult>;
 
-    const medians = {} as PerfRunResult;
-    const p90 = {} as PerfRunResult;
-    const max = {} as PerfRunResult;
+	const medians = {} as PerfRunResult;
+	const p90 = {} as PerfRunResult;
+	const max = {} as PerfRunResult;
 
-    for (const key of metricKeys) {
-        const values = results.map(result => result[key]);
-        medians[key] = Number(median(values).toFixed(1));
-        p90[key] = Number(percentile(values, 90).toFixed(1));
-        max[key] = Number(maxValue(values).toFixed(1));
-    }
+	for (const key of metricKeys) {
+		const values = results.map(result => result[key]);
+		medians[key] = Number(median(values).toFixed(1));
+		p90[key] = Number(percentile(values, 90).toFixed(1));
+		max[key] = Number(maxValue(values).toFixed(1));
+	}
 
-    const gatedKeys: Array<keyof PerfRunResult> = [
-        'selectMs',
-        'unselectMs',
-        'regroupMs',
-        'shortFilterMs',
-        'clearFilterMs',
-    ];
+	const gatedKeys: Array<keyof PerfRunResult> = [
+		'selectMs',
+		'unselectMs',
+		'regroupMs',
+		'shortFilterMs',
+		'clearFilterMs',
+	];
 
-    const pass = gatedKeys.every(key => medians[key] < threshold);
+	const pass = gatedKeys.every(key => medians[key] < threshold);
 
-    return {
-        runs: results.length,
-        threshold,
-        medians,
-        p90,
-        max,
-        pass,
-    };
+	return {
+		runs: results.length,
+		threshold,
+		medians,
+		p90,
+		max,
+		pass,
+	};
 }
 
 function printSummary(summary: PerfSummary) {
-    const lines = [
-        `Perf summary (${summary.runs} runs, threshold ${summary.threshold}ms):`,
-        `  median  select=${summary.medians.selectMs}  unselect=${summary.medians.unselectMs}  regroup=${summary.medians.regroupMs}  shortFilter=${summary.medians.shortFilterMs}  clearFilter=${summary.medians.clearFilterMs}`,
-        `  p90     select=${summary.p90.selectMs}  unselect=${summary.p90.unselectMs}  regroup=${summary.p90.regroupMs}  shortFilter=${summary.p90.shortFilterMs}  clearFilter=${summary.p90.clearFilterMs}`,
-        `  longTask median max=${summary.medians.longTaskMaxMs} total=${summary.medians.longTaskTotalMs}`,
-        `  result: ${summary.pass ? 'PASS' : 'FAIL'}`,
-    ];
+	const lines = [
+		`Perf summary (${summary.runs} runs, threshold ${summary.threshold}ms):`,
+		`  median  select=${summary.medians.selectMs}  unselect=${summary.medians.unselectMs}  regroup=${summary.medians.regroupMs}  shortFilter=${summary.medians.shortFilterMs}  clearFilter=${summary.medians.clearFilterMs}`,
+		`  p90     select=${summary.p90.selectMs}  unselect=${summary.p90.unselectMs}  regroup=${summary.p90.regroupMs}  shortFilter=${summary.p90.shortFilterMs}  clearFilter=${summary.p90.clearFilterMs}`,
+		`  longTask median max=${summary.medians.longTaskMaxMs} total=${summary.medians.longTaskTotalMs}`,
+		`  result: ${summary.pass ? 'PASS' : 'FAIL'}`,
+	];
 
-    for (const line of lines) {
-        console.log(line);
-    }
+	for (const line of lines) {
+		console.log(line);
+	}
 }
 
 async function ensureUrlIsReachable(url: string) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3000);
+	const controller = new AbortController();
+	const timeout = setTimeout(() => controller.abort(), 3000);
 
-    try {
-        const response = await fetch(url, {
-            method: 'GET',
-            signal: controller.signal,
-        });
-        if (!response.ok) {
-            throw new Error(`Received HTTP ${response.status}`);
-        }
-    } finally {
-        clearTimeout(timeout);
-    }
+	try {
+		const response = await fetch(url, {
+			method: 'GET',
+			signal: controller.signal,
+		});
+		if (!response.ok) {
+			throw new Error(`Received HTTP ${response.status}`);
+		}
+	} finally {
+		clearTimeout(timeout);
+	}
 }
 
 await createScript(async () => {
-    const args = parseArgs(process.argv.slice(2));
+	const args = parseArgs(process.argv.slice(2));
 
-    if (!Number.isFinite(args.runs) || args.runs <= 0) {
-        throw new Error(`Invalid --runs value: ${args.runs}`);
-    }
+	if (!Number.isFinite(args.runs) || args.runs <= 0) {
+		throw new Error(`Invalid --runs value: ${args.runs}`);
+	}
 
-    if (!Number.isFinite(args.threshold) || args.threshold <= 0) {
-        throw new Error(`Invalid --threshold value: ${args.threshold}`);
-    }
+	if (!Number.isFinite(args.threshold) || args.threshold <= 0) {
+		throw new Error(`Invalid --threshold value: ${args.threshold}`);
+	}
 
-    const codexHome = process.env.CODEX_HOME ?? path.join(process.env.HOME ?? '', '.codex');
-    const pwcli = path.join(codexHome, 'skills', 'playwright', 'scripts', 'playwright_cli.sh');
+	const codexHome = process.env.CODEX_HOME ?? path.join(process.env.HOME ?? '', '.codex');
+	const pwcli = path.join(codexHome, 'skills', 'playwright', 'scripts', 'playwright_cli.sh');
 
-    if (!fs.existsSync(pwcli)) {
-        throw new Error(`Playwright CLI wrapper not found at ${pwcli}`);
-    }
+	if (!fs.existsSync(pwcli)) {
+		throw new Error(`Playwright CLI wrapper not found at ${pwcli}`);
+	}
 
-    await ensureUrlIsReachable(args.url);
+	await ensureUrlIsReachable(args.url);
 
-    runPwCli({
-        pwcli,
-        session: args.session,
-        args: ['open', args.url],
-    });
+	runPwCli({
+		pwcli,
+		session: args.session,
+		args: ['open', args.url],
+	});
 
-    const runResults: PerfRunResult[] = [];
+	const runResults: PerfRunResult[] = [];
 
-    try {
-        for (let index = 0; index < args.runs; index += 1) {
-            const output = runPwCli({
-                pwcli,
-                session: args.session,
-                args: ['run-code', PERF_PROBE_CODE],
-            });
-            const parsed = parseResultJson(output);
-            runResults.push(parsed);
-            if (!args.jsonOnly) {
-                const runId = String(index + 1).padStart(2, '0');
-                console.log(`run ${runId}: select=${parsed.selectMs.toFixed(1)} regroup=${parsed.regroupMs.toFixed(1)} filter=${parsed.shortFilterMs.toFixed(1)} clear=${parsed.clearFilterMs.toFixed(1)} longTaskMax=${parsed.longTaskMaxMs.toFixed(1)}`);
-            }
-        }
-    } finally {
-        runPwCli({
-            pwcli,
-            session: args.session,
-            args: ['close'],
-        });
-    }
+	try {
+		for (let index = 0; index < args.runs; index += 1) {
+			const output = runPwCli({
+				pwcli,
+				session: args.session,
+				args: ['run-code', PERF_PROBE_CODE],
+			});
+			const parsed = parseResultJson(output);
+			runResults.push(parsed);
+			if (!args.jsonOnly) {
+				const runId = String(index + 1).padStart(2, '0');
+				console.log(
+					`run ${runId}: select=${parsed.selectMs.toFixed(1)} regroup=${parsed.regroupMs.toFixed(1)} filter=${parsed.shortFilterMs.toFixed(1)} clear=${parsed.clearFilterMs.toFixed(1)} longTaskMax=${parsed.longTaskMaxMs.toFixed(1)}`,
+				);
+			}
+		}
+	} finally {
+		runPwCli({
+			pwcli,
+			session: args.session,
+			args: ['close'],
+		});
+	}
 
-    const summary = summarize(runResults, args.threshold);
+	const summary = summarize(runResults, args.threshold);
 
-    if (args.jsonOnly) {
-        console.log(JSON.stringify(summary, null, 2));
-    } else {
-        printSummary(summary);
-    }
+	if (args.jsonOnly) {
+		console.log(JSON.stringify(summary, null, 2));
+	} else {
+		printSummary(summary);
+	}
 
-    if (!summary.pass) {
-        throw new Error(`Performance gate failed: median metrics exceeded ${args.threshold}ms threshold`);
-    }
+	if (!summary.pass) {
+		throw new Error(
+			`Performance gate failed: median metrics exceeded ${args.threshold}ms threshold`,
+		);
+	}
 });

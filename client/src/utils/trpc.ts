@@ -7,24 +7,24 @@ import type { AppRouter } from 'server/trpc/index.ts';
 export const { TRPCProvider, useTRPC, useTRPCClient } = createTRPCContext<AppRouter>();
 
 export function createQueryClient() {
-    return new QueryClient({
-        defaultOptions: {
-            queries: {
-                staleTime: 60_000,
-                refetchOnWindowFocus: false,
-            },
-        },
-    });
+	return new QueryClient({
+		defaultOptions: {
+			queries: {
+				staleTime: 60_000,
+				refetchOnWindowFocus: false,
+			},
+		},
+	});
 }
 
 export function createBrowserTrpcClient() {
-    const apiBaseUrl = import.meta.env.VITE_API_URL?.trim();
+	const apiBaseUrl = import.meta.env.VITE_API_URL?.trim();
 
-    return createTRPCClient<AppRouter>({
-        links: [
-            httpBatchLink({
-                url: apiBaseUrl ? `${apiBaseUrl}/trpc` : '/trpc',
-            }),
-        ],
-    });
+	return createTRPCClient<AppRouter>({
+		links: [
+			httpBatchLink({
+				url: apiBaseUrl ? `${apiBaseUrl}/trpc` : '/trpc',
+			}),
+		],
+	});
 }

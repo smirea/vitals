@@ -3,9 +3,9 @@ import { initTRPC } from '@trpc/server';
 import { getDatabase } from 'server/db/client.ts';
 
 export function createTrpcContext() {
-    return {
-        db: getDatabase(),
-    };
+	return {
+		db: getDatabase(),
+	};
 }
 
 type TrpcContext = ReturnType<typeof createTrpcContext>;

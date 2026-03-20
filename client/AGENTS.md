@@ -16,6 +16,7 @@ If a route gets too large, give that route its own folder and extract only the m
 Use `_`-prefixed files for non-route helpers that should stay colocated but be ignored by TanStack Router.
 
 A good split is:
+
 - route file for the page entry
 - one route-local data/model file if needed
 - one route-local components file if needed

@@ -1,469 +1,469 @@
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap');
 
 :root {
-    --font-body: 'IBM Plex Sans', 'Segoe UI', sans-serif;
-    font-family: var(--font-body);
+	--font-body: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+	font-family: var(--font-body);
 }
 
 * {
-    box-sizing: border-box;
+	box-sizing: border-box;
 }
 
 html,
 body,
 #root {
-    margin: 0;
-    width: 100%;
-    min-height: 100%;
-    font-family: var(--font-body);
+	margin: 0;
+	width: 100%;
+	min-height: 100%;
+	font-family: var(--font-body);
 }
 
 .app-shell {
-    min-height: 100vh;
+	min-height: 100vh;
 }
 
 .app-shell-sider {
-    position: sticky;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    align-self: flex-start;
-    height: 100vh;
-    overflow: hidden;
+	position: sticky;
+	top: 0;
+	bottom: 0;
+	left: 0;
+	align-self: flex-start;
+	height: 100vh;
+	overflow: hidden;
 }
 
 .app-main-layout {
-    min-width: 0;
-    min-height: 100vh;
+	min-width: 0;
+	min-height: 100vh;
 }
 
 .app-main-content {
-    min-width: 0;
-    min-height: 0;
+	min-width: 0;
+	min-height: 0;
 }
 
 .app-nav {
-    position: relative;
-    display: flex;
-    height: 100%;
-    flex-direction: column;
+	position: relative;
+	display: flex;
+	height: 100%;
+	flex-direction: column;
 }
 
 .app-nav-header {
-    padding: 16px 20px;
+	padding: 16px 20px;
 }
 
 .app-nav-title.ant-typography {
-    margin-bottom: 4px;
+	margin-bottom: 4px;
 }
 
 .app-nav-menu {
-    flex: 1;
-    padding-top: 12px;
-    padding-bottom: 96px;
-    border-inline-end: 0;
+	flex: 1;
+	padding-top: 12px;
+	padding-bottom: 96px;
+	border-inline-end: 0;
 }
 
 .app-nav-link {
-    display: block;
-    width: 100%;
-    color: inherit;
-    text-decoration: none;
+	display: block;
+	width: 100%;
+	color: inherit;
+	text-decoration: none;
 }
 
 .app-nav-footer {
-    position: absolute;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 16px 20px;
+	position: absolute;
+	right: 0;
+	bottom: 0;
+	left: 0;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 16px 20px;
 }
 
 .app-nav-footer-copy {
-    min-width: 0;
+	min-width: 0;
 }
 
 .home-page {
-    display: flex;
-    min-height: 100%;
-    height: 100%;
-    align-items: center;
-    justify-content: center;
-    padding: 32px;
+	display: flex;
+	min-height: 100%;
+	height: 100%;
+	align-items: center;
+	justify-content: center;
+	padding: 32px;
 }
 
 .home-card {
-    width: 100%;
-    max-width: 42rem;
+	width: 100%;
+	max-width: 42rem;
 }
 
 .home-card-content {
-    display: flex;
-    align-items: flex-start;
-    gap: 16px;
+	display: flex;
+	align-items: flex-start;
+	gap: 16px;
 }
 
 .home-icon-shell {
-    border-radius: 12px;
-    padding: 12px;
+	border-radius: 12px;
+	padding: 12px;
 }
 
 .home-icon {
-    font-size: 32px;
+	font-size: 32px;
 }
 
 .home-copy {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
 }
 
 .home-copy-title.ant-typography,
 .home-copy-body.ant-typography {
-    margin-bottom: 0;
+	margin-bottom: 0;
 }
 
 .pills-page {
-    height: 100%;
-    overflow: auto;
+	height: 100%;
+	overflow: auto;
 }
 
 .pills-page-inner {
-    display: flex;
-    max-width: 1800px;
-    margin: 0 auto;
-    padding: 24px;
-    flex-direction: column;
-    gap: 24px;
+	display: flex;
+	max-width: 1800px;
+	margin: 0 auto;
+	padding: 24px;
+	flex-direction: column;
+	gap: 24px;
 }
 
 .page-nav {
-    position: sticky;
-    top: 0;
-    z-index: 10;
-    backdrop-filter: blur(12px);
+	position: sticky;
+	top: 0;
+	z-index: 10;
+	backdrop-filter: blur(12px);
 }
 
 .page-nav-inner {
-    position: relative;
-    display: flex;
-    max-width: 1800px;
-    margin: 0 auto;
-    align-items: center;
-    padding: 1rem 24px;
+	position: relative;
+	display: flex;
+	max-width: 1800px;
+	margin: 0 auto;
+	align-items: center;
+	padding: 1rem 24px;
 }
 
 .page-nav-title-shell {
-    min-width: 0;
-    padding-right: clamp(160px, 24vw, 320px);
+	min-width: 0;
+	padding-right: clamp(160px, 24vw, 320px);
 }
 
 .page-nav-title.ant-typography {
-    margin: 0;
-    font-size: 14px;
-    line-height: 1.25;
+	margin: 0;
+	font-size: 14px;
+	line-height: 1.25;
 }
 
 .page-nav-actions {
-    position: absolute;
-    top: 50%;
-    right: 24px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    transform: translateY(-50%);
+	position: absolute;
+	top: 50%;
+	right: 24px;
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	transform: translateY(-50%);
 }
 
 .pills-image-list {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
 }
 
 .pills-image-preview {
-    border-radius: 8px;
-    object-fit: cover;
+	border-radius: 8px;
+	object-fit: cover;
 }
 
 .pills-link-button.ant-btn-link {
-    padding-inline: 0;
-    font-weight: 600;
+	padding-inline: 0;
+	font-weight: 600;
 }
 
 .trend-chart-table-shell {
-    overflow-x: auto;
-    border: 1px solid transparent;
+	overflow-x: auto;
+	border: 1px solid transparent;
 }
 
 .trend-chart-table {
-    min-width: 100%;
-    width: max-content;
-    border-collapse: collapse;
-    font-size: 12px;
+	min-width: 100%;
+	width: max-content;
+	border-collapse: collapse;
+	font-size: 12px;
 }
 
 .trend-chart-table-head {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    padding: 6px 8px;
-    border: 1px solid transparent;
-    text-align: left;
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	padding: 6px 8px;
+	border: 1px solid transparent;
+	text-align: left;
 }
 
 .trend-chart-table-cell {
-    padding: 6px 8px;
-    border: 1px solid transparent;
+	padding: 6px 8px;
+	border: 1px solid transparent;
 }
 
 .pills-primary-fields {
-    display: grid;
-    gap: 12px;
-    grid-template-columns: minmax(0, 1.8fr) minmax(120px, 0.7fr) minmax(160px, 0.9fr);
+	display: grid;
+	gap: 12px;
+	grid-template-columns: minmax(0, 1.8fr) minmax(120px, 0.7fr) minmax(160px, 0.9fr);
 }
 
 .pills-images-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 12px;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin-bottom: 12px;
 }
 
 .pills-images-divider.ant-divider {
-    flex: 1;
-    min-width: 0;
-    margin: 0;
+	flex: 1;
+	min-width: 0;
+	margin: 0;
 }
 
 .pills-images-grid {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-start;
-    gap: 8px;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-start;
+	gap: 8px;
 }
 
 .pills-image-tile {
-    position: relative;
-    width: 104px;
-    height: 104px;
-    overflow: hidden;
-    border-radius: 8px;
+	position: relative;
+	width: 104px;
+	height: 104px;
+	overflow: hidden;
+	border-radius: 8px;
 }
 
 .pills-image-remove {
-    position: absolute;
-    top: 6px;
-    right: 6px;
+	position: absolute;
+	top: 6px;
+	right: 6px;
 }
 
 .pills-upload-tile.ant-upload-wrapper {
-    width: 104px;
-    height: 104px;
+	width: 104px;
+	height: 104px;
 }
 
 .pills-upload-inner {
-    display: flex;
-    height: 100%;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    padding: 8px;
+	display: flex;
+	height: 100%;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	padding: 8px;
 }
 
 .pills-upload-label.ant-typography {
-    font-size: 12px;
-    line-height: 1.2;
-    text-align: center;
+	font-size: 12px;
+	line-height: 1.2;
+	text-align: center;
 }
 
 .pills-parsing-banner {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-top: 8px;
-    padding: 8px 12px;
-    border: 1px solid;
-    border-radius: 8px;
-    font-size: 14px;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-top: 8px;
+	padding: 8px 12px;
+	border: 1px solid;
+	border-radius: 8px;
+	font-size: 14px;
 }
 
 .pills-parsing-banner-text.ant-typography {
-    color: inherit;
+	color: inherit;
 }
 
 .pills-list-space.ant-space {
-    display: flex;
+	display: flex;
 }
 
 .vitals-chart-fallback {
-    display: grid;
-    height: 100%;
-    padding: 16px;
-    place-items: center;
+	display: grid;
+	height: 100%;
+	padding: 16px;
+	place-items: center;
 }
 
 .vitals-loading-panel {
-    display: grid;
-    width: 100%;
-    height: 100%;
-    border: 1px solid transparent;
-    place-items: center;
+	display: grid;
+	width: 100%;
+	height: 100%;
+	border: 1px solid transparent;
+	place-items: center;
 }
 
 .vitals-panel {
-    display: flex;
-    min-width: 0;
-    min-height: 0;
-    flex-direction: column;
-    border: 1px solid transparent;
+	display: flex;
+	min-width: 0;
+	min-height: 0;
+	flex-direction: column;
+	border: 1px solid transparent;
 }
 
 .vitals-panel-header {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 10px 12px;
-    border-bottom: 1px solid transparent;
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	padding: 10px 12px;
+	border-bottom: 1px solid transparent;
 }
 
 .vitals-resizer {
-    position: relative;
-    cursor: col-resize;
+	position: relative;
+	cursor: col-resize;
 }
 
 .vitals-resizer-handle {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 50%;
-    width: 2px;
-    transform: translateX(-50%);
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 50%;
+	width: 2px;
+	transform: translateX(-50%);
 }
 
 .vitals-controls {
-    display: grid;
-    align-items: center;
-    gap: 8px 16px;
-    padding: 8px;
-    border-bottom: 1px solid transparent;
+	display: grid;
+	align-items: center;
+	gap: 8px 16px;
+	padding: 8px;
+	border-bottom: 1px solid transparent;
 }
 
 .vitals-controls-desktop {
-    grid-template-columns: minmax(240px, 1fr) minmax(320px, 1.35fr) auto auto;
+	grid-template-columns: minmax(240px, 1fr) minmax(320px, 1.35fr) auto auto;
 }
 
 .vitals-controls-mobile {
-    grid-template-columns: 1fr;
+	grid-template-columns: 1fr;
 }
 
 .vitals-filter-label {
-    position: relative;
-    display: flex;
-    align-items: center;
+	position: relative;
+	display: flex;
+	align-items: center;
 }
 
 .vitals-filter-icon {
-    position: absolute;
-    left: 8px;
-    pointer-events: none;
+	position: absolute;
+	left: 8px;
+	pointer-events: none;
 }
 
 .vitals-filter-input {
-    width: 100%;
-    height: 32px;
-    padding: 0 8px 0 32px;
-    border: 1px solid transparent;
-    border-radius: 4px;
-    font-size: 14px;
-    outline: none;
-    transition: border-color 0.2s ease;
+	width: 100%;
+	height: 32px;
+	padding: 0 8px 0 32px;
+	border: 1px solid transparent;
+	border-radius: 4px;
+	font-size: 14px;
+	outline: none;
+	transition: border-color 0.2s ease;
 }
 
 .vitals-slider {
-    position: relative;
-    display: flex;
-    min-width: 0;
-    height: 32px;
-    align-items: center;
+	position: relative;
+	display: flex;
+	min-width: 0;
+	height: 32px;
+	align-items: center;
 }
 
 .vitals-slider-label {
-    position: absolute;
-    pointer-events: none;
-    white-space: nowrap;
-    font-size: 11px;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+	position: absolute;
+	pointer-events: none;
+	white-space: nowrap;
+	font-size: 11px;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
 }
 
 .vitals-toggle-label {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 14px;
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 14px;
 }
 
 .vitals-toggle-checkbox {
-    width: 16px;
-    height: 16px;
-    border-radius: 4px;
+	width: 16px;
+	height: 16px;
+	border-radius: 4px;
 }
 
 .vitals-download-button {
-    display: inline-flex;
-    height: 32px;
-    align-items: center;
-    gap: 6px;
-    padding: 0 12px;
-    border: 1px solid transparent;
-    border-radius: 4px;
-    font-size: 14px;
-    transition: background 0.2s ease;
+	display: inline-flex;
+	height: 32px;
+	align-items: center;
+	gap: 6px;
+	padding: 0 12px;
+	border: 1px solid transparent;
+	border-radius: 4px;
+	font-size: 14px;
+	transition: background 0.2s ease;
 }
 
 .vitals-download-button:disabled {
-    cursor: not-allowed;
-    opacity: 0.5;
+	cursor: not-allowed;
+	opacity: 0.5;
 }
 
 .vitals-star-button {
-    display: grid;
-    width: 20px;
-    height: 20px;
-    padding: 0;
-    border: 1px solid transparent;
-    border-radius: 4px;
-    place-items: center;
+	display: grid;
+	width: 20px;
+	height: 20px;
+	padding: 0;
+	border: 1px solid transparent;
+	border-radius: 4px;
+	place-items: center;
 }
 
 @media (max-width: 899px) {
-    .page-nav {
-        position: static;
-        backdrop-filter: none;
-    }
+	.page-nav {
+		position: static;
+		backdrop-filter: none;
+	}
 
-    .page-nav-inner {
-        min-height: 0;
-        flex-direction: column;
-        align-items: stretch;
-        gap: 12px;
-        padding-top: 1rem;
-        padding-bottom: 1rem;
-    }
+	.page-nav-inner {
+		min-height: 0;
+		flex-direction: column;
+		align-items: stretch;
+		gap: 12px;
+		padding-top: 1rem;
+		padding-bottom: 1rem;
+	}
 
-    .page-nav-title-shell {
-        padding-right: 0;
-    }
+	.page-nav-title-shell {
+		padding-right: 0;
+	}
 
-    .page-nav-actions {
-        position: static;
-        transform: none;
-    }
+	.page-nav-actions {
+		position: static;
+		transform: none;
+	}
 }
