@@ -1,6 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 
+import env from '../server/src/env.ts';
+
 import { createScript } from './createScript.ts';
 
 type PerfRunResult = {
@@ -176,7 +178,6 @@ function runPwCli({
 		stderr: 'pipe',
 		stdin: 'ignore',
 		cwd: process.cwd(),
-		env: process.env,
 	});
 
 	const stdout = proc.stdout.toString();
@@ -313,7 +314,7 @@ await createScript(async () => {
 		throw new Error(`Invalid --threshold value: ${args.threshold}`);
 	}
 
-	const codexHome = process.env.CODEX_HOME ?? path.join(process.env.HOME ?? '', '.codex');
+	const codexHome = env.CODEX_HOME;
 	const pwcli = path.join(codexHome, 'skills', 'playwright', 'scripts', 'playwright_cli.sh');
 
 	if (!fs.existsSync(pwcli)) {

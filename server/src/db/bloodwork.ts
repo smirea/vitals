@@ -19,8 +19,8 @@ import {
 	type BloodworkDocumentRow,
 	type BloodworkMeasurementRow,
 } from 'server/db/schema.ts';
+import env from 'server/env.ts';
 
-const DEFAULT_BLOODWORK_MODEL = 'google/gemini-3.1-pro-preview';
 const LOCAL_TEXT_MIN_CHARACTERS_PER_PAGE = 320;
 const MAX_DOCUMENT_STATUS_ROWS = 16;
 
@@ -1228,15 +1228,11 @@ function parseJsonObjectFromText(text: string) {
 }
 
 function getOpenRouterProvider() {
-	const apiKey = process.env.OPENROUTER_API_KEY?.trim();
-	if (!apiKey) {
-		throw new Error('OPENROUTER_API_KEY is required for bloodwork import.');
-	}
-	return createOpenRouter({ apiKey });
+	return createOpenRouter({ apiKey: env.OPENROUTER_API_KEY });
 }
 
 function getBloodworkModelId() {
-	return process.env.BLOODWORK_OPENROUTER_MODEL?.trim() || DEFAULT_BLOODWORK_MODEL;
+	return env.BLOODWORK_OPENROUTER_MODEL;
 }
 
 async function getPdfPageCount(pdfData: Buffer) {

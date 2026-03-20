@@ -6,6 +6,8 @@ import chalk from 'chalk';
 import { formatDate } from 'date-fns';
 import _ from 'lodash';
 
+import env from '../server/src/env.ts';
+
 export async function createScript(fn: () => any) {
 	process.on('unhandledRejection', err => {
 		console.error(chalk.red.bold('[Unhandled promise rejection]'), err);
@@ -121,7 +123,7 @@ export const disk = new (class Disk {
 	prettyPath(p: string) {
 		if (p === this.root) return '.';
 		if (p.startsWith(this.root)) return p.slice(this.root.length + 1);
-		if (p.startsWith(process.env.HOME!)) return '~/' + p.slice(process.env.HOME!.length + 1);
+		if (p.startsWith(env.HOME)) return '~/' + p.slice(env.HOME.length + 1);
 		return p;
 	}
 

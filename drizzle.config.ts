@@ -3,13 +3,12 @@ import { fileURLToPath } from 'url';
 
 import { defineConfig } from 'drizzle-kit';
 
+import env from './server/src/env.ts';
+
 const projectRoot = path.dirname(fileURLToPath(import.meta.url));
-const configuredDbPath = process.env.VITALS_DB_PATH?.trim();
-const dbPath = configuredDbPath
-	? path.isAbsolute(configuredDbPath)
-		? configuredDbPath
-		: path.resolve(projectRoot, configuredDbPath)
-	: path.join(projectRoot, 'data', 'vitals.sqlite');
+const dbPath = path.isAbsolute(env.VITALS_DB_PATH)
+	? env.VITALS_DB_PATH
+	: path.resolve(projectRoot, env.VITALS_DB_PATH);
 
 export default defineConfig({
 	schema: './server/src/db/schema.ts',

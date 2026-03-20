@@ -1,14 +1,17 @@
-import { defineConfig } from 'vite';
+import path from 'path';
+
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { tanstackRouter } from '@tanstack/router-plugin/vite';
 import tsconfigPaths from 'vite-tsconfig-paths';
 
-export default defineConfig(({ command }) => {
-	const clientPort = Number(process.env.CLIENT_PORT);
+export default defineConfig(async ({ command, mode }) => {
+	const projectRoot = path.resolve(import.meta.dirname, '..');
 
-	if (command === 'serve' && !Number.isFinite(clientPort)) {
-		throw new Error('process.env.CLIENT_PORT must be a number');
-	}
+	Object.assign(process.env, loadEnv(mode, projectRoot, ''));
+	const { default: env } = await import('../server/src/env.ts');
+
+	const clientPort = env.CLIENT_PORT;
 
 	return {
 		server:
@@ -18,7 +21,7 @@ export default defineConfig(({ command }) => {
 						strictPort: true,
 						proxy: {
 							'/api': {
-								target: process.env.VITE_API_URL,
+								target: env.VITE_API_URL,
 								changeOrigin: true,
 								rewrite: (path: string) => path.replace(/^\/api/, ''),
 							},

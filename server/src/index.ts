@@ -2,12 +2,10 @@ import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 
 import { PROJECT_ROOT } from 'scripts/project-paths.ts';
 import { startBloodworkProcessor } from 'server/db/bloodwork.ts';
+import env from 'server/env.ts';
 import { appRouter, createTrpcContext } from 'server/trpc/index.ts';
 
-const port = Number(process.env.API_PORT);
-if (!Number.isFinite(port)) {
-	throw new Error('process.env.API_PORT must be a number');
-}
+const port = env.API_PORT;
 
 function getCorsHeaders(req: Request) {
 	const origin = req.headers.get('origin');

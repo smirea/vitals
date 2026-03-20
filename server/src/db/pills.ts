@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 import type { VitalsDatabase } from 'server/db/client.ts';
 import { ensureTagsByNames } from 'server/db/tags.ts';
+import env from 'server/env.ts';
 import {
 	type PillComponentRow,
 	type PillImageRow,
@@ -684,20 +685,8 @@ export function upsertPill(db: VitalsDatabase, input: z.infer<typeof pillUpsertI
 }
 
 export async function extractPillFromImages(input: z.infer<typeof pillImageExtractionInputSchema>) {
-	const apiKey = process.env.OPENROUTER_API_KEY?.trim();
-	if (!apiKey) {
-		throw new Error('OPENROUTER_API_KEY is required to extract pill data from images.');
-	}
-
-	const model = process.env.OPENROUTER_MODEL?.trim();
-	if (!model) {
-		throw new Error('OPENROUTER_MODEL is required for pill image parsing.');
-	}
-	if (!model.startsWith('google/gemini')) {
-		throw new Error(
-			`OPENROUTER_MODEL must be a Gemini model for pill image parsing. Received: ${model}`,
-		);
-	}
+	const apiKey = env.OPENROUTER_API_KEY;
+	const model = env.OPENROUTER_MODEL;
 
 	const provider = createOpenRouter({ apiKey });
 	const imageParts = input.images.map(image => {
