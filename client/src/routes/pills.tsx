@@ -18,7 +18,6 @@ import {
 	DatePicker,
 	Divider,
 	Drawer,
-	Empty,
 	Form,
 	Image,
 	Input,
@@ -983,65 +982,56 @@ function PillsRouteComponent() {
 					</Card>
 				) : null}
 
-				<Card
-					title='Active pills'
-					extra={<Typography.Text type='secondary'>{activePills.length} rows</Typography.Text>}
-				>
-					<Table
-						rowKey={row => String(row.pill.id)}
-						size='small'
-						columns={activeColumns}
-						dataSource={activeRows}
-						loading={dashboardQuery.isLoading}
-						pagination={false}
-						expandable={activeTableExpandable}
-						locale={{
-							emptyText: (
-								<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description='No active pills yet' />
-							),
-						}}
-					/>
-				</Card>
+				{activeRows.length > 0 ? (
+					<Card
+						title='Active pills'
+						extra={<Typography.Text type='secondary'>{activePills.length} rows</Typography.Text>}
+					>
+						<Table
+							rowKey={row => String(row.pill.id)}
+							size='small'
+							columns={activeColumns}
+							dataSource={activeRows}
+							loading={dashboardQuery.isLoading}
+							pagination={false}
+							expandable={activeTableExpandable}
+						/>
+					</Card>
+				) : null}
 
-				<Card
-					title='Not tracked yet'
-					extra={<Typography.Text type='secondary'>{notTrackedRows.length} rows</Typography.Text>}
-				>
-					<Table
-						rowKey={row => String(row.pill.id)}
-						size='small'
-						columns={notTrackedColumns}
-						dataSource={notTrackedRows}
-						loading={dashboardQuery.isLoading}
-						pagination={false}
-						expandable={notTrackedTableExpandable}
-						locale={{
-							emptyText: (
-								<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description='No untracked pills yet' />
-							),
-						}}
-					/>
-				</Card>
+				{notTrackedRows.length > 0 ? (
+					<Card
+						title='Not tracked yet'
+						extra={<Typography.Text type='secondary'>{notTrackedRows.length} rows</Typography.Text>}
+					>
+						<Table
+							rowKey={row => String(row.pill.id)}
+							size='small'
+							columns={notTrackedColumns}
+							dataSource={notTrackedRows}
+							loading={dashboardQuery.isLoading}
+							pagination={false}
+							expandable={notTrackedTableExpandable}
+						/>
+					</Card>
+				) : null}
 
-				<Card
-					title='Past pills'
-					extra={<Typography.Text type='secondary'>{pastRows.length} rows</Typography.Text>}
-				>
-					<Table
-						rowKey='key'
-						size='small'
-						columns={pastColumns}
-						dataSource={pastRows}
-						loading={dashboardQuery.isLoading}
-						pagination={false}
-						expandable={pastTableExpandable}
-						locale={{
-							emptyText: (
-								<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description='No past pills yet' />
-							),
-						}}
-					/>
-				</Card>
+				{pastRows.length > 0 ? (
+					<Card
+						title='Past pills'
+						extra={<Typography.Text type='secondary'>{pastRows.length} rows</Typography.Text>}
+					>
+						<Table
+							rowKey='key'
+							size='small'
+							columns={pastColumns}
+							dataSource={pastRows}
+							loading={dashboardQuery.isLoading}
+							pagination={false}
+							expandable={pastTableExpandable}
+						/>
+					</Card>
+				) : null}
 			</div>
 
 			<Drawer
