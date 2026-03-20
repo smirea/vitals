@@ -7,7 +7,7 @@ import {
     TRPCProvider,
     createBrowserTrpcClient,
     createQueryClient,
-} from './lib/trpc'
+} from './utils/trpc'
 import { AutofillGuard } from './components/AutofillGuard'
 import { AppContextProvider } from './hooks/useAppContext'
 import useAppContext from './hooks/useAppContext'

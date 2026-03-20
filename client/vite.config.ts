@@ -27,6 +27,7 @@ export default defineConfig(({ command }) => {
             tanstackRouter({
                 target: 'react',
                 autoCodeSplitting: true,
+                routeFileIgnorePattern: '(^|/)_[^_].+',
             }) as any,
             react(),
         ],
