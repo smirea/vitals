@@ -7,6 +7,7 @@ import {
 	Card,
 	Empty,
 	Flex,
+	Popconfirm,
 	Splitter,
 	Spin,
 	Tag,
@@ -85,6 +86,7 @@ function BloodworkPage() {
 	const importInputRef = useRef<HTMLInputElement | null>(null);
 
 	const [measurementFilter, setMeasurementFilter] = useState('');
+	const [deletingDocumentId, setDeletingDocumentId] = useState<number | null>(null);
 	const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>(() =>
 		readStoredSelectedRowKeys(),
 	);
@@ -126,6 +128,21 @@ function BloodworkPage() {
 		},
 		onError: error => {
 			messageApi.error(error.message);
+		},
+	});
+	const deleteDocumentMutation = useMutation({
+		...trpc.table.bloodworkDocuments.deleteMany.mutationOptions(),
+		onSuccess: async data => {
+			await queryClient.invalidateQueries();
+			messageApi.success(
+				data.deletedCount === 1 ? 'Document deleted.' : `${data.deletedCount} documents deleted.`,
+			);
+		},
+		onError: error => {
+			messageApi.error(error.message);
+		},
+		onSettled: () => {
+			setDeletingDocumentId(null);
 		},
 	});
 	const dashboard = dashboardQuery.data;
@@ -637,6 +654,24 @@ function BloodworkPage() {
 		[uploadDocumentsMutation],
 	);
 
+	const onDeleteDocument = useCallback(
+		async (documentId: number) => {
+			setDeletingDocumentId(documentId);
+			await deleteDocumentMutation
+				.mutateAsync({
+					where: [
+						{
+							column: 'id',
+							operator: 'eq',
+							value: documentId,
+						},
+					],
+				})
+				.catch(() => undefined);
+		},
+		[deleteDocumentMutation],
+	);
+
 	const importPanel = (
 		<Card
 			size='small'
@@ -695,10 +730,34 @@ function BloodworkPage() {
 											<Tag color={statusColor}>{item.status}</Tag>
 											<Typography.Text strong>{item.fileName}</Typography.Text>
 										</Flex>
-										<Typography.Text type='secondary'>
-											{item.date ?? item.queuedAt.slice(0, 10)}
-											{item.labName ? ` · ${item.labName}` : ''}
-										</Typography.Text>
+										<Flex align='center' gap={12} wrap>
+											<Typography.Text type='secondary'>
+												{item.date ?? item.queuedAt.slice(0, 10)}
+												{item.labName ? ` · ${item.labName}` : ''}
+											</Typography.Text>
+											<Popconfirm
+												title='Delete imported file?'
+												description='This removes the document and every result derived from it.'
+												okText='Delete'
+												okButtonProps={{ danger: true }}
+												onConfirm={() => onDeleteDocument(item.id)}
+												disabled={item.status === 'processing' || deleteDocumentMutation.isPending}
+											>
+												<Button
+													size='small'
+													type='text'
+													danger
+													disabled={
+														item.status === 'processing' || deleteDocumentMutation.isPending
+													}
+													loading={
+														deleteDocumentMutation.isPending && deletingDocumentId === item.id
+													}
+												>
+													Delete
+												</Button>
+											</Popconfirm>
+										</Flex>
 									</Flex>
 									{item.lastError ? (
 										<Typography.Text type='danger'>{item.lastError}</Typography.Text>
