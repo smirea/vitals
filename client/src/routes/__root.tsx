@@ -12,6 +12,7 @@ export const Route = createRootRoute({
         return (
             <Layout className='app-shell' style={{ background: token.colorBgLayout }}>
                 <Layout.Sider
+                    className='app-shell-sider'
                     width={240}
                     theme={theme}
                     style={{ borderRight: `1px solid ${token.colorBorderSecondary}` }}

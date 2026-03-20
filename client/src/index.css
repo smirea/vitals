@@ -19,11 +19,22 @@ body,
 }
 
 .app-shell {
+    min-height: 100vh;
+}
+
+.app-shell-sider {
+    position: sticky;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    align-self: flex-start;
     height: 100vh;
+    overflow: hidden;
 }
 
 .app-main-layout {
     min-width: 0;
+    min-height: 100vh;
 }
 
 .app-main-content {
