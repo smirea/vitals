@@ -3,7 +3,7 @@ import {
     useMemo,
 } from 'react';
 
-import { Empty } from 'antd';
+import { Empty, theme as antdTheme } from 'antd';
 import {
     CartesianGrid,
     Legend,
@@ -30,6 +30,7 @@ export const TrendChart = memo(function TrendChart({
     orderedSources,
     isMobile,
 }: TrendChartProps) {
+    const { token } = antdTheme.useToken();
     const visibleSeries = useMemo(
         () =>
             series.filter(item => orderedSources.some(source => {
@@ -107,27 +108,27 @@ export const TrendChart = memo(function TrendChart({
                             <XAxis
                                 dataKey='sourceId'
                                 tickFormatter={sourceId => sourceById.get(String(sourceId))?.prettyDate ?? String(sourceId)}
-                                tick={{ fontSize: 11, fill: '#334155' }}
+                                tick={{ fontSize: 11, fill: token.colorTextSecondary }}
                                 minTickGap={isMobile ? 40 : 22}
                                 interval='preserveStartEnd'
                             />
                             <YAxis
                                 domain={yDomain}
                                 tickFormatter={formatNormalizedYAxisTick}
-                                tick={{ fontSize: 11, fill: '#334155' }}
+                                tick={{ fontSize: 11, fill: token.colorTextSecondary }}
                                 width={isMobile ? 44 : 56}
                             />
                             <ReferenceLine
                                 y={0}
-                                stroke='#64748b'
+                                stroke={token.colorTextTertiary}
                                 strokeDasharray='4 4'
-                                label={{ value: 'Low', position: 'insideLeft', fill: '#64748b', fontSize: 11 }}
+                                label={{ value: 'Low', position: 'insideLeft', fill: token.colorTextTertiary, fontSize: 11 }}
                             />
                             <ReferenceLine
                                 y={1}
-                                stroke='#64748b'
+                                stroke={token.colorTextTertiary}
                                 strokeDasharray='4 4'
-                                label={{ value: 'High', position: 'insideLeft', fill: '#64748b', fontSize: 11 }}
+                                label={{ value: 'High', position: 'insideLeft', fill: token.colorTextTertiary, fontSize: 11 }}
                             />
                             <RechartsTooltip
                                 content={({ active, label }) => {
@@ -140,8 +141,17 @@ export const TrendChart = memo(function TrendChart({
                                     }
 
                                     return (
-                                            <div className='min-w-[260px] max-w-[440px] rounded border border-slate-300 bg-white px-3 py-2 shadow-[0_10px_28px_rgba(15,23,42,0.18)]'>
-                                                <div className='mb-2 text-xs font-semibold text-slate-900'>{source.prettyDate}</div>
+                                            <div
+                                                className='min-w-[260px] max-w-[440px] rounded border px-3 py-2'
+                                                style={{
+                                                    borderColor: token.colorBorder,
+                                                    background: token.colorBgContainer,
+                                                    boxShadow: token.boxShadowSecondary,
+                                                }}
+                                            >
+                                                <div className='mb-2 text-xs font-semibold' style={{ color: token.colorText }}>
+                                                    {source.prettyDate}
+                                                </div>
                                             {visibleSeries.map(item => {
                                                 const cell = item.valuesBySourceIndex[source.index];
                                                 const displayLabel = item.unitLabel
@@ -155,8 +165,12 @@ export const TrendChart = memo(function TrendChart({
                                                 return (
                                                     <div key={`${label}-${item.id}`} className='flex items-center gap-2 py-[2px]'>
                                                         <span className='h-[10px] w-[10px] rounded-full' style={{ background: item.color }} />
-                                                        <span className='min-w-0 flex-1 text-xs text-slate-700'>{displayLabel}</span>
-                                                        <span className='ml-auto text-xs font-semibold text-slate-900'>{valueWithRange}</span>
+                                                        <span className='min-w-0 flex-1 text-xs' style={{ color: token.colorTextSecondary }}>
+                                                            {displayLabel}
+                                                        </span>
+                                                        <span className='ml-auto text-xs font-semibold' style={{ color: token.colorText }}>
+                                                            {valueWithRange}
+                                                        </span>
                                                     </div>
                                                 );
                                             })}
@@ -168,7 +182,11 @@ export const TrendChart = memo(function TrendChart({
                                 verticalAlign='bottom'
                                 align='left'
                                 iconSize={8}
-                                formatter={value => <span className='text-[11px] leading-tight text-slate-700'>{value}</span>}
+                                formatter={value => (
+                                    <span className='text-[11px] leading-tight' style={{ color: token.colorTextSecondary }}>
+                                        {value}
+                                    </span>
+                                )}
                                 wrapperStyle={{ paddingTop: 8, maxHeight: isMobile ? 68 : undefined, overflowY: isMobile ? 'auto' : undefined }}
                             />
                             {visibleSeries.map(item => (
@@ -196,8 +214,8 @@ export const TrendChart = memo(function TrendChart({
                                                 cx={cx}
                                                 cy={cy}
                                                 r={4}
-                                                fill={isOutOfRange ? '#dc2626' : item.color}
-                                                stroke='#ffffff'
+                                                fill={isOutOfRange ? token.colorError : item.color}
+                                                stroke={token.colorBgContainer}
                                                 strokeWidth={1.6}
                                             />
                                         );
@@ -217,8 +235,8 @@ export const TrendChart = memo(function TrendChart({
                                                 cx={cx}
                                                 cy={cy}
                                                 r={5}
-                                                fill={isOutOfRange ? '#dc2626' : item.color}
-                                                stroke='#0f172a'
+                                                fill={isOutOfRange ? token.colorError : item.color}
+                                                stroke={token.colorText}
                                                 strokeWidth={1.6}
                                             />
                                         );
@@ -235,16 +253,32 @@ export const TrendChart = memo(function TrendChart({
             </div>
 
             <section className='flex flex-col gap-1.5'>
-                <h3 className='m-0 text-xs font-semibold uppercase tracking-[0.04em] text-slate-700'>Selected values</h3>
-                <div className='overflow-x-auto border border-slate-300'>
+                <h3 className='m-0 text-xs font-semibold uppercase tracking-[0.04em]' style={{ color: token.colorTextSecondary }}>
+                    Selected values
+                </h3>
+                <div className='overflow-x-auto border' style={{ borderColor: token.colorBorder }}>
                     <table className='min-w-full w-max border-collapse text-xs'>
                         <thead>
                             <tr>
-                                <th className='sticky top-0 z-[1] border border-slate-200 bg-slate-50 px-2 py-1.5 text-left text-slate-700'>Date</th>
+                                <th
+                                    className='sticky top-0 z-[1] border px-2 py-1.5 text-left'
+                                    style={{
+                                        borderColor: token.colorBorderSecondary,
+                                        background: token.colorFillAlter,
+                                        color: token.colorTextSecondary,
+                                    }}
+                                >
+                                    Date
+                                </th>
                                 {visibleSeries.map(item => (
                                     <th
                                         key={`selected-values-heading-${item.id}`}
-                                        className='sticky top-0 z-[1] border border-slate-200 bg-slate-50 px-2 py-1.5 text-left text-slate-700'
+                                        className='sticky top-0 z-[1] border px-2 py-1.5 text-left'
+                                        style={{
+                                            borderColor: token.colorBorderSecondary,
+                                            background: token.colorFillAlter,
+                                            color: token.colorTextSecondary,
+                                        }}
                                     >
                                         {item.unitLabel ? `${item.label} (${item.unitLabel})` : item.label}
                                     </th>
@@ -252,13 +286,22 @@ export const TrendChart = memo(function TrendChart({
                             </tr>
                         </thead>
                         <tbody>
-                            {tableSources.map(source => (
-                                <tr key={`selected-values-row-${source.id}`} className='odd:bg-slate-50/30'>
-                                    <td className='border border-slate-200 px-2 py-1.5'>{source.prettyDate}</td>
+                            {tableSources.map((source, index) => (
+                                <tr
+                                    key={`selected-values-row-${source.id}`}
+                                    style={{ background: index % 2 === 0 ? token.colorFillQuaternary : undefined }}
+                                >
+                                    <td className='border px-2 py-1.5' style={{ borderColor: token.colorBorderSecondary }}>
+                                        {source.prettyDate}
+                                    </td>
                                     {visibleSeries.map(item => {
                                         const cell = item.valuesBySourceIndex[source.index];
                                         return (
-                                            <td key={`selected-values-${source.id}-${item.id}`} className='border border-slate-200 px-2 py-1.5'>
+                                            <td
+                                                key={`selected-values-${source.id}-${item.id}`}
+                                                className='border px-2 py-1.5'
+                                                style={{ borderColor: token.colorBorderSecondary }}
+                                            >
                                                 {cell?.display ?? '--'}
                                             </td>
                                         );

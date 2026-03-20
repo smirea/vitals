@@ -1,6 +1,14 @@
-import { ExperimentOutlined, HomeOutlined, MedicineBoxOutlined } from '@ant-design/icons'
+import {
+    BulbOutlined,
+    ExperimentOutlined,
+    HomeOutlined,
+    MedicineBoxOutlined,
+    MoonOutlined,
+} from '@ant-design/icons'
 import { Link, useRouterState } from '@tanstack/react-router'
-import { Menu, Typography } from 'antd'
+import { Menu, Switch, Typography, theme as antdTheme } from 'antd'
+
+import useAppContext from '../hooks/useAppContext'
 
 const navigationItems = [
     {
@@ -24,6 +32,8 @@ const navigationItems = [
 ] as const
 
 export function AppNavigation() {
+    const { theme, setTheme } = useAppContext()
+    const { token } = antdTheme.useToken()
     const pathname = useRouterState({
         select: state => state.location.pathname,
     })
@@ -33,8 +43,11 @@ export function AppNavigation() {
     ))?.key ?? '/'
 
     return (
-        <div className='flex h-full flex-col bg-white'>
-            <div className='border-b border-slate-200 px-5 py-4'>
+        <div className='relative flex h-full flex-col' style={{ background: token.colorBgContainer }}>
+            <div
+                className='px-5 py-4'
+                style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}
+            >
                 <Typography.Title level={4} className='!mb-1'>
                     Vitals
                 </Typography.Title>
@@ -45,8 +58,10 @@ export function AppNavigation() {
 
             <Menu
                 mode='inline'
+                theme={theme}
                 selectedKeys={[selectedKey]}
-                className='flex-1 border-e-0 pt-3'
+                className='flex-1 border-e-0 pt-3 pb-24'
+                style={{ background: token.colorBgContainer }}
                 items={navigationItems.map(item => ({
                     key: item.key,
                     icon: item.icon,
@@ -62,6 +77,28 @@ export function AppNavigation() {
                     ),
                 }))}
             />
+
+            <div
+                className='absolute bottom-0 left-0 right-0 flex items-center justify-between gap-3 px-5 py-4'
+                style={{
+                    borderTop: `1px solid ${token.colorBorderSecondary}`,
+                    background: token.colorBgContainer,
+                }}
+            >
+                <div className='min-w-0'>
+                    <Typography.Text strong>
+                        Dark mode
+                    </Typography.Text>
+                </div>
+
+                <Switch
+                    checked={theme === 'dark'}
+                    onChange={checked => setTheme(checked ? 'dark' : 'light')}
+                    checkedChildren={<MoonOutlined />}
+                    unCheckedChildren={<BulbOutlined />}
+                    aria-label='Toggle dark mode'
+                />
+            </div>
         </div>
     )
 }

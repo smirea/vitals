@@ -26,6 +26,7 @@ import {
   Typography,
   Upload,
   message,
+  theme as antdTheme,
 } from "antd";
 import type { FormInstance, TableColumnsType } from "antd";
 import type { UploadChangeParam, UploadFile, UploadProps } from "antd/es/upload/interface";
@@ -397,6 +398,7 @@ function renderImages(images: PillImage[]) {
 }
 
 export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
+  const { token } = antdTheme.useToken();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [form] = Form.useForm<PillFormValues>();
@@ -901,48 +903,53 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
   };
 
   return (
-    <main className="h-full overflow-auto bg-slate-100 p-6">
-      <div className="mx-auto flex max-w-[1800px] flex-col gap-6">
-        <Card className="shadow-sm">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div className="space-y-2">
-              <Typography.Title level={2} className="!mb-0">
+    <main
+      className='h-full overflow-auto p-6'
+      style={{ background: token.colorBgLayout }}
+    >
+      <div className='mx-auto flex max-w-[1800px] flex-col gap-6'>
+        <Card>
+          <div className='flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between'>
+            <div className='space-y-2'>
+              <Typography.Title level={2} className='!mb-0'>
                 Pills
               </Typography.Title>
-              <Typography.Paragraph className="!mb-0 max-w-3xl text-slate-600">
+              <Typography.Paragraph
+                className='!mb-0 max-w-3xl'
+                style={{ color: token.colorTextSecondary }}
+              >
                 Log canonical pills, track every period they were taken, and keep the supplement
                 facts plus label images together.
               </Typography.Paragraph>
             </div>
 
-            <Button type="primary" size="large" icon={<PlusOutlined />} onClick={openNewPillDrawer}>
+            <Button type='primary' size='large' icon={<PlusOutlined />} onClick={openNewPillDrawer}>
               Log pill
             </Button>
           </div>
 
-          <Divider className="!my-5" />
+          <Divider className='!my-5' />
 
-          <div className="grid gap-4 md:grid-cols-3">
-            <Card size="small" className="bg-slate-50">
-              <Statistic title="All Pills" value={totals.all} />
+          <div className='grid gap-4 md:grid-cols-3'>
+            <Card size='small' style={{ background: token.colorFillAlter }}>
+              <Statistic title='All Pills' value={totals.all} />
             </Card>
-            <Card size="small" className="bg-emerald-50">
-              <Statistic title="Active Pills" value={totals.active} />
+            <Card size='small' style={{ background: token.colorSuccessBg }}>
+              <Statistic title='Active Pills' value={totals.active} />
             </Card>
-            <Card size="small" className="bg-slate-50">
-              <Statistic title="Past Pills" value={totals.past} />
+            <Card size='small' style={{ background: token.colorFillAlter }}>
+              <Statistic title='Past Pills' value={totals.past} />
             </Card>
           </div>
         </Card>
 
         <Card
-          title="Active pills"
-          className="shadow-sm"
-          extra={<Typography.Text type="secondary">{activePills.length} rows</Typography.Text>}
+          title='Active pills'
+          extra={<Typography.Text type='secondary'>{activePills.length} rows</Typography.Text>}
         >
           <Table
             rowKey={(row) => String(row.pill.id)}
-            size="small"
+            size='small'
             columns={activeColumns}
             dataSource={activeRows}
             loading={dashboardQuery.isLoading}
@@ -951,20 +958,19 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
             expandable={activeTableExpandable}
             locale={{
               emptyText: (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No active pills yet" />
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description='No active pills yet' />
               ),
             }}
           />
         </Card>
 
         <Card
-          title="Past pills"
-          className="shadow-sm"
-          extra={<Typography.Text type="secondary">{pastRows.length} rows</Typography.Text>}
+          title='Past pills'
+          extra={<Typography.Text type='secondary'>{pastRows.length} rows</Typography.Text>}
         >
           <Table
-            rowKey="key"
-            size="small"
+            rowKey='key'
+            size='small'
             columns={pastColumns}
             dataSource={pastRows}
             loading={dashboardQuery.isLoading}
@@ -973,7 +979,7 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
             expandable={pastTableExpandable}
             locale={{
               emptyText: (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No past pills yet" />
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description='No past pills yet' />
               ),
             }}
           />
@@ -1176,9 +1182,16 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
           </Image.PreviewGroup>
 
           {isParsingImages ? (
-            <div className="mt-2 flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-700">
+            <div
+              className="mt-2 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm"
+              style={{
+                borderColor: token.colorInfoBorder,
+                background: token.colorInfoBg,
+                color: token.colorInfoText,
+              }}
+            >
               <Spin size="small" />
-              <Typography.Text className="!text-sky-700">
+              <Typography.Text style={{ color: token.colorInfoText }}>
                 Parsing uploaded images and filling the form…
               </Typography.Text>
             </div>

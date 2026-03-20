@@ -3,6 +3,7 @@ import {
 } from '@tanstack/react-query';
 import {
     useCallback,
+    type CSSProperties,
     useDeferredValue,
     useEffect,
     useLayoutEffect,
@@ -13,7 +14,7 @@ import {
 } from 'react';
 
 import { ChartLineUp } from '@phosphor-icons/react';
-import { Alert, Empty, Spin } from 'antd';
+import { Alert, Empty, Spin, theme as antdTheme } from 'antd';
 
 import { useTRPC } from '../../lib/trpc';
 import type { BloodworkDashboardPayload } from './api';
@@ -91,6 +92,7 @@ export function VitalsDashboard() {
     const viewport = useViewport();
     const isMobileViewport = viewport.width < 900;
     const trpc = useTRPC();
+    const { token } = antdTheme.useToken();
 
     const [measurementFilter, setMeasurementFilter] = useState('');
     const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>(() => readStoredSelectedRowKeys());
@@ -571,10 +573,41 @@ export function VitalsDashboard() {
             : <div className='grid h-full place-items-center p-4'><Empty description='No numeric values in the selected rows for this date range.' /></div>
     ), [chartSeries, chartSources, isMobileViewport]);
 
+    const vitalsThemeStyle: CSSProperties = {
+        ['--vitals-bg-layout' as string]: token.colorBgLayout,
+        ['--vitals-bg-container' as string]: token.colorBgContainer,
+        ['--vitals-bg-subtle' as string]: token.colorFillAlter,
+        ['--vitals-bg-muted' as string]: token.colorFillSecondary,
+        ['--vitals-bg-hover' as string]: token.colorFillTertiary,
+        ['--vitals-bg-row-alt' as string]: token.colorFillQuaternary,
+        ['--vitals-border' as string]: token.colorBorder,
+        ['--vitals-border-secondary' as string]: token.colorBorderSecondary,
+        ['--vitals-text' as string]: token.colorText,
+        ['--vitals-text-secondary' as string]: token.colorTextSecondary,
+        ['--vitals-text-tertiary' as string]: token.colorTextTertiary,
+        ['--vitals-primary-bg' as string]: token.colorPrimaryBg,
+        ['--vitals-primary-bg-hover' as string]: token.colorPrimaryBgHover,
+        ['--vitals-primary-border' as string]: token.colorPrimaryBorder,
+        ['--vitals-success' as string]: token.colorSuccess,
+        ['--vitals-success-bg' as string]: token.colorSuccessBg,
+        ['--vitals-success-border' as string]: token.colorSuccessBorder,
+        ['--vitals-error' as string]: token.colorError,
+        ['--vitals-error-bg' as string]: token.colorErrorBg,
+        ['--vitals-error-bg-hover' as string]: token.colorErrorBgHover,
+        ['--vitals-error-border' as string]: token.colorErrorBorder,
+        ['--vitals-warning' as string]: token.colorWarning,
+        ['--vitals-warning-bg' as string]: token.colorWarningBg,
+        ['--vitals-warning-border' as string]: token.colorWarningBorder,
+        ['--vitals-white' as string]: token.colorWhite,
+    };
+
     return (
-        <main className='vitals-page'>
+        <main className='vitals-page' style={vitalsThemeStyle}>
             {dashboardQuery.isLoading ? (
-                <section className='grid h-full w-full place-items-center border border-slate-300 bg-white'>
+                <section
+                    className='grid h-full w-full place-items-center border'
+                    style={{ borderColor: token.colorBorder, background: token.colorBgContainer }}
+                >
                     <Spin size='large' />
                 </section>
             ) : dashboardQuery.error ? (
@@ -585,7 +618,10 @@ export function VitalsDashboard() {
                     description={dashboardQuery.error.message}
                 />
             ) : !hasAnyData ? (
-                <section className='grid h-full w-full place-items-center border border-slate-300 bg-white'>
+                <section
+                    className='grid h-full w-full place-items-center border'
+                    style={{ borderColor: token.colorBorder, background: token.colorBgContainer }}
+                >
                     <Empty description='No bloodwork data found yet.' />
                 </section>
             ) : (
@@ -599,7 +635,10 @@ export function VitalsDashboard() {
                                 : '1fr',
                         }}
                     >
-                        <section className='flex min-h-0 min-w-0 flex-col border border-slate-300 bg-white'>
+                        <section
+                            className='flex min-h-0 min-w-0 flex-col border'
+                            style={{ borderColor: token.colorBorder, background: token.colorBgContainer }}
+                        >
                             <CategoriesOverview items={categoryOverview} />
                             <MeaningfulChanges items={sixMonthChanges} />
 
@@ -644,15 +683,25 @@ export function VitalsDashboard() {
                                     event.preventDefault();
                                     setIsResizing(true);
                                 }}
-                                className='relative cursor-col-resize bg-slate-300 hover:bg-slate-400'
+                                className='relative cursor-col-resize'
+                                style={{ background: token.colorFillSecondary }}
                             >
-                                <span className='absolute bottom-0 left-1/2 top-0 w-[2px] -translate-x-1/2 bg-slate-900/30' />
+                                <span
+                                    className='absolute bottom-0 left-1/2 top-0 w-[2px] -translate-x-1/2'
+                                    style={{ background: token.colorTextTertiary }}
+                                />
                             </div>
                         )}
 
                         {showSplitLayout && (
-                            <section className='flex min-h-0 min-w-0 flex-col border border-l-0 border-slate-300 bg-white'>
-                                <div className='inline-flex items-center gap-2 border-b border-slate-300 px-3 py-2.5'>
+                            <section
+                                className='flex min-h-0 min-w-0 flex-col border border-l-0'
+                                style={{ borderColor: token.colorBorder, background: token.colorBgContainer }}
+                            >
+                                <div
+                                    className='inline-flex items-center gap-2 border-b px-3 py-2.5'
+                                    style={{ borderColor: token.colorBorder }}
+                                >
                                     <ChartLineUp size={18} weight='duotone' />
                                     <strong>Trend view</strong>
                                 </div>
@@ -662,8 +711,14 @@ export function VitalsDashboard() {
                     </section>
 
                     {hasSelectedRows && isMobileViewport && (
-                        <section className='flex min-h-0 min-w-0 flex-col border border-slate-300 bg-white'>
-                            <div className='inline-flex items-center gap-2 border-b border-slate-300 px-3 py-2.5'>
+                        <section
+                            className='flex min-h-0 min-w-0 flex-col border'
+                            style={{ borderColor: token.colorBorder, background: token.colorBgContainer }}
+                        >
+                            <div
+                                className='inline-flex items-center gap-2 border-b px-3 py-2.5'
+                                style={{ borderColor: token.colorBorder }}
+                            >
                                 <ChartLineUp size={18} weight='duotone' />
                                 <strong>Trend view</strong>
                             </div>

@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 
 import { CheckCircle, Flag, Star, WarningCircle } from '@phosphor-icons/react';
+import { theme as antdTheme } from 'antd';
 
 import type {
     CategorySelectionState,
@@ -51,6 +52,7 @@ const SelectionCheckbox = memo(function SelectionCheckbox({
     onChange,
     ariaLabel,
 }: SelectionCheckboxProps) {
+    const { token } = antdTheme.useToken();
     const ref = useRef<HTMLInputElement | null>(null);
 
     useEffect(() => {
@@ -66,14 +68,17 @@ const SelectionCheckbox = memo(function SelectionCheckbox({
             disabled={disabled}
             aria-label={ariaLabel}
             onChange={event => onChange(event.target.checked)}
-            className='h-4 w-4 rounded border-slate-300 accent-slate-800 disabled:cursor-not-allowed'
+            className='h-4 w-4 rounded disabled:cursor-not-allowed'
+            style={{ accentColor: token.colorPrimary, borderColor: token.colorBorder }}
         />
     );
 });
 
 const MeasurementValueCell = memo(function MeasurementValueCell({ cell }: { cell: MeasurementCell | undefined }) {
+    const { token } = antdTheme.useToken();
+
     if (!cell) {
-        return <span className='text-slate-500'>--</span>;
+        return <span style={{ color: token.colorTextTertiary }}>--</span>;
     }
 
     const rangeVisualization = cell.rangeVisualization;
@@ -141,6 +146,7 @@ const MeasurementRow = memo(function MeasurementRow({
     onToggleRow,
     onToggleStar,
 }: MeasurementRowProps) {
+    const { token } = antdTheme.useToken();
     const hasAnyCounter = overview.inRange > 0 || overview.outOfRange > 0;
 
     return (
@@ -160,7 +166,12 @@ const MeasurementRow = memo(function MeasurementRow({
                         aria-label={starred ? `Unstar ${row.measurement}` : `Star ${row.measurement}`}
                         onMouseDown={event => event.preventDefault()}
                         onClick={() => onToggleStar(row.key)}
-                        className={`grid h-5 w-5 place-items-center rounded-sm border border-transparent p-0 ${starred ? 'text-amber-600 hover:text-amber-700' : 'text-slate-400 hover:text-slate-700'} hover:border-slate-300 hover:bg-slate-50`}
+                        className='grid h-5 w-5 place-items-center rounded-sm border p-0'
+                        style={{
+                            borderColor: 'transparent',
+                            background: 'transparent',
+                            color: starred ? token.colorWarning : token.colorTextTertiary,
+                        }}
                     >
                         <Star size={14} weight={starred ? 'fill' : 'regular'} />
                     </button>
@@ -172,20 +183,28 @@ const MeasurementRow = memo(function MeasurementRow({
                     {hasAnyCounter ? (
                         <>
                             {overview.inRange > 0 && (
-                                <span className='inline-flex items-center gap-1 text-[11px] leading-none text-green-700' title={`${overview.inRange} in range`}>
+                                <span
+                                    className='inline-flex items-center gap-1 text-[11px] leading-none'
+                                    style={{ color: token.colorSuccess }}
+                                    title={`${overview.inRange} in range`}
+                                >
                                     <CheckCircle size={13} weight='fill' />
-                                    <span className='font-semibold text-slate-900'>{overview.inRange}</span>
+                                    <span className='font-semibold' style={{ color: token.colorText }}>{overview.inRange}</span>
                                 </span>
                             )}
                             {overview.outOfRange > 0 && (
-                                <span className='inline-flex items-center gap-1 text-[11px] leading-none text-red-700' title={`${overview.outOfRange} out of range`}>
+                                <span
+                                    className='inline-flex items-center gap-1 text-[11px] leading-none'
+                                    style={{ color: token.colorError }}
+                                    title={`${overview.outOfRange} out of range`}
+                                >
                                     <WarningCircle size={13} weight='fill' />
-                                    <span className='font-semibold text-slate-900'>{overview.outOfRange}</span>
+                                    <span className='font-semibold' style={{ color: token.colorText }}>{overview.outOfRange}</span>
                                 </span>
                             )}
                         </>
                     ) : (
-                        <span className='text-slate-500'>--</span>
+                        <span style={{ color: token.colorTextTertiary }}>--</span>
                     )}
                 </div>
             </td>
@@ -224,6 +243,8 @@ const CategoryRow = memo(function CategoryRow({
     selection,
     onToggleCategory,
 }: CategoryRowProps) {
+    const { token } = antdTheme.useToken();
+
     return (
         <tr className='vitals-category-row'>
             <td className='vitals-cell vitals-col-select'>
@@ -238,7 +259,7 @@ const CategoryRow = memo(function CategoryRow({
             <td className='vitals-cell vitals-col-measurement'>
                 <div className='inline-flex min-h-[22px] items-center gap-2'>
                     <strong>{row.category}</strong>
-                    <span className='text-[11px] text-slate-500'>{row.categoryCount}</span>
+                    <span className='text-[11px]' style={{ color: token.colorTextTertiary }}>{row.categoryCount}</span>
                 </div>
             </td>
             <td className='vitals-cell vitals-col-overview'>
