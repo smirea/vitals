@@ -105,6 +105,11 @@ type ActivePillRow = {
     activePeriod: PillPeriod
 }
 
+type FuturePillRow = {
+    pill: PillRecord
+    futurePeriod: PillPeriod
+}
+
 type PastPillRow = {
     key: string
     pill: PillRecord
@@ -229,6 +234,7 @@ function PillsRouteComponent() {
 
     const allPills = dashboard?.pills ?? []
     const activePills = dashboard?.activePills ?? []
+    const futurePills = dashboard?.futurePills ?? []
     const pastPills = dashboard?.pastPills ?? []
     const editedPill = useMemo(
         () => allPills.find(pill => pill.id === editPillId) ?? null,
@@ -244,6 +250,16 @@ function PillsRouteComponent() {
             }))
             .filter((row): row is ActivePillRow => row.activePeriod !== null),
         [activePills],
+    )
+    const futureRows = useMemo<FuturePillRow[]>(
+        () => futurePills
+            .map(pill => ({
+                pill,
+                futurePeriod: getFuturePeriod(pill),
+            }))
+            .filter((row): row is FuturePillRow => row.futurePeriod !== null)
+            .sort((left, right) => left.futurePeriod.startDate.localeCompare(right.futurePeriod.startDate)),
+        [futurePills],
     )
     const pastRows = useMemo<PastPillRow[]>(
         () => pastPills
@@ -707,6 +723,62 @@ function PillsRouteComponent() {
         },
     ]
 
+    const futureColumns: TableColumnsType<FuturePillRow> = [
+        {
+            title: 'Pill',
+            key: 'name',
+            render: (_: unknown, row: FuturePillRow) => renderPillNameCell(
+                row.pill,
+                row.futurePeriod.tags.map(tag => tag.name),
+            ),
+        },
+        {
+            title: 'Amount',
+            key: 'amount',
+            render: (_: unknown, row: FuturePillRow) => (
+                <Typography.Text>
+                    {formatServing(
+                        row.futurePeriod.valueOverride ?? row.pill.value,
+                        row.futurePeriod.unitOverride ?? row.pill.unit,
+                    )}
+                </Typography.Text>
+            ),
+        },
+        {
+            title: 'Timing',
+            key: 'timing',
+            render: (_: unknown, row: FuturePillRow) => (
+                <Typography.Text>{formatTiming(row.futurePeriod.timing)}</Typography.Text>
+            ),
+        },
+        {
+            title: 'Starts',
+            key: 'starts',
+            render: (_: unknown, row: FuturePillRow) => (
+                <Typography.Text>{formatRelativeDate(row.futurePeriod.startDate)}</Typography.Text>
+            ),
+        },
+        {
+            title: 'Components',
+            key: 'components',
+            render: (_: unknown, row: FuturePillRow) => renderComponents(row.pill.components),
+            onCell: row =>
+                row.pill.components.length > 0
+                    ? {
+                        onClick: () => {
+                            toggleExpandedComponentsRow(`future-${row.pill.id}`)
+                        },
+                        style: { cursor: 'pointer' },
+                    }
+                    : {},
+        },
+        {
+            title: 'Images',
+            key: 'images',
+            render: (_: unknown, row: FuturePillRow) => renderImages(row.pill.images),
+        },
+    ]
+
     const pastColumns: TableColumnsType<PastPillRow> = [
         {
             title: 'Pill',
@@ -809,6 +881,16 @@ function PillsRouteComponent() {
         showExpandColumn: false,
     }
 
+    const futureTableExpandable = {
+        expandedRowKeys: expandedComponentRowKeys,
+        expandedRowRender: (row: FuturePillRow) => renderExpandedComponents(row.pill.components),
+        onExpandedRowsChange: (keys: readonly Key[]) => {
+            setExpandedComponentRowKeys(keys.map(key => String(key)))
+        },
+        rowExpandable: (row: FuturePillRow) => row.pill.components.length > 0,
+        showExpandColumn: false,
+    }
+
     const pastTableExpandable = {
         expandedRowKeys: expandedComponentRowKeys,
         expandedRowRender: (row: PastPillRow) => renderExpandedComponents(row.pill.components),
@@ -844,6 +926,23 @@ function PillsRouteComponent() {
             />
 
             <div className='pills-page-inner'>
+                {futureRows.length > 0 ? (
+                    <Card
+                        title='Future pills'
+                        extra={<Typography.Text type='secondary'>{futureRows.length} rows</Typography.Text>}
+                    >
+                        <Table
+                            rowKey={row => String(row.pill.id)}
+                            size='small'
+                            columns={futureColumns}
+                            dataSource={futureRows}
+                            loading={dashboardQuery.isLoading}
+                            pagination={false}
+                            expandable={futureTableExpandable}
+                        />
+                    </Card>
+                ) : null}
+
                 <Card
                     title='Active pills'
                     extra={<Typography.Text type='secondary'>{activePills.length} rows</Typography.Text>}
@@ -1471,9 +1570,18 @@ function getActivePeriod(pill: PillRecord) {
     const today = getTodayDateString()
 
     return [...pill.periods]
-        .filter(period => !period.endDate || period.endDate > today)
+        .filter(period => period.startDate <= today && (!period.endDate || period.endDate > today))
         .sort((left, right) => left.startDate.localeCompare(right.startDate))
         .at(-1) ?? null
+}
+
+function getFuturePeriod(pill: PillRecord) {
+    const today = getTodayDateString()
+
+    return [...pill.periods]
+        .filter(period => period.startDate > today && (!period.endDate || period.endDate > today))
+        .sort((left, right) => left.startDate.localeCompare(right.startDate))
+        .at(0) ?? null
 }
 
 function formatPeriodRange(period: Pick<PillPeriod, 'startDate' | 'endDate'>) {

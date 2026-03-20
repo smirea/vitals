@@ -374,13 +374,21 @@ function splitPillsByStatus(pillRecords: PillRecord[]) {
   const today = getTodayDateString();
 
   const activePills: PillRecord[] = [];
+  const futurePills: PillRecord[] = [];
   const pastPills: PillRecord[] = [];
 
   for (const pill of pillRecords) {
-    const isActive = pill.periods.some((period) => !period.endDate || period.endDate > today);
+    const hasActivePeriod = pill.periods.some(
+      (period) => period.startDate <= today && (!period.endDate || period.endDate > today),
+    );
+    const hasFuturePeriod = pill.periods.some(
+      (period) => period.startDate > today && (!period.endDate || period.endDate > today),
+    );
 
-    if (isActive) {
+    if (hasActivePeriod) {
       activePills.push(pill);
+    } else if (hasFuturePeriod) {
+      futurePills.push(pill);
     } else {
       pastPills.push(pill);
     }
@@ -388,10 +396,12 @@ function splitPillsByStatus(pillRecords: PillRecord[]) {
 
   return {
     activePills,
+    futurePills,
     pastPills,
     totals: {
       all: pillRecords.length,
       active: activePills.length,
+      future: futurePills.length,
       past: pastPills.length,
     },
   };
