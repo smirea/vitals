@@ -70,11 +70,14 @@ import {
 	clamp,
 	type VitalsRowModel,
 } from './bloodwork/_bloodwork';
+import type { BloodworkImportDocument } from '../utils/api';
 import { useTRPC } from '../utils/trpc';
 
 export const Route = createFileRoute('/bloodwork')({
 	component: BloodworkPage,
 });
+
+const BLOODWORK_IMPORT_POLL_INTERVAL_MS = 3_000;
 
 function BloodworkPage() {
 	const viewport = useViewport();
@@ -106,13 +109,18 @@ function BloodworkPage() {
 		[starredMeasurementKeys],
 	);
 
-	const dashboardQuery = useQuery({
-		...trpc.bloodwork.getDashboard.queryOptions(),
-		refetchInterval: 3_000,
-	});
 	const documentsQuery = useQuery({
 		...trpc.bloodwork.listDocuments.queryOptions(),
-		refetchInterval: 3_000,
+		refetchInterval: query =>
+			hasActiveBloodworkImports((query.state.data ?? []) as BloodworkImportDocument[])
+				? BLOODWORK_IMPORT_POLL_INTERVAL_MS
+				: false,
+	});
+	const importDocuments = documentsQuery.data ?? [];
+	const hasActiveImportDocuments = hasActiveBloodworkImports(importDocuments);
+	const dashboardQuery = useQuery({
+		...trpc.bloodwork.getDashboard.queryOptions(),
+		refetchInterval: hasActiveImportDocuments ? BLOODWORK_IMPORT_POLL_INTERVAL_MS : false,
 	});
 	const uploadDocumentsMutation = useMutation({
 		...trpc.bloodwork.uploadDocuments.mutationOptions(),
@@ -149,7 +157,16 @@ function BloodworkPage() {
 	const documents = dashboard?.documents ?? [];
 	const measurements = dashboard?.measurements ?? [];
 	const results = dashboard?.results ?? [];
-	const importDocuments = documentsQuery.data ?? [];
+	const previousHasActiveImportDocumentsRef = useRef(hasActiveImportDocuments);
+
+	useEffect(() => {
+		const previousHadActiveImports = previousHasActiveImportDocumentsRef.current;
+		previousHasActiveImportDocumentsRef.current = hasActiveImportDocuments;
+
+		if (previousHadActiveImports && !hasActiveImportDocuments) {
+			void dashboardQuery.refetch();
+		}
+	}, [dashboardQuery.refetch, hasActiveImportDocuments]);
 
 	const orderedDocuments = useMemo(() => getOrderedDocuments(documents), [documents]);
 	const sources = useMemo(() => getSources(orderedDocuments), [orderedDocuments]);
@@ -894,6 +911,12 @@ function BloodworkPage() {
 				</Flex>
 			)}
 		</main>
+	);
+}
+
+function hasActiveBloodworkImports(documents: BloodworkImportDocument[]) {
+	return documents.some(
+		document => document.status === 'pending' || document.status === 'processing',
 	);
 }
 

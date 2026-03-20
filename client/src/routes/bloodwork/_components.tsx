@@ -305,10 +305,10 @@ const VitalsScope = styled.div`
 
 	.vitals-controls {
 		display: grid;
-		grid-template-columns: minmax(220px, 1fr) minmax(260px, 420px) auto auto;
-		gap: 10px 12px;
+		grid-template-columns: minmax(240px, 1fr) minmax(360px, 1.45fr) auto auto;
+		gap: 10px 16px;
 		border-bottom: 1px solid var(--vitals-border);
-		padding: 10px 0 14px;
+		padding: 10px 16px 14px;
 		background: var(--vitals-bg-container);
 		align-items: center;
 	}
@@ -368,6 +368,7 @@ const VitalsScope = styled.div`
 		flex-direction: column;
 		gap: 6px;
 		min-width: 0;
+		align-self: stretch;
 	}
 
 	.vitals-controls-range-labels {
@@ -1334,25 +1335,6 @@ export function VitalsControls({
 					/>
 				</label>
 
-				<label className='vitals-controls-toggle'>
-					<input
-						type='checkbox'
-						checked={groupByCategory}
-						onChange={event => onGroupByCategoryChange(event.target.checked)}
-					/>
-					Group by category
-				</label>
-
-				<button
-					type='button'
-					className='vitals-controls-button'
-					onClick={onDownloadCsv}
-					disabled={isDownloadCsvDisabled}
-				>
-					<DownloadSimple size={14} />
-					CSV
-				</button>
-
 				<div className='vitals-controls-range'>
 					<div className='vitals-controls-range-labels'>
 						<span>{startDateLabel}</span>
@@ -1381,6 +1363,25 @@ export function VitalsControls({
 						}}
 					/>
 				</div>
+
+				<label className='vitals-controls-toggle'>
+					<input
+						type='checkbox'
+						checked={groupByCategory}
+						onChange={event => onGroupByCategoryChange(event.target.checked)}
+					/>
+					Group by category
+				</label>
+
+				<button
+					type='button'
+					className='vitals-controls-button'
+					onClick={onDownloadCsv}
+					disabled={isDownloadCsvDisabled}
+				>
+					<DownloadSimple size={14} />
+					CSV
+				</button>
 			</div>
 		</ScopedVitals>
 	);

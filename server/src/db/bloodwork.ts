@@ -21,7 +21,6 @@ import {
 import env from 'server/env.ts';
 
 const LOCAL_TEXT_MIN_CHARACTERS_PER_PAGE = 320;
-const MAX_DOCUMENT_STATUS_ROWS = 16;
 
 const bloodworkUploadFileInputSchema = z.object({
 	fileName: z.string().trim().min(1),
@@ -193,8 +192,7 @@ export function listBloodworkDocuments(db: VitalsDatabase) {
 		.from(bloodworkDocuments)
 		.orderBy(bloodworkDocuments.id)
 		.all()
-		.reverse()
-		.slice(0, MAX_DOCUMENT_STATUS_ROWS);
+		.reverse();
 }
 
 export async function uploadBloodworkDocuments(
@@ -878,24 +876,14 @@ async function resolveNormalizationOutput(args: {
 	const { db, document, provider, modelId, probe, existingMeasurements, extractionPass } = args;
 
 	let lastError: unknown = null;
-	let lastSparseSummary: string | null = null;
 
 	for (let attempt = 1; attempt <= 2; attempt += 1) {
-		if (attempt === 2) {
-			if (lastError) {
-				updateBloodworkDocumentStatus(
-					db,
-					document,
-					'Retrying normalization after invalid response',
-				);
-				logBloodworkDocumentEvent(
-					document,
-					`Normalization retry reason: ${formatBloodworkError(lastError)}`,
-				);
-			} else if (lastSparseSummary) {
-				updateBloodworkDocumentStatus(db, document, 'Retrying normalization after sparse response');
-				logBloodworkDocumentEvent(document, `Normalization retry reason: ${lastSparseSummary}`);
-			}
+		if (attempt === 2 && lastError) {
+			updateBloodworkDocumentStatus(db, document, 'Retrying normalization after invalid response');
+			logBloodworkDocumentEvent(
+				document,
+				`Normalization retry reason: ${formatBloodworkError(lastError)}`,
+			);
 		}
 
 		try {
@@ -907,29 +895,12 @@ async function resolveNormalizationOutput(args: {
 				existingMeasurements,
 				extractionPass,
 			});
-			if (!shouldUseFallbackNormalization(extractionPass.output, normalizationPass.output)) {
-				return normalizationPass.output;
-			}
-
-			lastSparseSummary = [
-				`sparse response (${normalizationPass.output.results.length} normalized`,
-				`for ${extractionPass.output.measurements.length} extracted)`,
-			].join(' ');
-			if (attempt === 1) {
-				continue;
-			}
-
-			updateBloodworkDocumentStatus(
-				db,
-				document,
-				'Normalization response was sparse, using extracted rows fallback',
-			);
-			return buildFallbackNormalizationOutput({
-				existingMeasurements,
-				extractionOutput: extractionPass.output,
-			});
+			return normalizationPass.output;
 		} catch (error) {
-			if (extractionPass.output.measurements.length === 0) {
+			if (
+				extractionPass.output.measurements.length === 0 ||
+				!isRetryableNormalizationFormatError(error)
+			) {
 				throw error;
 			}
 
@@ -961,30 +932,15 @@ function formatBloodworkError(error: unknown) {
 	return error instanceof Error ? error.message : String(error);
 }
 
-function shouldUseFallbackNormalization(
-	extractionOutput: ExtractionPassOutput,
-	normalizationOutput: NormalizationPassOutput,
-) {
-	const extractedCount = extractionOutput.measurements.length;
-	const normalizedCount = normalizationOutput.results.length;
+function isRetryableNormalizationFormatError(error: unknown) {
+	const message = formatBloodworkError(error).toLowerCase();
 
-	if (extractedCount === 0) {
-		return false;
-	}
-
-	if (normalizedCount === 0) {
-		return true;
-	}
-
-	if (extractedCount >= 4 && normalizedCount === 1) {
-		return true;
-	}
-
-	if (extractedCount >= 10 && normalizedCount < Math.ceil(extractedCount * 0.5)) {
-		return true;
-	}
-
-	return false;
+	return (
+		message.includes('invalid input') ||
+		message.includes('invalid_type') ||
+		message.includes('expected') ||
+		message.includes('json')
+	);
 }
 
 function buildFallbackNormalizationOutput(args: {
@@ -1288,7 +1244,7 @@ async function generateStructuredOutput<T>(args: {
 			output: Output.object({
 				schema: args.schema,
 			}),
-			temperature: 0,
+			temperature: 0.25,
 			maxRetries: 2,
 			messages: args.messages,
 			maxOutputTokens: args.maxOutputTokens,
@@ -1300,7 +1256,7 @@ async function generateStructuredOutput<T>(args: {
 	} catch {
 		const textResult = await generateText({
 			model: args.model,
-			temperature: 0,
+			temperature: 0.75,
 			maxRetries: 1,
 			messages: args.messages,
 			maxOutputTokens: args.maxOutputTokens,
