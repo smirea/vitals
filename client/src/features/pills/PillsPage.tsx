@@ -75,6 +75,7 @@ type PillFormValues = {
   name: string;
   value: string;
   unit: string;
+  url: string;
   note: string;
   images: PillImageFormValue[];
   components: PillComponentFormValue[];
@@ -173,6 +174,7 @@ function createEmptyFormValues(): PillFormValues {
     name: "",
     value: "",
     unit: "",
+    url: "",
     note: "",
     images: [],
     components: [{ name: "", value: "", unit: "" }],
@@ -221,6 +223,7 @@ function pillToFormValues(
     name: pill.name,
     value: pill.value ?? "",
     unit: pill.unit ?? "",
+    url: pill.url ?? "",
     note: pill.note ?? "",
     images: pill.images.map((image, index) => ({
       id: image.id,
@@ -710,6 +713,7 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
       name: values.name,
       value: values.value,
       unit: values.unit,
+      url: values.url,
       note: values.note,
       images: getImagePayload(values.images),
       components: values.components,
@@ -1110,6 +1114,10 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
               <Input placeholder="e.g. capsules" />
             </Form.Item>
           </div>
+
+          <Form.Item label="URL" name="url">
+            <Input placeholder="Optional product URL" />
+          </Form.Item>
 
           <Form.Item label="Note" name="note">
             <Input.TextArea

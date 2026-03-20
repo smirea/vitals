@@ -139,6 +139,7 @@ export const pills = sqliteTable('pills', {
     name: text('name').notNull(),
     value: text('value'),
     unit: text('unit'),
+    url: text('url'),
     note: text('note'),
 }, table => [
     uniqueIndex('pills_name_idx').on(table.name),

@@ -42,6 +42,7 @@ export const pillUpsertInputSchema = z.object({
     name: z.string().trim().min(1),
     value: z.string().trim().min(1),
     unit: z.string().trim().min(1),
+    url: z.string().trim().optional().default(''),
     note: z.string().trim().optional().default(''),
     images: z.array(pillImageInputSchema).max(16),
     components: z.array(pillComponentInputSchema).max(200),
@@ -250,6 +251,7 @@ function buildPillsPayload(args: {
         name: row.name,
         value: row.value,
         unit: row.unit,
+        url: row.url,
         note: row.note,
         components: componentMap.get(row.id) ?? [],
         images: imageMap.get(row.id) ?? [],
@@ -375,6 +377,7 @@ export function upsertPill(db: VitalsDatabase, input: z.infer<typeof pillUpsertI
         throw new Error('A pill can only have one active date range at a time.');
     }
 
+    const normalizedUrl = normalizeOptionalText(input.url);
     const normalizedNote = normalizeOptionalText(input.note);
 
     try {
@@ -395,22 +398,24 @@ export function upsertPill(db: VitalsDatabase, input: z.infer<typeof pillUpsertI
 
             if (pillId === null) {
                 const insertedRow = tx.insert(pills).values({
-                    name,
-                    value: normalizedValue,
-                    unit: normalizedUnit,
-                    note: normalizedNote,
-                }).returning({
-                    id: pills.id,
+                name,
+                value: normalizedValue,
+                unit: normalizedUnit,
+                url: normalizedUrl,
+                note: normalizedNote,
+            }).returning({
+                id: pills.id,
                 }).get();
 
                 pillId = insertedRow.id;
             } else {
                 tx.update(pills).set({
-                    name,
-                    value: normalizedValue,
-                    unit: normalizedUnit,
-                    note: normalizedNote,
-                }).where(eq(pills.id, pillId)).run();
+                name,
+                value: normalizedValue,
+                unit: normalizedUnit,
+                url: normalizedUrl,
+                note: normalizedNote,
+            }).where(eq(pills.id, pillId)).run();
             }
 
             tx.delete(pillComponents).where(eq(pillComponents.pillId, pillId)).run();
