@@ -23,7 +23,6 @@ import {
   Spin,
   Statistic,
   Table,
-  Tag,
   Typography,
   Upload,
   message,
@@ -768,25 +767,15 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
       key: "name",
       width: 220,
       render: (_: unknown, row: ActivePillRow) => (
-        <div className="space-y-2">
-          <Button
-            type="link"
-            size="small"
-            className="!px-0 !font-semibold"
-            icon={<EditOutlined />}
-            onClick={() => openExistingPillDrawer(row.pill)}
-          >
-            {row.pill.name}
-          </Button>
-          <div className="flex flex-wrap gap-1.5">
-            {row.pill.images.length > 0 ? (
-              <Tag className="me-0 rounded-full">Images {row.pill.images.length}</Tag>
-            ) : null}
-            <Tag color="green" className="me-0 rounded-full">
-              {row.pill.periods.length} ranges
-            </Tag>
-          </div>
-        </div>
+        <Button
+          type="link"
+          size="small"
+          className="!px-0 !font-semibold"
+          icon={<EditOutlined />}
+          onClick={() => openExistingPillDrawer(row.pill)}
+        >
+          {row.pill.name}
+        </Button>
       ),
     },
     {
@@ -826,22 +815,6 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
           : {},
     },
     {
-      title: "Note",
-      key: "note",
-      width: 260,
-      render: (_: unknown, row: ActivePillRow) =>
-        row.pill.note ? (
-          <Typography.Paragraph
-            ellipsis={{ rows: 4, expandable: true, symbol: "more" }}
-            className="!mb-0 whitespace-pre-wrap"
-          >
-            {row.pill.note}
-          </Typography.Paragraph>
-        ) : (
-          <Typography.Text type="secondary">No note</Typography.Text>
-        ),
-    },
-    {
       title: "Images",
       key: "images",
       width: 220,
@@ -855,23 +828,15 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
       key: "name",
       width: 220,
       render: (_: unknown, row: PastPillRow) => (
-        <div className="space-y-2">
-          <Button
-            type="link"
-            size="small"
-            className="!px-0 !font-semibold"
-            icon={<EditOutlined />}
-            onClick={() => openExistingPillDrawer(row.pill)}
-          >
-            {row.pill.name}
-          </Button>
-          <div className="flex flex-wrap gap-1.5">
-            {row.pill.images.length > 0 ? (
-              <Tag className="me-0 rounded-full">Images {row.pill.images.length}</Tag>
-            ) : null}
-            <Tag className="me-0 rounded-full">{row.pill.periods.length} ranges</Tag>
-          </div>
-        </div>
+        <Button
+          type="link"
+          size="small"
+          className="!px-0 !font-semibold"
+          icon={<EditOutlined />}
+          onClick={() => openExistingPillDrawer(row.pill)}
+        >
+          {row.pill.name}
+        </Button>
       ),
     },
     {
@@ -906,22 +871,6 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
               style: { cursor: "pointer" },
             }
           : {},
-    },
-    {
-      title: "Note",
-      key: "note",
-      width: 260,
-      render: (_: unknown, row: PastPillRow) =>
-        row.pill.note ? (
-          <Typography.Paragraph
-            ellipsis={{ rows: 4, expandable: true, symbol: "more" }}
-            className="!mb-0 whitespace-pre-wrap"
-          >
-            {row.pill.note}
-          </Typography.Paragraph>
-        ) : (
-          <Typography.Text type="secondary">No note</Typography.Text>
-        ),
     },
     {
       title: "Images",
