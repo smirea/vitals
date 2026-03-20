@@ -485,10 +485,7 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
     onSuccess: () => {
       void queryClient.invalidateQueries();
       setIsCreateDrawerOpen(false);
-      setPillQuery("");
-      setHydratedEditPillId(null);
       onEditPillChange(null);
-      resetPillForm();
       message.success("Pill saved.");
     },
     onError: (error) => {
@@ -691,10 +688,7 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
 
   function handleCloseDrawer() {
     setIsCreateDrawerOpen(false);
-    setPillQuery("");
-    setHydratedEditPillId(null);
     onEditPillChange(null);
-    resetPillForm();
   }
 
   function toggleExpandedComponentsRow(rowKey: string) {
@@ -1062,6 +1056,15 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
         width={920}
         open={isDrawerOpen}
         onClose={handleCloseDrawer}
+        afterOpenChange={(open) => {
+          if (open) {
+            return;
+          }
+
+          setPillQuery("");
+          setHydratedEditPillId(null);
+          resetPillForm();
+        }}
         destroyOnHidden={false}
         styles={{
           body: {
