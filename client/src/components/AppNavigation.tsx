@@ -43,12 +43,12 @@ export function AppNavigation() {
     ))?.key ?? '/'
 
     return (
-        <div className='relative flex h-full flex-col' style={{ background: token.colorBgContainer }}>
+        <div className='app-nav' style={{ background: token.colorBgContainer }}>
             <div
-                className='px-5 py-4'
+                className='app-nav-header'
                 style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}
             >
-                <Typography.Title level={4} className='!mb-1'>
+                <Typography.Title level={4} className='app-nav-title'>
                     Vitals
                 </Typography.Title>
                 <Typography.Text type='secondary'>
@@ -60,7 +60,7 @@ export function AppNavigation() {
                 mode='inline'
                 theme={theme}
                 selectedKeys={[selectedKey]}
-                className='flex-1 border-e-0 pt-3 pb-24'
+                className='app-nav-menu'
                 style={{ background: token.colorBgContainer }}
                 items={navigationItems.map(item => ({
                     key: item.key,
@@ -68,9 +68,9 @@ export function AppNavigation() {
                     label: (
                         <Link
                             to={item.to}
-                            className='block w-full text-inherit no-underline'
-                            activeProps={{ className: 'text-inherit no-underline' }}
-                            inactiveProps={{ className: 'text-inherit no-underline' }}
+                            className='app-nav-link'
+                            activeProps={{ className: 'app-nav-link' }}
+                            inactiveProps={{ className: 'app-nav-link' }}
                         >
                             {item.label}
                         </Link>
@@ -79,13 +79,13 @@ export function AppNavigation() {
             />
 
             <div
-                className='absolute bottom-0 left-0 right-0 flex items-center justify-between gap-3 px-5 py-4'
+                className='app-nav-footer'
                 style={{
                     borderTop: `1px solid ${token.colorBorderSecondary}`,
                     background: token.colorBgContainer,
                 }}
             >
-                <div className='min-w-0'>
+                <div className='app-nav-footer-copy'>
                     <Typography.Text strong>
                         Dark mode
                     </Typography.Text>

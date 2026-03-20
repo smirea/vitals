@@ -11,28 +11,28 @@ function HomePage() {
 
     return (
         <main
-            className='flex h-full min-h-full items-center justify-center p-8'
+            className='home-page'
             style={{ background: token.colorBgLayout }}
         >
-            <Card className='w-full max-w-2xl'>
-                <div className='flex items-start gap-4'>
+            <Card className='home-card'>
+                <div className='home-card-content'>
                     <div
-                        className='rounded-xl p-3'
+                        className='home-icon-shell'
                         style={{
                             background: token.colorFillTertiary,
                             color: token.colorTextSecondary,
                         }}
                     >
-                        <HomeOutlined className='text-2xl' />
+                        <HomeOutlined className='home-icon' />
                     </div>
 
-                    <div className='space-y-2'>
-                        <Typography.Title level={2} className='!mb-0'>
+                    <div className='home-copy'>
+                        <Typography.Title level={2} className='home-copy-title'>
                             Home
                         </Typography.Title>
                         <Typography.Paragraph
-                            className='!mb-0 text-base'
-                            style={{ color: token.colorTextSecondary }}
+                            className='home-copy-body'
+                            style={{ color: token.colorTextSecondary, fontSize: 16 }}
                         >
                             This is a stub page for the routed app shell. Bloodwork now lives under the dedicated
                             `/bloodwork` page.

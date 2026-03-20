@@ -10,7 +10,7 @@ export const Route = createRootRoute({
         const { token } = antdTheme.useToken()
 
         return (
-            <Layout className='h-screen' style={{ background: token.colorBgLayout }}>
+            <Layout className='app-shell' style={{ background: token.colorBgLayout }}>
                 <Layout.Sider
                     width={240}
                     theme={theme}
@@ -19,8 +19,8 @@ export const Route = createRootRoute({
                     <AppNavigation />
                 </Layout.Sider>
 
-                <Layout className='min-w-0' style={{ background: token.colorBgLayout }}>
-                    <Layout.Content className='min-h-0 min-w-0'>
+                <Layout className='app-main-layout' style={{ background: token.colorBgLayout }}>
+                    <Layout.Content className='app-main-content'>
                         <Outlet />
                     </Layout.Content>
                 </Layout>

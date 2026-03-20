@@ -68,7 +68,7 @@ const SelectionCheckbox = memo(function SelectionCheckbox({
             disabled={disabled}
             aria-label={ariaLabel}
             onChange={event => onChange(event.target.checked)}
-            className='h-4 w-4 rounded disabled:cursor-not-allowed'
+            className='vitals-toggle-checkbox'
             style={{ accentColor: token.colorPrimary, borderColor: token.colorBorder }}
         />
     );
@@ -88,11 +88,11 @@ const MeasurementValueCell = memo(function MeasurementValueCell({ cell }: { cell
 
     return (
         <div className='vitals-cell-value'>
-            <div className='min-h-[18px]'>
+            <div style={{ minHeight: 18 }}>
                 <span>{cell.display}</span>
             </div>
             {rangeVisualization && cell.rangeCaption && (
-                <div className='flex flex-col gap-0.5'>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     <div className='vitals-range-track'>
                         {hasBand && (
                             <span
@@ -159,14 +159,14 @@ const MeasurementRow = memo(function MeasurementRow({
                 />
             </td>
             <td className='vitals-cell vitals-col-measurement'>
-                <div className='flex min-w-0 items-start gap-1.5' title={tooltip}>
+                <div style={{ display: 'flex', minWidth: 0, alignItems: 'flex-start', gap: 6 }} title={tooltip}>
                     <button
                         type='button'
                         aria-pressed={starred}
                         aria-label={starred ? `Unstar ${row.measurement}` : `Star ${row.measurement}`}
                         onMouseDown={event => event.preventDefault()}
                         onClick={() => onToggleStar(row.key)}
-                        className='grid h-5 w-5 place-items-center rounded-sm border p-0'
+                        className='vitals-star-button'
                         style={{
                             borderColor: 'transparent',
                             background: 'transparent',
@@ -175,31 +175,39 @@ const MeasurementRow = memo(function MeasurementRow({
                     >
                         <Star size={14} weight={starred ? 'fill' : 'regular'} />
                     </button>
-                    <span className={`min-w-0 break-words whitespace-normal leading-snug ${starred ? 'font-semibold' : ''}`}>{row.measurement}</span>
+                    <span
+                        style={{
+                            minWidth: 0,
+                            lineHeight: 1.35,
+                            overflowWrap: 'break-word',
+                            whiteSpace: 'normal',
+                            fontWeight: starred ? 600 : undefined,
+                        }}
+                    >
+                        {row.measurement}
+                    </span>
                 </div>
             </td>
             <td className='vitals-cell vitals-col-overview'>
-                <div className='inline-flex items-center gap-1.5 whitespace-nowrap'>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
                     {hasAnyCounter ? (
                         <>
                             {overview.inRange > 0 && (
                                 <span
-                                    className='inline-flex items-center gap-1 text-[11px] leading-none'
-                                    style={{ color: token.colorSuccess }}
+                                    style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: token.colorSuccess, fontSize: 11, lineHeight: 1 }}
                                     title={`${overview.inRange} in range`}
                                 >
                                     <CheckCircle size={13} weight='fill' />
-                                    <span className='font-semibold' style={{ color: token.colorText }}>{overview.inRange}</span>
+                                    <span style={{ color: token.colorText, fontWeight: 600 }}>{overview.inRange}</span>
                                 </span>
                             )}
                             {overview.outOfRange > 0 && (
                                 <span
-                                    className='inline-flex items-center gap-1 text-[11px] leading-none'
-                                    style={{ color: token.colorError }}
+                                    style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: token.colorError, fontSize: 11, lineHeight: 1 }}
                                     title={`${overview.outOfRange} out of range`}
                                 >
                                     <WarningCircle size={13} weight='fill' />
-                                    <span className='font-semibold' style={{ color: token.colorText }}>{overview.outOfRange}</span>
+                                    <span style={{ color: token.colorText, fontWeight: 600 }}>{overview.outOfRange}</span>
                                 </span>
                             )}
                         </>
@@ -257,20 +265,20 @@ const CategoryRow = memo(function CategoryRow({
                 />
             </td>
             <td className='vitals-cell vitals-col-measurement'>
-                <div className='inline-flex min-h-[22px] items-center gap-2'>
+                <div style={{ display: 'inline-flex', minHeight: 22, alignItems: 'center', gap: 8 }}>
                     <strong>{row.category}</strong>
-                    <span className='text-[11px]' style={{ color: token.colorTextTertiary }}>{row.categoryCount}</span>
+                    <span style={{ color: token.colorTextTertiary, fontSize: 11 }}>{row.categoryCount}</span>
                 </div>
             </td>
             <td className='vitals-cell vitals-col-overview'>
-                <div className='min-h-[18px]' />
+                <div style={{ minHeight: 18 }} />
             </td>
             {tableSources.map(source => (
                 <td
                     key={`${row.key}-${source.id}`}
                     className={`vitals-cell ${highlightedSourceIdSet.has(source.id) ? 'vitals-source-filter-active' : ''}`}
                 >
-                    <div className='min-h-[18px]' />
+                    <div style={{ minHeight: 18 }} />
                 </td>
             ))}
         </tr>
@@ -331,7 +339,7 @@ export const VitalsTable = memo(function VitalsTable({
     }, [rows]);
 
     return (
-        <div className='flex min-h-0 flex-1'>
+        <div style={{ display: 'flex', minHeight: 0, flex: 1 }}>
             <div ref={tableShellRef} className='vitals-table-shell'>
                 <table
                     className='vitals-table'

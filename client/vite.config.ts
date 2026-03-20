@@ -2,7 +2,6 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { tanstackRouter } from '@tanstack/router-plugin/vite';
 import tsconfigPaths from 'vite-tsconfig-paths';
-import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig(({ command }) => {
     const clientPort = Number(process.env.CLIENT_PORT);
@@ -30,7 +29,6 @@ export default defineConfig(({ command }) => {
                 autoCodeSplitting: true,
             }) as any,
             react(),
-            tailwindcss() as any,
         ],
     };
 });

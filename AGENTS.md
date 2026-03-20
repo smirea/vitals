@@ -11,5 +11,5 @@ This is an information dense, concise but comprehensive tool to analyze all sort
 - Tooling: Bun + TypeScript
 - Server: Bun.serve API
 - Client: React + Vite + TanStack Router
-- UI: Ant Design + Emotion + Tailwind CSS (enabled in client/src/index.css, avoid using tailwind)
+- UI: Ant Design + Emotion + plain CSS modules/files. Do not use Tailwind.
 - Linting and Hooks: Oxlint + Lefthook

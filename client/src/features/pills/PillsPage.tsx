@@ -381,7 +381,7 @@ function renderImages(images: PillImage[]) {
 
   return (
     <Image.PreviewGroup>
-      <div className="flex flex-wrap items-center gap-2">
+      <div className='pills-image-list'>
         {images.map((image) => (
           <Image
             key={image.id}
@@ -389,7 +389,7 @@ function renderImages(images: PillImage[]) {
             alt={image.fileName}
             width={44}
             height={44}
-            className="rounded-lg object-cover"
+            className='pills-image-preview'
           />
         ))}
       </div>
@@ -772,7 +772,7 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
         <Button
           type="link"
           size="small"
-          className="!px-0 !font-semibold"
+          className='pills-link-button'
           icon={<EditOutlined />}
           onClick={() => openExistingPillDrawer(row.pill)}
         >
@@ -833,7 +833,7 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
         <Button
           type="link"
           size="small"
-          className="!px-0 !font-semibold"
+          className='pills-link-button'
           icon={<EditOutlined />}
           onClick={() => openExistingPillDrawer(row.pill)}
         >
@@ -904,18 +904,18 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
 
   return (
     <main
-      className='h-full overflow-auto p-6'
+      className='pills-page'
       style={{ background: token.colorBgLayout }}
     >
-      <div className='mx-auto flex max-w-[1800px] flex-col gap-6'>
+      <div className='pills-page-inner'>
         <Card>
-          <div className='flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between'>
-            <div className='space-y-2'>
-              <Typography.Title level={2} className='!mb-0'>
+          <div className='pills-hero'>
+            <div className='pills-hero-copy'>
+              <Typography.Title level={2} className='pills-hero-title'>
                 Pills
               </Typography.Title>
               <Typography.Paragraph
-                className='!mb-0 max-w-3xl'
+                className='pills-hero-description'
                 style={{ color: token.colorTextSecondary }}
               >
                 Log canonical pills, track every period they were taken, and keep the supplement
@@ -928,9 +928,9 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
             </Button>
           </div>
 
-          <Divider className='!my-5' />
+          <Divider className='pills-section-divider' />
 
-          <div className='grid gap-4 md:grid-cols-3'>
+          <div className='pills-stats'>
             <Card size='small' style={{ background: token.colorFillAlter }}>
               <Statistic title='All Pills' value={totals.all} />
             </Card>
@@ -1024,12 +1024,12 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
             <Input />
           </Form.Item>
 
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className='pills-form-grid'>
             <Form.Item
               label="Pill name"
               name="name"
               rules={[{ required: true, message: "Enter a pill name." }]}
-              className="md:col-span-2"
+              className='pills-form-grid-full'
             >
               <AutoComplete
                 options={autocompleteOptions}
@@ -1081,8 +1081,8 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
             />
           </Form.Item>
 
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <Divider className="!my-0 !min-w-0 !flex-1">Images</Divider>
+          <div className='pills-images-header'>
+            <Divider className='pills-images-divider'>Images</Divider>
 
             {watchedImages.length > 0 ? (
               <Button
@@ -1104,22 +1104,13 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
 
           <Image.PreviewGroup>
             <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: 8,
-                alignItems: "flex-start",
-              }}
+              className='pills-images-grid'
             >
               {watchedImages.map((image) => (
                 <div
                   key={image.uid}
+                  className='pills-image-tile'
                   style={{
-                    position: "relative",
-                    width: IMAGE_TILE_SIZE,
-                    height: IMAGE_TILE_SIZE,
-                    borderRadius: 8,
-                    overflow: "hidden",
                     border: "1px solid var(--ant-color-border-secondary)",
                     background: "var(--ant-color-bg-container)",
                   }}
@@ -1138,41 +1129,24 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
                     onClick={() => {
                       form.setFieldValue("images", removeImageByUid(watchedImages, image.uid));
                     }}
-                    style={{
-                      position: "absolute",
-                      top: 6,
-                      right: 6,
-                    }}
+                    className='pills-image-remove'
                   />
                 </div>
               ))}
 
               <Dragger
                 {...uploadProps}
+                className='pills-upload-tile'
                 style={{
                   width: IMAGE_TILE_SIZE,
                   height: IMAGE_TILE_SIZE,
                 }}
               >
-                <div
-                  style={{
-                    display: "flex",
-                    height: "100%",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 6,
-                    padding: 8,
-                  }}
-                >
+                <div className='pills-upload-inner'>
                   <UploadOutlined style={{ fontSize: 20 }} />
                   <Typography.Text
+                    className='pills-upload-label'
                     type="secondary"
-                    style={{
-                      fontSize: 12,
-                      lineHeight: 1.2,
-                      textAlign: "center",
-                    }}
                   >
                     Drop or upload
                   </Typography.Text>
@@ -1183,7 +1157,7 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
 
           {isParsingImages ? (
             <div
-              className="mt-2 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm"
+              className='pills-parsing-banner'
               style={{
                 borderColor: token.colorInfoBorder,
                 background: token.colorInfoBg,
@@ -1191,7 +1165,7 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
               }}
             >
               <Spin size="small" />
-              <Typography.Text style={{ color: token.colorInfoText }}>
+              <Typography.Text className='pills-parsing-banner-text'>
                 Parsing uploaded images and filling the form…
               </Typography.Text>
             </div>
@@ -1201,7 +1175,7 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
 
           <Form.List name="periods">
             {(fields, { add, remove }) => (
-              <Space direction="vertical" size={8} className="flex">
+              <Space direction="vertical" size={8} className='pills-list-space'>
                 <Table
                   size="small"
                   pagination={false}
@@ -1346,7 +1320,7 @@ export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
 
           <Form.List name="components">
             {(fields, { add, remove }) => (
-              <Space direction="vertical" size={8} className="flex">
+              <Space direction="vertical" size={8} className='pills-list-space'>
                 <Table
                   size="small"
                   pagination={false}

@@ -570,7 +570,11 @@ export function VitalsDashboard() {
     const chartContent = useMemo(() => (
         chartSeries.length > 0
             ? <TrendChart series={chartSeries} orderedSources={chartSources} isMobile={isMobileViewport} />
-            : <div className='grid h-full place-items-center p-4'><Empty description='No numeric values in the selected rows for this date range.' /></div>
+            : (
+                <div className='vitals-chart-fallback'>
+                    <Empty description='No numeric values in the selected rows for this date range.' />
+                </div>
+            )
     ), [chartSeries, chartSources, isMobileViewport]);
 
     const vitalsThemeStyle: CSSProperties = {
@@ -605,7 +609,7 @@ export function VitalsDashboard() {
         <main className='vitals-page' style={vitalsThemeStyle}>
             {dashboardQuery.isLoading ? (
                 <section
-                    className='grid h-full w-full place-items-center border'
+                    className='vitals-loading-panel'
                     style={{ borderColor: token.colorBorder, background: token.colorBgContainer }}
                 >
                     <Spin size='large' />
@@ -619,7 +623,7 @@ export function VitalsDashboard() {
                 />
             ) : !hasAnyData ? (
                 <section
-                    className='grid h-full w-full place-items-center border'
+                    className='vitals-loading-panel'
                     style={{ borderColor: token.colorBorder, background: token.colorBgContainer }}
                 >
                     <Empty description='No bloodwork data found yet.' />
@@ -636,7 +640,7 @@ export function VitalsDashboard() {
                         }}
                     >
                         <section
-                            className='flex min-h-0 min-w-0 flex-col border'
+                            className='vitals-panel'
                             style={{ borderColor: token.colorBorder, background: token.colorBgContainer }}
                         >
                             <CategoriesOverview items={categoryOverview} />
@@ -683,11 +687,11 @@ export function VitalsDashboard() {
                                     event.preventDefault();
                                     setIsResizing(true);
                                 }}
-                                className='relative cursor-col-resize'
+                                className='vitals-resizer'
                                 style={{ background: token.colorFillSecondary }}
                             >
                                 <span
-                                    className='absolute bottom-0 left-1/2 top-0 w-[2px] -translate-x-1/2'
+                                    className='vitals-resizer-handle'
                                     style={{ background: token.colorTextTertiary }}
                                 />
                             </div>
@@ -695,11 +699,15 @@ export function VitalsDashboard() {
 
                         {showSplitLayout && (
                             <section
-                                className='flex min-h-0 min-w-0 flex-col border border-l-0'
-                                style={{ borderColor: token.colorBorder, background: token.colorBgContainer }}
+                                className='vitals-panel'
+                                style={{
+                                    borderColor: token.colorBorder,
+                                    background: token.colorBgContainer,
+                                    borderLeftWidth: 0,
+                                }}
                             >
                                 <div
-                                    className='inline-flex items-center gap-2 border-b px-3 py-2.5'
+                                    className='vitals-panel-header'
                                     style={{ borderColor: token.colorBorder }}
                                 >
                                     <ChartLineUp size={18} weight='duotone' />
@@ -712,11 +720,11 @@ export function VitalsDashboard() {
 
                     {hasSelectedRows && isMobileViewport && (
                         <section
-                            className='flex min-h-0 min-w-0 flex-col border'
+                            className='vitals-panel'
                             style={{ borderColor: token.colorBorder, background: token.colorBgContainer }}
                         >
                             <div
-                                className='inline-flex items-center gap-2 border-b px-3 py-2.5'
+                                className='vitals-panel-header'
                                 style={{ borderColor: token.colorBorder }}
                             >
                                 <ChartLineUp size={18} weight='duotone' />

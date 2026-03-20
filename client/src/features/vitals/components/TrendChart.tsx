@@ -94,8 +94,8 @@ export const TrendChart = memo(function TrendChart({
     );
 
     return (
-        <div className='flex w-full flex-col gap-3 p-3'>
-            <div className={`w-full ${isMobile ? 'h-[260px] min-h-[220px]' : 'h-[380px] min-h-[320px]'}`}>
+        <div style={{ display: 'flex', width: '100%', flexDirection: 'column', gap: 12, padding: 12 }}>
+            <div style={{ width: '100%', height: isMobile ? 260 : 380, minHeight: isMobile ? 220 : 320 }}>
                 {hasNumericData ? (
                     <ResponsiveContainer width='100%' height='100%'>
                         <LineChart
@@ -142,14 +142,19 @@ export const TrendChart = memo(function TrendChart({
 
                                     return (
                                             <div
-                                                className='min-w-[260px] max-w-[440px] rounded border px-3 py-2'
                                                 style={{
+                                                    minWidth: 260,
+                                                    maxWidth: 440,
+                                                    padding: '8px 12px',
+                                                    borderRadius: 8,
+                                                    borderStyle: 'solid',
+                                                    borderWidth: 1,
                                                     borderColor: token.colorBorder,
                                                     background: token.colorBgContainer,
                                                     boxShadow: token.boxShadowSecondary,
                                                 }}
                                             >
-                                                <div className='mb-2 text-xs font-semibold' style={{ color: token.colorText }}>
+                                                <div style={{ marginBottom: 8, color: token.colorText, fontSize: 12, fontWeight: 600 }}>
                                                     {source.prettyDate}
                                                 </div>
                                             {visibleSeries.map(item => {
@@ -163,12 +168,12 @@ export const TrendChart = memo(function TrendChart({
                                                     ? `${displayValue} (${rangeLabel})`
                                                     : displayValue;
                                                 return (
-                                                    <div key={`${label}-${item.id}`} className='flex items-center gap-2 py-[2px]'>
-                                                        <span className='h-[10px] w-[10px] rounded-full' style={{ background: item.color }} />
-                                                        <span className='min-w-0 flex-1 text-xs' style={{ color: token.colorTextSecondary }}>
+                                                    <div key={`${label}-${item.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
+                                                        <span style={{ width: 10, height: 10, borderRadius: '999px', background: item.color }} />
+                                                        <span style={{ minWidth: 0, flex: 1, color: token.colorTextSecondary, fontSize: 12 }}>
                                                             {displayLabel}
                                                         </span>
-                                                        <span className='ml-auto text-xs font-semibold' style={{ color: token.colorText }}>
+                                                        <span style={{ marginLeft: 'auto', color: token.colorText, fontSize: 12, fontWeight: 600 }}>
                                                             {valueWithRange}
                                                         </span>
                                                     </div>
@@ -183,7 +188,7 @@ export const TrendChart = memo(function TrendChart({
                                 align='left'
                                 iconSize={8}
                                 formatter={value => (
-                                    <span className='text-[11px] leading-tight' style={{ color: token.colorTextSecondary }}>
+                                    <span style={{ color: token.colorTextSecondary, fontSize: 11, lineHeight: 1.2 }}>
                                         {value}
                                     </span>
                                 )}
@@ -246,22 +251,22 @@ export const TrendChart = memo(function TrendChart({
                         </LineChart>
                     </ResponsiveContainer>
                 ) : (
-                    <div className='grid h-full place-items-center'>
+                    <div style={{ display: 'grid', height: '100%', placeItems: 'center' }}>
                         <Empty description='No numeric values in the selected rows for this date range.' />
                     </div>
                 )}
             </div>
 
-            <section className='flex flex-col gap-1.5'>
-                <h3 className='m-0 text-xs font-semibold uppercase tracking-[0.04em]' style={{ color: token.colorTextSecondary }}>
+            <section style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <h3 style={{ margin: 0, color: token.colorTextSecondary, fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                     Selected values
                 </h3>
-                <div className='overflow-x-auto border' style={{ borderColor: token.colorBorder }}>
-                    <table className='min-w-full w-max border-collapse text-xs'>
+                <div className='trend-chart-table-shell' style={{ borderColor: token.colorBorder }}>
+                    <table className='trend-chart-table'>
                         <thead>
                             <tr>
                                 <th
-                                    className='sticky top-0 z-[1] border px-2 py-1.5 text-left'
+                                    className='trend-chart-table-head'
                                     style={{
                                         borderColor: token.colorBorderSecondary,
                                         background: token.colorFillAlter,
@@ -273,7 +278,7 @@ export const TrendChart = memo(function TrendChart({
                                 {visibleSeries.map(item => (
                                     <th
                                         key={`selected-values-heading-${item.id}`}
-                                        className='sticky top-0 z-[1] border px-2 py-1.5 text-left'
+                                        className='trend-chart-table-head'
                                         style={{
                                             borderColor: token.colorBorderSecondary,
                                             background: token.colorFillAlter,
@@ -291,7 +296,7 @@ export const TrendChart = memo(function TrendChart({
                                     key={`selected-values-row-${source.id}`}
                                     style={{ background: index % 2 === 0 ? token.colorFillQuaternary : undefined }}
                                 >
-                                    <td className='border px-2 py-1.5' style={{ borderColor: token.colorBorderSecondary }}>
+                                    <td className='trend-chart-table-cell' style={{ borderColor: token.colorBorderSecondary }}>
                                         {source.prettyDate}
                                     </td>
                                     {visibleSeries.map(item => {
@@ -299,7 +304,7 @@ export const TrendChart = memo(function TrendChart({
                                         return (
                                             <td
                                                 key={`selected-values-${source.id}-${item.id}`}
-                                                className='border px-2 py-1.5'
+                                                className='trend-chart-table-cell'
                                                 style={{ borderColor: token.colorBorderSecondary }}
                                             >
                                                 {cell?.display ?? '--'}

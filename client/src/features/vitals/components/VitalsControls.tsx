@@ -43,20 +43,20 @@ export function VitalsControls({
 
     return (
         <div
-            className={`grid items-center gap-y-2 gap-x-4 border-b p-2 ${isMobile ? 'grid-cols-1' : 'grid-cols-[minmax(240px,1fr)_minmax(320px,1.35fr)_auto_auto]'}`}
+            className={`vitals-controls ${isMobile ? 'vitals-controls-mobile' : 'vitals-controls-desktop'}`}
             style={{ borderColor: token.colorBorder }}
         >
-            <label className='relative flex items-center'>
+            <label className='vitals-filter-label'>
                 <Drop
                     size={16}
-                    className='pointer-events-none absolute left-2'
+                    className='vitals-filter-icon'
                     style={{ color: token.colorTextSecondary }}
                 />
                 <input
                     value={measurementFilter}
                     onChange={onMeasurementFilterChange}
                     placeholder='Filter measurements'
-                    className='h-8 w-full rounded-sm border pl-8 pr-2 text-sm outline-none transition'
+                    className='vitals-filter-input'
                     style={{
                         borderColor: token.colorBorder,
                         background: token.colorBgContainer,
@@ -65,9 +65,9 @@ export function VitalsControls({
                 />
             </label>
 
-            <div className='relative flex h-8 min-w-0 items-center'>
+            <div className='vitals-slider'>
                 <span
-                    className='pointer-events-none absolute whitespace-nowrap text-left text-[11px] uppercase tracking-[0.04em]'
+                    className='vitals-slider-label'
                     style={{
                         color: token.colorTextSecondary,
                         left: `${startHandlePercent}%`,
@@ -78,7 +78,7 @@ export function VitalsControls({
                     {startDateLabel}
                 </span>
                 <span
-                    className='pointer-events-none absolute whitespace-nowrap text-right text-[11px] uppercase tracking-[0.04em]'
+                    className='vitals-slider-label'
                     style={{
                         color: token.colorTextSecondary,
                         left: `${endHandlePercent}%`,
@@ -109,12 +109,12 @@ export function VitalsControls({
                 />
             </div>
 
-            <label className='inline-flex items-center gap-2 text-sm' style={{ color: token.colorText }}>
+            <label className='vitals-toggle-label' style={{ color: token.colorText }}>
                 <input
                     type='checkbox'
                     checked={groupByCategory}
                     onChange={onGroupByCategoryChange}
-                    className='h-4 w-4 rounded'
+                    className='vitals-toggle-checkbox'
                     style={{ accentColor: token.colorPrimary, borderColor: token.colorBorder }}
                 />
                 Group by category
@@ -124,7 +124,7 @@ export function VitalsControls({
                 type='button'
                 onClick={onDownloadCsv}
                 disabled={isDownloadCsvDisabled}
-                className='inline-flex h-8 items-center gap-1.5 rounded-sm border px-3 text-sm transition disabled:cursor-not-allowed disabled:opacity-50'
+                className='vitals-download-button'
                 style={{
                     borderColor: token.colorBorder,
                     background: token.colorBgContainer,
