@@ -76,6 +76,14 @@ type PillRecord = ReturnType<typeof buildPillsPayload>[number];
 type PillsReadDb = Pick<VitalsDatabase, 'select'>;
 type PillImageExtraction = z.infer<typeof pillImageExtractionSchema>;
 
+function getTodayDateString() {
+    const date = new Date();
+    const year = String(date.getFullYear());
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
 function normalizeOptionalText(value: string | null | undefined) {
     const trimmed = value?.trim() ?? '';
     return trimmed.length > 0 ? trimmed : null;
@@ -148,6 +156,21 @@ function sanitizePillPeriods(args: {
 
             return period;
         });
+}
+
+function getActivePeriodCount(periods: Array<{
+    endDate: string | null;
+}>) {
+    const today = getTodayDateString();
+    return periods.filter(period => !period.endDate || period.endDate > today).length;
+}
+
+function normalizePillWriteError(error: unknown, name: string) {
+    if (error instanceof Error && error.message.includes('UNIQUE constraint failed: pills.name')) {
+        return new Error(`A pill named '${name}' already exists.`);
+    }
+
+    return error;
 }
 
 function parseDataUrl(dataUrl: string) {
@@ -235,7 +258,7 @@ function buildPillsPayload(args: {
 }
 
 function splitPillsByStatus(pillRecords: PillRecord[]) {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getTodayDateString();
 
     const activePills: PillRecord[] = [];
     const pastPills: PillRecord[] = [];
@@ -348,115 +371,114 @@ export function upsertPill(db: VitalsDatabase, input: z.infer<typeof pillUpsertI
     if (periods.length === 0) {
         throw new Error('At least one pill date range is required.');
     }
+    if (getActivePeriodCount(periods) > 1) {
+        throw new Error('A pill can only have one active date range at a time.');
+    }
 
     const normalizedNote = normalizeOptionalText(input.note);
 
-    return db.transaction(tx => {
-        let pillId = input.id ?? null;
+    try {
+        return db.transaction(tx => {
+            let pillId = input.id ?? null;
 
-        if (pillId !== null) {
-            const existingPill = tx.select({
-                id: pills.id,
-            }).from(pills)
-                .where(eq(pills.id, pillId))
-                .get();
-
-            if (!existingPill) {
-                throw new Error(`Pill ${pillId} does not exist.`);
-            }
-        } else {
-            const existingPill = tx.select({
-                id: pills.id,
-            }).from(pills)
-                .where(eq(pills.name, name))
-                .get();
-
-            pillId = existingPill?.id ?? null;
-        }
-
-        if (pillId === null) {
-            const insertedRow = tx.insert(pills).values({
-                name,
-                value: normalizedValue,
-                unit: normalizedUnit,
-                note: normalizedNote,
-            }).returning({
-                id: pills.id,
-            }).get();
-
-            pillId = insertedRow.id;
-        } else {
-            tx.update(pills).set({
-                name,
-                value: normalizedValue,
-                unit: normalizedUnit,
-                note: normalizedNote,
-            }).where(eq(pills.id, pillId)).run();
-        }
-
-        tx.delete(pillComponents).where(eq(pillComponents.pillId, pillId)).run();
-        tx.delete(pillImages).where(eq(pillImages.pillId, pillId)).run();
-
-        if (components.length > 0) {
-            tx.insert(pillComponents).values(
-                components.map((component, index) => ({
-                    pillId,
-                    sortOrder: index,
-                    name: component.name,
-                    value: component.value,
-                    unit: component.unit,
-                })),
-            ).run();
-        }
-
-        if (input.images.length > 0) {
-            tx.insert(pillImages).values(
-                input.images.map((image, index) => ({
-                    pillId,
-                    sortOrder: index,
-                    fileName: image.fileName,
-                    dataUrl: image.dataUrl,
-                })),
-            ).run();
-        }
-
-        for (const period of periods) {
-            if (period.id) {
-                const existingPeriod = tx.select({
-                    id: pillPeriods.id,
-                }).from(pillPeriods)
-                    .where(and(
-                        eq(pillPeriods.id, period.id),
-                        eq(pillPeriods.pillId, pillId),
-                    ))
+            if (pillId !== null) {
+                const existingPill = tx.select({
+                    id: pills.id,
+                }).from(pills)
+                    .where(eq(pills.id, pillId))
                     .get();
 
-                if (!existingPeriod) {
-                    throw new Error(`Pill period ${period.id} does not belong to pill ${pillId}.`);
+                if (!existingPill) {
+                    throw new Error(`Pill ${pillId} does not exist.`);
+                }
+            }
+
+            if (pillId === null) {
+                const insertedRow = tx.insert(pills).values({
+                    name,
+                    value: normalizedValue,
+                    unit: normalizedUnit,
+                    note: normalizedNote,
+                }).returning({
+                    id: pills.id,
+                }).get();
+
+                pillId = insertedRow.id;
+            } else {
+                tx.update(pills).set({
+                    name,
+                    value: normalizedValue,
+                    unit: normalizedUnit,
+                    note: normalizedNote,
+                }).where(eq(pills.id, pillId)).run();
+            }
+
+            tx.delete(pillComponents).where(eq(pillComponents.pillId, pillId)).run();
+            tx.delete(pillImages).where(eq(pillImages.pillId, pillId)).run();
+
+            if (components.length > 0) {
+                tx.insert(pillComponents).values(
+                    components.map((component, index) => ({
+                        pillId,
+                        sortOrder: index,
+                        name: component.name,
+                        value: component.value,
+                        unit: component.unit,
+                    })),
+                ).run();
+            }
+
+            if (input.images.length > 0) {
+                tx.insert(pillImages).values(
+                    input.images.map((image, index) => ({
+                        pillId,
+                        sortOrder: index,
+                        fileName: image.fileName,
+                        dataUrl: image.dataUrl,
+                    })),
+                ).run();
+            }
+
+            for (const period of periods) {
+                if (period.id) {
+                    const existingPeriod = tx.select({
+                        id: pillPeriods.id,
+                    }).from(pillPeriods)
+                        .where(and(
+                            eq(pillPeriods.id, period.id),
+                            eq(pillPeriods.pillId, pillId),
+                        ))
+                        .get();
+
+                    if (!existingPeriod) {
+                        throw new Error(`Pill period ${period.id} does not belong to pill ${pillId}.`);
+                    }
+
+                    tx.update(pillPeriods).set({
+                        startDate: period.startDate,
+                        endDate: period.endDate,
+                        valueOverride: period.valueOverride,
+                        unitOverride: period.unitOverride,
+                        timing: period.timing,
+                    }).where(eq(pillPeriods.id, period.id)).run();
+                    continue;
                 }
 
-                tx.update(pillPeriods).set({
+                tx.insert(pillPeriods).values({
+                    pillId,
                     startDate: period.startDate,
                     endDate: period.endDate,
                     valueOverride: period.valueOverride,
                     unitOverride: period.unitOverride,
                     timing: period.timing,
-                }).where(eq(pillPeriods.id, period.id)).run();
-                continue;
+                }).run();
             }
 
-            tx.insert(pillPeriods).values({
-                pillId,
-                startDate: period.startDate,
-                endDate: period.endDate,
-                valueOverride: period.valueOverride,
-                unitOverride: period.unitOverride,
-                timing: period.timing,
-            }).run();
-        }
-
-        return getPillRecords(tx, [pillId])[0];
-    });
+            return getPillRecords(tx, [pillId])[0];
+        });
+    } catch (error) {
+        throw normalizePillWriteError(error, name);
+    }
 }
 
 export async function extractPillFromImages(input: z.infer<typeof pillImageExtractionInputSchema>) {
