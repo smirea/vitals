@@ -21,6 +21,7 @@ export const bloodworkDocuments = sqliteTable(
 		pdfData: blob('pdf_data', { mode: 'buffer' }).notNull(),
 		sha256: text('sha256').notNull(),
 		status: text('status', { enum: bloodworkDocumentStatusValues }).notNull().default('pending'),
+		statusText: text('status_text').notNull().default('Queued for import'),
 		queuedAt: text('queued_at').notNull(),
 		startedAt: text('started_at'),
 		completedAt: text('completed_at'),

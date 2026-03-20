@@ -184,6 +184,7 @@ export function listBloodworkDocuments(db: VitalsDatabase) {
 			id: bloodworkDocuments.id,
 			fileName: bloodworkDocuments.fileName,
 			status: bloodworkDocuments.status,
+			statusText: bloodworkDocuments.statusText,
 			date: bloodworkDocuments.date,
 			labName: bloodworkDocuments.labName,
 			queuedAt: bloodworkDocuments.queuedAt,
@@ -327,14 +328,32 @@ function claimNextPendingBloodworkDocument(db: VitalsDatabase) {
 }
 
 export function resetStuckBloodworkDocuments(db = getDatabase()) {
+	const interruptedDocuments = db
+		.select({
+			id: bloodworkDocuments.id,
+			fileName: bloodworkDocuments.fileName,
+		})
+		.from(bloodworkDocuments)
+		.where(eq(bloodworkDocuments.status, 'processing'))
+		.all();
+
+	if (interruptedDocuments.length === 0) {
+		return;
+	}
+
 	db.update(bloodworkDocuments)
 		.set({
 			status: 'pending',
+			statusText: 'Queued after interrupted processing',
 			startedAt: null,
 			lastError: 'Processing was interrupted and has been retried.',
 		})
 		.where(eq(bloodworkDocuments.status, 'processing'))
 		.run();
+
+	for (const document of interruptedDocuments) {
+		logBloodworkDocumentEvent(document, 'Queued after interrupted processing');
+	}
 }
 
 export function enqueueBloodworkDocuments(
@@ -350,6 +369,7 @@ export function enqueueBloodworkDocuments(
 		id: number;
 		fileName: string;
 		status: BloodworkDocumentRow['status'];
+		statusText: string;
 		queuedAt: string;
 		deduplicated: boolean;
 	}> = [];
@@ -361,6 +381,7 @@ export function enqueueBloodworkDocuments(
 				id: bloodworkDocuments.id,
 				fileName: bloodworkDocuments.fileName,
 				status: bloodworkDocuments.status,
+				statusText: bloodworkDocuments.statusText,
 				queuedAt: bloodworkDocuments.queuedAt,
 			})
 			.from(bloodworkDocuments)
@@ -368,6 +389,7 @@ export function enqueueBloodworkDocuments(
 			.get();
 
 		if (existing) {
+			logBloodworkDocumentEvent(existing, 'Duplicate upload skipped');
 			queued.push({
 				...existing,
 				deduplicated: true,
@@ -383,12 +405,14 @@ export function enqueueBloodworkDocuments(
 				pdfData: file.pdfData,
 				sha256,
 				status: 'pending',
+				statusText: 'Queued for import',
 				queuedAt: now,
 			})
 			.returning({
 				id: bloodworkDocuments.id,
 				fileName: bloodworkDocuments.fileName,
 				status: bloodworkDocuments.status,
+				statusText: bloodworkDocuments.statusText,
 				queuedAt: bloodworkDocuments.queuedAt,
 			})
 			.get();
@@ -397,9 +421,32 @@ export function enqueueBloodworkDocuments(
 			...inserted,
 			deduplicated: false,
 		});
+		logBloodworkDocumentEvent(inserted, inserted.statusText);
 	}
 
 	return queued;
+}
+
+function updateBloodworkDocumentStatus(
+	db: VitalsDatabase,
+	document: Pick<BloodworkDocumentRow, 'id' | 'fileName'>,
+	statusText: string,
+) {
+	db.update(bloodworkDocuments)
+		.set({
+			statusText,
+		})
+		.where(eq(bloodworkDocuments.id, document.id))
+		.run();
+
+	logBloodworkDocumentEvent(document, statusText);
+}
+
+function logBloodworkDocumentEvent(
+	document: Pick<BloodworkDocumentRow, 'id' | 'fileName'>,
+	message: string,
+) {
+	console.log(`[bloodwork] #${document.id} ${document.fileName}: ${message}`);
 }
 
 async function processBloodworkDocument(db: VitalsDatabase, documentId: number) {
@@ -413,28 +460,27 @@ async function processBloodworkDocument(db: VitalsDatabase, documentId: number) 
 	}
 
 	try {
+		updateBloodworkDocumentStatus(db, document, 'Extracting text from PDF');
 		const probe = await probePdf(document);
 		const provider = getOpenRouterProvider();
 		const modelId = getBloodworkModelId();
 		const existingMeasurements = db.select().from(bloodworkMeasurements).all();
+		updateBloodworkDocumentStatus(db, document, 'Extracting measurements from document');
 		const extractionPass = await runExtractionPass({
 			provider,
 			modelId,
 			document,
 			probe,
 		});
-		const normalizationPass = await runNormalizationPass({
+		updateBloodworkDocumentStatus(db, document, 'Normalizing measurements');
+		const normalizationOutput = await resolveNormalizationOutput({
+			db,
+			document,
 			provider,
 			modelId,
-			document,
 			probe,
 			existingMeasurements,
 			extractionPass,
-		});
-		const normalizationOutput = selectNormalizationOutput({
-			existingMeasurements,
-			extractionOutput: extractionPass.output,
-			normalizationOutput: normalizationPass.output,
 		});
 		const metadata = normalizeMetadataDraft(
 			extractionPass.output.metadata,
@@ -442,6 +488,10 @@ async function processBloodworkDocument(db: VitalsDatabase, documentId: number) 
 			probe.extractedText,
 		);
 		const { measurementDrafts, resultDrafts } = buildDraftsFromNormalization(normalizationOutput);
+		const savedStatusText = `Saving ${resultDrafts.length} normalized result${resultDrafts.length === 1 ? '' : 's'}`;
+		const completedStatusText = `Imported ${resultDrafts.length} result${resultDrafts.length === 1 ? '' : 's'}`;
+
+		updateBloodworkDocumentStatus(db, document, savedStatusText);
 
 		db.transaction(tx => {
 			tx.delete(bloodworkResults).where(eq(bloodworkResults.documentId, documentId)).run();
@@ -480,6 +530,7 @@ async function processBloodworkDocument(db: VitalsDatabase, documentId: number) 
 			tx.update(bloodworkDocuments)
 				.set({
 					status: 'completed',
+					statusText: completedStatusText,
 					completedAt: new Date().toISOString(),
 					failedAt: null,
 					lastError: null,
@@ -496,11 +547,14 @@ async function processBloodworkDocument(db: VitalsDatabase, documentId: number) 
 				.where(eq(bloodworkDocuments.id, documentId))
 				.run();
 		});
+		logBloodworkDocumentEvent(document, completedStatusText);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
+		logBloodworkDocumentEvent(document, `Import failed: ${message}`);
 		db.update(bloodworkDocuments)
 			.set({
 				status: 'failed',
+				statusText: 'Import failed',
 				failedAt: new Date().toISOString(),
 				lastError: message,
 			})
@@ -812,20 +866,99 @@ function buildDraftsFromNormalization(output: NormalizationPassOutput) {
 	};
 }
 
-function selectNormalizationOutput(args: {
+async function resolveNormalizationOutput(args: {
+	db: VitalsDatabase;
+	document: BloodworkDocumentRow;
+	provider: ReturnType<typeof createOpenRouter>;
+	modelId: string;
+	probe: PdfProbe;
 	existingMeasurements: BloodworkMeasurementRow[];
-	extractionOutput: ExtractionPassOutput;
-	normalizationOutput: NormalizationPassOutput;
+	extractionPass: StructuredPassResult<ExtractionPassOutput>;
 }) {
-	const { existingMeasurements, extractionOutput, normalizationOutput } = args;
-	if (!shouldUseFallbackNormalization(extractionOutput, normalizationOutput)) {
-		return normalizationOutput;
+	const { db, document, provider, modelId, probe, existingMeasurements, extractionPass } = args;
+
+	let lastError: unknown = null;
+	let lastSparseSummary: string | null = null;
+
+	for (let attempt = 1; attempt <= 2; attempt += 1) {
+		if (attempt === 2) {
+			if (lastError) {
+				updateBloodworkDocumentStatus(
+					db,
+					document,
+					'Retrying normalization after invalid response',
+				);
+				logBloodworkDocumentEvent(
+					document,
+					`Normalization retry reason: ${formatBloodworkError(lastError)}`,
+				);
+			} else if (lastSparseSummary) {
+				updateBloodworkDocumentStatus(db, document, 'Retrying normalization after sparse response');
+				logBloodworkDocumentEvent(document, `Normalization retry reason: ${lastSparseSummary}`);
+			}
+		}
+
+		try {
+			const normalizationPass = await runNormalizationPass({
+				provider,
+				modelId,
+				document,
+				probe,
+				existingMeasurements,
+				extractionPass,
+			});
+			if (!shouldUseFallbackNormalization(extractionPass.output, normalizationPass.output)) {
+				return normalizationPass.output;
+			}
+
+			lastSparseSummary = [
+				`sparse response (${normalizationPass.output.results.length} normalized`,
+				`for ${extractionPass.output.measurements.length} extracted)`,
+			].join(' ');
+			if (attempt === 1) {
+				continue;
+			}
+
+			updateBloodworkDocumentStatus(
+				db,
+				document,
+				'Normalization response was sparse, using extracted rows fallback',
+			);
+			return buildFallbackNormalizationOutput({
+				existingMeasurements,
+				extractionOutput: extractionPass.output,
+			});
+		} catch (error) {
+			if (extractionPass.output.measurements.length === 0) {
+				throw error;
+			}
+
+			lastError = error;
+			if (attempt === 1) {
+				continue;
+			}
+
+			updateBloodworkDocumentStatus(
+				db,
+				document,
+				'Normalization failed, using extracted rows fallback',
+			);
+			logBloodworkDocumentEvent(
+				document,
+				`Normalization fallback reason: ${formatBloodworkError(error)}`,
+			);
+			return buildFallbackNormalizationOutput({
+				existingMeasurements,
+				extractionOutput: extractionPass.output,
+			});
+		}
 	}
 
-	return buildFallbackNormalizationOutput({
-		existingMeasurements,
-		extractionOutput,
-	});
+	throw new Error('Normalization retry flow ended without a result.');
+}
+
+function formatBloodworkError(error: unknown) {
+	return error instanceof Error ? error.message : String(error);
 }
 
 function shouldUseFallbackNormalization(

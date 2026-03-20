@@ -729,6 +729,9 @@ function BloodworkPage() {
 										<Flex align='center' gap={8} wrap>
 											<Tag color={statusColor}>{item.status}</Tag>
 											<Typography.Text strong>{item.fileName}</Typography.Text>
+											{item.statusText ? (
+												<Typography.Text type='secondary'>{item.statusText}</Typography.Text>
+											) : null}
 										</Flex>
 										<Flex align='center' gap={12} wrap>
 											<Typography.Text type='secondary'>
