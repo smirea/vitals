@@ -5,9 +5,10 @@ import type { AppRouter } from 'server/trpc/index.ts';
 type RouterOutput = inferRouterOutputs<AppRouter>;
 
 export type BloodworkDashboardPayload = RouterOutput['bloodwork']['getDashboard'];
-export type BloodworkDashboardReport = BloodworkDashboardPayload['reports'][number];
-export type BloodworkDashboardMarker = BloodworkDashboardPayload['markers'][number];
+export type BloodworkDashboardDocument = BloodworkDashboardPayload['documents'][number];
+export type BloodworkDashboardMeasurement = BloodworkDashboardPayload['measurements'][number];
 export type BloodworkDashboardResult = BloodworkDashboardPayload['results'][number];
+export type BloodworkImportDocument = RouterOutput['bloodwork']['listDocuments'][number];
 
 export type PillsDashboardPayload = RouterOutput['pills']['getDashboard'];
 export type PillRecord = PillsDashboardPayload['pills'][number];

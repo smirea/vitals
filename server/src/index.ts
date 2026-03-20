@@ -1,6 +1,7 @@
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 
 import { PROJECT_ROOT } from 'scripts/project-paths.ts';
+import { startBloodworkProcessor } from 'server/db/bloodwork.ts';
 import { appRouter, createTrpcContext } from 'server/trpc/index.ts';
 
 const port = Number(process.env.API_PORT);
@@ -21,6 +22,7 @@ function getCorsHeaders(req: Request) {
 }
 
 await Bun.$`bunx drizzle-kit push --config drizzle.config.ts --force`.cwd(PROJECT_ROOT);
+startBloodworkProcessor();
 
 const server = Bun.serve({
 	development: true,

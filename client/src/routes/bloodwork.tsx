@@ -1,13 +1,26 @@
-import { ChartLineUp } from '@phosphor-icons/react';
-import { useQuery } from '@tanstack/react-query';
+import { ChartLineUp, UploadSimple } from '@phosphor-icons/react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
-import { Alert, Card, Empty, Flex, Splitter, Spin, theme as antdTheme } from 'antd';
+import {
+	Alert,
+	Button,
+	Card,
+	Empty,
+	Flex,
+	Splitter,
+	Spin,
+	Tag,
+	Typography,
+	message,
+	theme as antdTheme,
+} from 'antd';
 import {
 	type ChangeEvent,
 	useCallback,
 	useDeferredValue,
 	useEffect,
 	useMemo,
+	useRef,
 	useState,
 } from 'react';
 
@@ -29,7 +42,7 @@ import {
 	getMeasurementKeysByCategory,
 	getMeasurementOverviewByKey,
 	getMeasurementRangesTooltipByKey,
-	getOrderedReports,
+	getOrderedDocuments,
 	getOutOfRangeMeasurementCountBySourceId,
 	getPrunedSelectedRowKeys,
 	getRowsMatchingOutOfRangeSources,
@@ -56,7 +69,6 @@ import {
 	clamp,
 	type VitalsRowModel,
 } from './bloodwork/_bloodwork';
-import type { BloodworkDashboardPayload } from '../utils/api';
 import { useTRPC } from '../utils/trpc';
 
 export const Route = createFileRoute('/bloodwork')({
@@ -67,7 +79,10 @@ function BloodworkPage() {
 	const viewport = useViewport();
 	const isMobileViewport = viewport.width < 900;
 	const trpc = useTRPC();
+	const queryClient = useQueryClient();
 	const { token } = antdTheme.useToken();
+	const [messageApi, messageContextHolder] = message.useMessage();
+	const importInputRef = useRef<HTMLInputElement | null>(null);
 
 	const [measurementFilter, setMeasurementFilter] = useState('');
 	const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>(() =>
@@ -89,14 +104,38 @@ function BloodworkPage() {
 		[starredMeasurementKeys],
 	);
 
-	const dashboardQuery = useQuery(trpc.bloodwork.getDashboard.queryOptions());
-	const dashboard = dashboardQuery.data as BloodworkDashboardPayload | undefined;
-	const reports = dashboard?.reports ?? [];
-	const markers = dashboard?.markers ?? [];
+	const dashboardQuery = useQuery({
+		...trpc.bloodwork.getDashboard.queryOptions(),
+		refetchInterval: 3_000,
+	});
+	const documentsQuery = useQuery({
+		...trpc.bloodwork.listDocuments.queryOptions(),
+		refetchInterval: 3_000,
+	});
+	const uploadDocumentsMutation = useMutation({
+		...trpc.bloodwork.uploadDocuments.mutationOptions(),
+		onSuccess: async data => {
+			await queryClient.invalidateQueries();
+			const queuedCount = data.documents.filter(document => !document.deduplicated).length;
+			const deduplicatedCount = data.documents.length - queuedCount;
+			const parts = [`Queued ${queuedCount} PDF${queuedCount === 1 ? '' : 's'}.`];
+			if (deduplicatedCount > 0) {
+				parts.push(`${deduplicatedCount} duplicate${deduplicatedCount === 1 ? '' : 's'} skipped.`);
+			}
+			messageApi.success(parts.join(' '));
+		},
+		onError: error => {
+			messageApi.error(error.message);
+		},
+	});
+	const dashboard = dashboardQuery.data;
+	const documents = dashboard?.documents ?? [];
+	const measurements = dashboard?.measurements ?? [];
 	const results = dashboard?.results ?? [];
+	const importDocuments = documentsQuery.data ?? [];
 
-	const orderedReports = useMemo(() => getOrderedReports(reports), [reports]);
-	const sources = useMemo(() => getSources(orderedReports), [orderedReports]);
+	const orderedDocuments = useMemo(() => getOrderedDocuments(documents), [documents]);
+	const sources = useMemo(() => getSources(orderedDocuments), [orderedDocuments]);
 	const availableDates = useMemo(
 		() =>
 			Array.from(new Set(sources.map(source => source.date))).sort((left, right) =>
@@ -153,12 +192,12 @@ function BloodworkPage() {
 	const allMeasurementRows = useMemo(
 		() =>
 			getAllMeasurementRows({
-				orderedReports,
-				markers,
+				orderedDocuments,
+				measurements,
 				results,
 				sourceCount: sources.length,
 			}),
-		[markers, orderedReports, results, sources.length],
+		[measurements, orderedDocuments, results, sources.length],
 	);
 
 	useEffect(() => {
@@ -495,7 +534,7 @@ function BloodworkPage() {
 		);
 	}, []);
 
-	const hasAnyData = reports.length > 0;
+	const hasAnyData = documents.length > 0;
 	const hasSelectedRows = selectedRows.length > 0;
 	const showSplitLayout = hasSelectedRows && !isMobileViewport;
 
@@ -570,6 +609,109 @@ function BloodworkPage() {
 		window.setTimeout(() => URL.revokeObjectURL(href), 0);
 	}, [csvMeasurementRows, isDownloadCsvDisabled, measurementOverviewByKey, tableSources]);
 
+	const onOpenImportPicker = useCallback(() => {
+		importInputRef.current?.click();
+	}, []);
+
+	const onImportFiles = useCallback(
+		async (event: ChangeEvent<HTMLInputElement>) => {
+			const selectedFiles = Array.from(event.target.files ?? []).filter(file =>
+				file.name.toLowerCase().endsWith('.pdf'),
+			);
+			event.target.value = '';
+
+			if (selectedFiles.length === 0) {
+				return;
+			}
+
+			await uploadDocumentsMutation.mutateAsync({
+				files: await Promise.all(
+					selectedFiles.map(async file => ({
+						fileName: file.name,
+						mimeType: file.type || 'application/pdf',
+						dataBase64: await readFileAsBase64(file),
+					})),
+				),
+			});
+		},
+		[uploadDocumentsMutation],
+	);
+
+	const importPanel = (
+		<Card
+			size='small'
+			title='Imports'
+			extra={
+				<>
+					<input
+						ref={importInputRef}
+						type='file'
+						accept='application/pdf,.pdf'
+						multiple
+						hidden
+						onChange={event => {
+							void onImportFiles(event);
+						}}
+					/>
+					<Button
+						type='default'
+						icon={<UploadSimple size={16} />}
+						onClick={onOpenImportPicker}
+						loading={uploadDocumentsMutation.isPending}
+					>
+						Import File
+					</Button>
+				</>
+			}
+			styles={{ body: { padding: 0 } }}
+		>
+			{importDocuments.length === 0 ? (
+				<div style={{ padding: 16 }}>
+					<Empty description='No imported documents yet.' image={Empty.PRESENTED_IMAGE_SIMPLE} />
+				</div>
+			) : (
+				<div>
+					{importDocuments.map((item, index) => {
+						const statusColor =
+							item.status === 'completed'
+								? 'success'
+								: item.status === 'failed'
+									? 'error'
+									: item.status === 'processing'
+										? 'processing'
+										: 'default';
+
+						return (
+							<div
+								key={item.id}
+								style={{
+									padding: '12px 16px',
+									borderTop: index === 0 ? 'none' : `1px solid ${token.colorBorderSecondary}`,
+								}}
+							>
+								<Flex vertical style={{ width: '100%' }} gap={4}>
+									<Flex justify='space-between' align='center' gap={12} wrap>
+										<Flex align='center' gap={8} wrap>
+											<Tag color={statusColor}>{item.status}</Tag>
+											<Typography.Text strong>{item.fileName}</Typography.Text>
+										</Flex>
+										<Typography.Text type='secondary'>
+											{item.date ?? item.queuedAt.slice(0, 10)}
+											{item.labName ? ` · ${item.labName}` : ''}
+										</Typography.Text>
+									</Flex>
+									{item.lastError ? (
+										<Typography.Text type='danger'>{item.lastError}</Typography.Text>
+									) : null}
+								</Flex>
+							</div>
+						);
+					})}
+				</div>
+			)}
+		</Card>
+	);
+
 	const chartCard = (
 		<Card
 			size='small'
@@ -595,6 +737,7 @@ function BloodworkPage() {
 
 	const tablePanel = (
 		<div>
+			{importPanel}
 			<CategoriesOverview items={categoryOverview} />
 			<MeaningfulChanges items={sixMonthChanges} />
 			<VitalsControls
@@ -628,6 +771,16 @@ function BloodworkPage() {
 			/>
 		</div>
 	);
+	const emptyStatePanel = (
+		<Flex vertical gap={16}>
+			{importPanel}
+			<Card styles={{ body: { padding: 24 } }}>
+				<Flex justify='center' align='center' style={{ minHeight: '40vh' }}>
+					<Empty description='No bloodwork data found yet.' />
+				</Flex>
+			</Card>
+		</Flex>
+	);
 
 	return (
 		<main
@@ -637,6 +790,7 @@ function BloodworkPage() {
 				background: token.colorBgLayout,
 			}}
 		>
+			{messageContextHolder}
 			{dashboardQuery.isLoading ? (
 				<Card styles={{ body: { padding: 24 } }}>
 					<Flex justify='center' align='center' style={{ minHeight: '50vh' }}>
@@ -651,11 +805,7 @@ function BloodworkPage() {
 					description={dashboardQuery.error.message}
 				/>
 			) : !hasAnyData ? (
-				<Card styles={{ body: { padding: 24 } }}>
-					<Flex justify='center' align='center' style={{ minHeight: '50vh' }}>
-						<Empty description='No bloodwork data found yet.' />
-					</Flex>
-				</Card>
+				emptyStatePanel
 			) : showSplitLayout ? (
 				<Splitter
 					style={{ height: Math.max(viewport.height - 32, 680) }}
@@ -704,4 +854,31 @@ function useViewport() {
 	}, []);
 
 	return size;
+}
+
+function readFileAsBase64(file: File): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const reader = new FileReader();
+
+		reader.onerror = () => {
+			reject(new Error(`Failed to read ${file.name}.`));
+		};
+
+		reader.onload = () => {
+			if (typeof reader.result !== 'string') {
+				reject(new Error(`Failed to read ${file.name}.`));
+				return;
+			}
+
+			const [, dataBase64] = reader.result.split(',', 2);
+			if (!dataBase64) {
+				reject(new Error(`Failed to encode ${file.name}.`));
+				return;
+			}
+
+			resolve(dataBase64);
+		};
+
+		reader.readAsDataURL(file);
+	});
 }

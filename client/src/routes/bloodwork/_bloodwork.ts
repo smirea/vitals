@@ -1,6 +1,6 @@
 import type {
-	BloodworkDashboardMarker,
-	BloodworkDashboardReport,
+	BloodworkDashboardDocument,
+	BloodworkDashboardMeasurement,
 	BloodworkDashboardResult,
 } from '../../utils/api';
 
@@ -21,7 +21,7 @@ export type BloodworkMeasurementRecord = {
 
 export type SourceColumn = {
 	id: string;
-	reportId: number;
+	documentId: number;
 	date: string;
 	prettyDate: string;
 	index: number;
@@ -365,9 +365,29 @@ export function formatCell(measurement: BloodworkMeasurementRecord): Measurement
 		rangeBandLeft,
 		rangeBandWidth,
 		unit: unitText || undefined,
-		flag: measurement.flag ?? undefined,
+		flag: measurement.flag ?? inferMeasurementFlag(numericValue, rangeMin, rangeMax),
 		note: measurement.note?.trim() || undefined,
 	};
+}
+
+function inferMeasurementFlag(
+	numericValue: number | null,
+	rangeMin: number | null,
+	rangeMax: number | null,
+): MeasurementFlag | undefined {
+	if (numericValue === null) {
+		return undefined;
+	}
+	if (rangeMin !== null && numericValue < rangeMin) {
+		return 'low';
+	}
+	if (rangeMax !== null && numericValue > rangeMax) {
+		return 'high';
+	}
+	if (rangeMin !== null || rangeMax !== null) {
+		return 'normal';
+	}
+	return undefined;
 }
 
 export function hasCellDisplayValue(cell: MeasurementCell | undefined): boolean {
@@ -491,21 +511,25 @@ export function formatNormalizedYAxisTick(value: number): string {
 const FAVORITES_CATEGORY_LABEL = 'Favorites';
 const SIX_MONTHS = 6;
 
-export function getOrderedReports(reports: BloodworkDashboardReport[]): BloodworkDashboardReport[] {
-	return [...reports].sort((left, right) => {
-		if (left.date !== right.date) {
-			return right.date.localeCompare(left.date);
+export function getOrderedDocuments(
+	documents: BloodworkDashboardDocument[],
+): BloodworkDashboardDocument[] {
+	return [...documents].sort((left, right) => {
+		const leftDate = left.date ?? '';
+		const rightDate = right.date ?? '';
+		if (leftDate !== rightDate) {
+			return rightDate.localeCompare(leftDate);
 		}
 		return right.id - left.id;
 	});
 }
 
-export function getSources(orderedReports: BloodworkDashboardReport[]): SourceColumn[] {
-	return orderedReports.map((report, index) => ({
-		id: String(report.id),
-		reportId: report.id,
-		date: report.date,
-		prettyDate: formatPrettyDate(report.date),
+export function getSources(orderedDocuments: BloodworkDashboardDocument[]): SourceColumn[] {
+	return orderedDocuments.map((document, index) => ({
+		id: String(document.id),
+		documentId: document.id,
+		date: document.date ?? document.queuedAt.slice(0, 10),
+		prettyDate: formatPrettyDate(document.date ?? document.queuedAt.slice(0, 10)),
 		index,
 	}));
 }
@@ -562,60 +586,62 @@ export function getChartSources({
 }
 
 export function getAllMeasurementRows({
-	orderedReports,
-	markers,
+	orderedDocuments,
+	measurements,
 	results,
 	sourceCount,
 }: {
-	orderedReports: BloodworkDashboardReport[];
-	markers: BloodworkDashboardMarker[];
+	orderedDocuments: BloodworkDashboardDocument[];
+	measurements: BloodworkDashboardMeasurement[];
 	results: BloodworkDashboardResult[];
 	sourceCount: number;
 }): VitalsRowModel[] {
 	const grouped = new Map<string, VitalsRowModel>();
-	const markerById = new Map(markers.map(marker => [marker.id, marker]));
-	const sourceIndexByReportId = new Map(orderedReports.map((report, index) => [report.id, index]));
-	const resultsByReportId = new Map<number, BloodworkDashboardResult[]>();
+	const measurementById = new Map(measurements.map(measurement => [measurement.id, measurement]));
+	const sourceIndexByDocumentId = new Map(
+		orderedDocuments.map((document, index) => [document.id, index]),
+	);
+	const resultsByDocumentId = new Map<number, BloodworkDashboardResult[]>();
 
 	results.forEach(result => {
-		const existing = resultsByReportId.get(result.reportId);
+		const existing = resultsByDocumentId.get(result.documentId);
 		if (existing) {
 			existing.push(result);
 			return;
 		}
-		resultsByReportId.set(result.reportId, [result]);
+		resultsByDocumentId.set(result.documentId, [result]);
 	});
 
-	orderedReports.forEach(report => {
-		const sourceIndex = sourceIndexByReportId.get(report.id);
+	orderedDocuments.forEach(document => {
+		const sourceIndex = sourceIndexByDocumentId.get(document.id);
 		if (sourceIndex === undefined) {
 			return;
 		}
 
-		const reportResults = resultsByReportId.get(report.id) ?? [];
-		reportResults.forEach(result => {
-			const marker = markerById.get(result.markerId);
-			if (!marker) {
+		const documentResults = resultsByDocumentId.get(document.id) ?? [];
+		documentResults.forEach(result => {
+			const measurementDefinition = measurementById.get(result.measurementId);
+			if (!measurementDefinition) {
 				return;
 			}
 
-			const key = marker.key.trim().toLowerCase();
+			const key = measurementDefinition.key.trim().toLowerCase();
 			if (!key) {
 				return;
 			}
 
-			const category = normalizeCategoryLabel(result.category);
+			const category = normalizeCategoryLabel(measurementDefinition.category);
 			const existing = grouped.get(key);
 			const measurement = {
 				key,
-				name: marker.name,
-				category: result.category,
+				name: measurementDefinition.name,
+				category: measurementDefinition.category,
 				valueText: result.valueText,
 				valueNumeric: result.valueNumeric,
 				unit: result.unit,
-				referenceRangeMin: result.referenceRangeMin,
-				referenceRangeMax: result.referenceRangeMax,
-				flag: result.flag,
+				referenceRangeMin: measurementDefinition.canonicalRangeMin,
+				referenceRangeMax: measurementDefinition.canonicalRangeMax,
+				flag: null,
 				note: result.note,
 			};
 
@@ -638,9 +664,9 @@ export function getAllMeasurementRows({
 			grouped.set(key, {
 				key,
 				rowType: 'measurement',
-				measurement: marker.name,
+				measurement: measurementDefinition.name,
 				category,
-				measurementSearchText: marker.name.trim().toLowerCase(),
+				measurementSearchText: measurementDefinition.name.trim().toLowerCase(),
 				categorySearchText: category.toLowerCase(),
 				valuesBySourceIndex,
 			});

@@ -10,7 +10,6 @@ const PROJECT_DATA_DIR = configuredDataDir
 	: path.join(PROJECT_ROOT, 'data');
 
 const PROJECT_TO_IMPORT_DIR = path.join(PROJECT_DATA_DIR, 'to-import');
-const PROJECT_GLOSSARY_PATH = path.join(PROJECT_ROOT, 'scripts', 'bloodwork-glossary.json');
 const configuredDbPath = process.env.VITALS_DB_PATH?.trim();
 const PROJECT_DB_PATH = configuredDbPath
 	? path.isAbsolute(configuredDbPath)
@@ -18,10 +17,4 @@ const PROJECT_DB_PATH = configuredDbPath
 		: path.resolve(PROJECT_ROOT, configuredDbPath)
 	: path.join(PROJECT_DATA_DIR, 'vitals.sqlite');
 
-export {
-	PROJECT_ROOT,
-	PROJECT_DATA_DIR,
-	PROJECT_TO_IMPORT_DIR,
-	PROJECT_GLOSSARY_PATH,
-	PROJECT_DB_PATH,
-};
+export { PROJECT_ROOT, PROJECT_TO_IMPORT_DIR, PROJECT_DB_PATH };
