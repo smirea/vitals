@@ -2,12 +2,11 @@ import fs from 'fs';
 import path from 'path';
 
 import {
-	getDefaultBloodworkImportFilePaths,
-	processBloodworkQueueUntilIdle,
-	queueBloodworkPdfFiles,
-	resetBloodworkData,
+	enqueueBloodworkDocuments,
+	processNextPendingBloodworkDocument,
+	resetStuckBloodworkDocuments,
 } from 'server/db/bloodwork.ts';
-import { getDatabase } from 'server/db/client.ts';
+import { getDatabase, type VitalsDatabase } from 'server/db/client.ts';
 import { bloodworkDocuments, bloodworkMeasurements, bloodworkResults } from 'server/db/schema.ts';
 import { PROJECT_ROOT, PROJECT_TO_IMPORT_DIR } from 'scripts/project-paths.ts';
 
@@ -44,6 +43,50 @@ function resolveImportFilePath(input: string) {
 	throw new Error(`Bloodwork file not found: ${input}`);
 }
 
+function getDefaultImportFilePaths() {
+	if (!fs.existsSync(PROJECT_TO_IMPORT_DIR)) {
+		return [];
+	}
+
+	return fs
+		.readdirSync(PROJECT_TO_IMPORT_DIR)
+		.filter(fileName => fileName.toLowerCase().endsWith('.pdf'))
+		.map(fileName => path.join(PROJECT_TO_IMPORT_DIR, fileName))
+		.sort((left, right) => left.localeCompare(right));
+}
+
+function resetBloodworkData(db: VitalsDatabase) {
+	db.transaction(tx => {
+		tx.delete(bloodworkResults).run();
+		tx.delete(bloodworkMeasurements).run();
+		tx.delete(bloodworkDocuments).run();
+	});
+}
+
+function queueBloodworkFilePaths(db: VitalsDatabase, filePaths: string[]) {
+	return enqueueBloodworkDocuments(
+		db,
+		filePaths.map(filePath => ({
+			fileName: path.basename(filePath),
+			mimeType: 'application/pdf',
+			pdfData: fs.readFileSync(filePath),
+		})),
+	);
+}
+
+async function processQueuedDocumentsUntilIdle(db: VitalsDatabase) {
+	resetStuckBloodworkDocuments(db);
+
+	let outcome = await processNextPendingBloodworkDocument(db);
+	while (outcome === 'processed') {
+		outcome = await processNextPendingBloodworkDocument(db);
+	}
+
+	if (outcome === 'busy') {
+		throw new Error('Bloodwork processing is already active.');
+	}
+}
+
 async function main() {
 	const options = parseCliOptions(process.argv.slice(2));
 
@@ -54,7 +97,7 @@ async function main() {
 		resetBloodworkData(db);
 	}
 
-	const requestedFilePaths = options.all ? getDefaultBloodworkImportFilePaths() : [];
+	const requestedFilePaths = options.all ? getDefaultImportFilePaths() : [];
 	const explicitFilePaths = options.filePaths.map(resolveImportFilePath);
 	const filePaths = Array.from(new Set([...requestedFilePaths, ...explicitFilePaths]));
 
@@ -62,7 +105,7 @@ async function main() {
 		throw new Error('No bloodwork PDFs were selected. Pass --all or one or more file paths.');
 	}
 
-	const queuedDocuments = queueBloodworkPdfFiles(db, filePaths);
+	const queuedDocuments = queueBloodworkFilePaths(db, filePaths);
 	const deduplicatedCount = queuedDocuments.filter(document => document.deduplicated).length;
 	const queuedCount = queuedDocuments.length - deduplicatedCount;
 
@@ -70,7 +113,7 @@ async function main() {
 		`Queued ${queuedCount} document${queuedCount === 1 ? '' : 's'} and skipped ${deduplicatedCount} duplicate${deduplicatedCount === 1 ? '' : 's'}.`,
 	);
 
-	await processBloodworkQueueUntilIdle(db);
+	await processQueuedDocumentsUntilIdle(db);
 
 	const queuedIds = new Set(queuedDocuments.map(document => document.id));
 	const processedDocuments = db

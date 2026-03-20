@@ -10,7 +10,6 @@ import { eq } from 'drizzle-orm';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { z } from 'zod';
 
-import { PROJECT_TO_IMPORT_DIR } from 'scripts/project-paths.ts';
 import { getDatabase, type VitalsDatabase } from 'server/db/client.ts';
 import {
 	bloodworkDocuments,
@@ -202,7 +201,7 @@ export async function uploadBloodworkDocuments(
 	input: BloodworkUploadDocumentsInput,
 ) {
 	const parsed = bloodworkUploadDocumentsInputSchema.parse(input);
-	const queued = queueBloodworkDocuments(
+	const queued = enqueueBloodworkDocuments(
 		db,
 		parsed.files.map(file => ({
 			fileName: file.fileName,
@@ -222,55 +221,8 @@ export function startBloodworkProcessor() {
 		return;
 	}
 	processorStarted = true;
+	resetStuckBloodworkDocuments(getDatabase());
 	scheduleBloodworkProcessing();
-}
-
-export async function processBloodworkQueueUntilIdle(db = getDatabase()) {
-	resetStuckBloodworkDocuments(db);
-
-	for (;;) {
-		const nextDocumentId = claimNextPendingBloodworkDocument(db);
-		if (nextDocumentId === 'busy') {
-			await Bun.sleep(1_000);
-			continue;
-		}
-		if (nextDocumentId === null) {
-			break;
-		}
-
-		await processBloodworkDocument(db, nextDocumentId);
-	}
-}
-
-export function resetBloodworkData(db = getDatabase()) {
-	db.transaction(tx => {
-		tx.delete(bloodworkResults).run();
-		tx.delete(bloodworkMeasurements).run();
-		tx.delete(bloodworkDocuments).run();
-	});
-}
-
-export function queueBloodworkPdfFiles(db: VitalsDatabase, filePaths: string[]) {
-	return queueBloodworkDocuments(
-		db,
-		filePaths.map(filePath => ({
-			fileName: path.basename(filePath),
-			mimeType: 'application/pdf',
-			pdfData: fs.readFileSync(filePath),
-		})),
-	);
-}
-
-export function getDefaultBloodworkImportFilePaths() {
-	if (!fs.existsSync(PROJECT_TO_IMPORT_DIR)) {
-		return [];
-	}
-
-	return fs
-		.readdirSync(PROJECT_TO_IMPORT_DIR)
-		.filter(fileName => fileName.toLowerCase().endsWith('.pdf'))
-		.map(fileName => path.join(PROJECT_TO_IMPORT_DIR, fileName))
-		.sort((left, right) => left.localeCompare(right));
 }
 
 function scheduleBloodworkProcessing() {
@@ -278,35 +230,57 @@ function scheduleBloodworkProcessing() {
 		return;
 	}
 
-	processorPromise = processBloodworkQueueUntilIdle()
+	processorPromise = processTriggeredBloodworkDocument()
 		.catch(error => {
-			console.error('[bloodwork] processing loop failed', error);
+			console.error('[bloodwork] processing trigger failed', error);
 		})
 		.finally(() => {
 			processorPromise = null;
 
 			const db = getDatabase();
-			const hasPending = db
-				.select({
-					id: bloodworkDocuments.id,
-				})
-				.from(bloodworkDocuments)
-				.where(eq(bloodworkDocuments.status, 'pending'))
-				.orderBy(bloodworkDocuments.id)
-				.get();
-			const hasProcessing = db
-				.select({
-					id: bloodworkDocuments.id,
-				})
-				.from(bloodworkDocuments)
-				.where(eq(bloodworkDocuments.status, 'processing'))
-				.orderBy(bloodworkDocuments.id)
-				.get();
-
-			if (hasPending && !hasProcessing) {
+			if (hasNextPendingBloodworkDocument(db) && !hasActiveBloodworkDocument(db)) {
 				scheduleBloodworkProcessing();
 			}
 		});
+}
+
+async function processTriggeredBloodworkDocument(db = getDatabase()) {
+	const outcome = await processNextPendingBloodworkDocument(db);
+	if (outcome === 'busy') {
+		return;
+	}
+}
+
+export async function processNextPendingBloodworkDocument(db = getDatabase()) {
+	const nextDocumentId = claimNextPendingBloodworkDocument(db);
+	if (nextDocumentId === 'busy' || nextDocumentId === null) {
+		return nextDocumentId;
+	}
+
+	await processBloodworkDocument(db, nextDocumentId);
+	return 'processed' as const;
+}
+
+function hasNextPendingBloodworkDocument(db: VitalsDatabase) {
+	return db
+		.select({
+			id: bloodworkDocuments.id,
+		})
+		.from(bloodworkDocuments)
+		.where(eq(bloodworkDocuments.status, 'pending'))
+		.orderBy(bloodworkDocuments.id)
+		.get();
+}
+
+function hasActiveBloodworkDocument(db: VitalsDatabase) {
+	return db
+		.select({
+			id: bloodworkDocuments.id,
+		})
+		.from(bloodworkDocuments)
+		.where(eq(bloodworkDocuments.status, 'processing'))
+		.orderBy(bloodworkDocuments.id)
+		.get();
 }
 
 function claimNextPendingBloodworkDocument(db: VitalsDatabase) {
@@ -352,7 +326,7 @@ function claimNextPendingBloodworkDocument(db: VitalsDatabase) {
 	}
 }
 
-function resetStuckBloodworkDocuments(db: VitalsDatabase) {
+export function resetStuckBloodworkDocuments(db = getDatabase()) {
 	db.update(bloodworkDocuments)
 		.set({
 			status: 'pending',
@@ -363,7 +337,7 @@ function resetStuckBloodworkDocuments(db: VitalsDatabase) {
 		.run();
 }
 
-function queueBloodworkDocuments(
+export function enqueueBloodworkDocuments(
 	db: VitalsDatabase,
 	files: Array<{
 		fileName: string;
