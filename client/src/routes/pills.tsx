@@ -1215,7 +1215,7 @@ function PillsRouteComponent() {
 											title: 'Period',
 											width: 290,
 											render: (_: unknown, field) => (
-												<Space direction='vertical' size={0} style={{ width: '100%' }}>
+												<div style={{ width: '100%' }}>
 													<Form.Item name={[field.name, 'id']} hidden>
 														<Input />
 													</Form.Item>
@@ -1248,7 +1248,7 @@ function PillsRouteComponent() {
 															form.setFieldValue(['periods', field.name, 'endDate'], endDate ?? '');
 														}}
 													/>
-												</Space>
+												</div>
 											),
 										},
 										{
