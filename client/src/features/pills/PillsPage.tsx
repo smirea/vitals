@@ -44,6 +44,7 @@ import type {
 } from "../vitals/api";
 
 const DATE_FORMAT = "YYYY-MM-DD";
+const IMAGE_TILE_SIZE = 104;
 const { Dragger } = Upload;
 type PillTiming = "morning" | "afternoon" | "evening" | "random";
 
@@ -78,6 +79,11 @@ type PillFormValues = {
   images: PillImageFormValue[];
   components: PillComponentFormValue[];
   periods: PillPeriodFormValue[];
+};
+
+type PillsPageProps = {
+  editPillId: number | null;
+  onEditPillChange: (editPillId: number | null) => void;
 };
 
 const timingOptions = [
@@ -168,6 +174,12 @@ function formatServing(value?: string | null, unit?: string | null) {
   return text || "Not set";
 }
 
+function getLatestPeriod(pill: PillRecord) {
+  return [...pill.periods]
+    .sort((left, right) => left.startDate.localeCompare(right.startDate))
+    .at(-1);
+}
+
 function formatPeriodLabel(
   period: Pick<PillPeriod, "startDate" | "endDate" | "valueOverride" | "unitOverride" | "timing">,
 ) {
@@ -192,8 +204,14 @@ function createImageUid(
     : `image-${index}-${image.fileName}-${image.dataUrl.length}`;
 }
 
-function pillToFormValues(pill: PillRecord): PillFormValues {
+function pillToFormValues(
+  pill: PillRecord,
+  options?: {
+    appendNewPeriod?: boolean;
+  },
+): PillFormValues {
   const periodFormValues = getPillPeriodFormValues(pill);
+  const shouldAppendNewPeriod = options?.appendNewPeriod ?? false;
 
   return {
     id: pill.id,
@@ -222,16 +240,18 @@ function pillToFormValues(pill: PillRecord): PillFormValues {
             unit: component.unit ?? "",
           }))
         : [{ name: "", value: "", unit: "" }],
-    periods: [
-      ...periodFormValues,
-      createBlankPeriod(
-        getNewPeriodDefaults({
-          canonicalValue: pill.value ?? "",
-          canonicalUnit: pill.unit ?? "",
-          periods: periodFormValues,
-        }),
-      ),
-    ],
+    periods: shouldAppendNewPeriod
+      ? [
+          ...periodFormValues,
+          createBlankPeriod(
+            getNewPeriodDefaults({
+              canonicalValue: pill.value ?? "",
+              canonicalUnit: pill.unit ?? "",
+              periods: periodFormValues,
+            }),
+          ),
+        ]
+      : periodFormValues,
   };
 }
 
@@ -266,6 +286,10 @@ function getImagePayload(images: PillImageFormValue[]) {
     fileName: image.fileName,
     dataUrl: image.dataUrl,
   }));
+}
+
+function removeImageByUid(images: PillImageFormValue[], uid: string) {
+  return images.filter((image) => image.uid !== uid);
 }
 
 function getComponentInsertValue() {
@@ -387,13 +411,14 @@ function renderImages(images: PillImage[]) {
   );
 }
 
-export function PillsPage() {
+export function PillsPage({ editPillId, onEditPillChange }: PillsPageProps) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [form] = Form.useForm<PillFormValues>();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [pillQuery, setPillQuery] = useState("");
-  const [isHydratingExistingPill, setIsHydratingExistingPill] = useState(false);
+  const [isOpenedFromEdit, setIsOpenedFromEdit] = useState(false);
+  const [hydratedEditPillId, setHydratedEditPillId] = useState<number | null>(null);
   const [deletingPeriodId, setDeletingPeriodId] = useState<number | null>(null);
   const [isSaveDisabled, setIsSaveDisabled] = useState(true);
   const [expandedComponentRowKeys, setExpandedComponentRowKeys] = useState<number[]>([]);
@@ -438,7 +463,10 @@ export function PillsPage() {
       void queryClient.invalidateQueries();
       setIsDrawerOpen(false);
       setPillQuery("");
-      form.setFieldsValue(createEmptyFormValues());
+      setIsOpenedFromEdit(false);
+      setHydratedEditPillId(null);
+      onEditPillChange(null);
+      resetPillForm();
       message.success("Pill saved.");
     },
     onError: (error) => {
@@ -475,6 +503,7 @@ export function PillsPage() {
   const activePills = dashboard?.activePills ?? [];
   const pastPills = dashboard?.pastPills ?? [];
   const totals = dashboard?.totals ?? { all: 0, active: 0, past: 0 };
+  const isEditMode = editPillId !== null;
 
   useEffect(() => {
     let isCancelled = false;
@@ -523,24 +552,67 @@ export function PillsPage() {
     }
   }, [form, watchedDefaultUnit, watchedDefaultValue, watchedPeriods]);
 
+  function resetPillForm() {
+    form.resetFields();
+    form.setFieldsValue({
+      ...createEmptyFormValues(),
+      id: undefined,
+    });
+  }
+
+  useEffect(() => {
+    if (editPillId === null) {
+      setHydratedEditPillId(null);
+
+      if (isOpenedFromEdit) {
+        setIsDrawerOpen(false);
+        setIsOpenedFromEdit(false);
+        resetPillForm();
+      }
+
+      return;
+    }
+
+    setIsDrawerOpen(true);
+    setIsOpenedFromEdit(true);
+
+    if (hydratedEditPillId === editPillId) {
+      return;
+    }
+
+    const pill = dashboard?.pills.find((currentPill) => currentPill.id === editPillId);
+    if (!pill) {
+      return;
+    }
+
+    setPillQuery(pill.name);
+    form.setFieldsValue(pillToFormValues(pill));
+    setHydratedEditPillId(editPillId);
+  }, [dashboard?.pills, editPillId, form, hydratedEditPillId, isOpenedFromEdit]);
+
   function openNewPillDrawer() {
     setIsDrawerOpen(true);
-    setIsHydratingExistingPill(false);
+    setIsOpenedFromEdit(false);
+    setHydratedEditPillId(null);
     setPillQuery("");
-    form.setFieldsValue(createEmptyFormValues());
+    onEditPillChange(null);
+    resetPillForm();
   }
 
   function openExistingPillDrawer(pill: PillRecord) {
     setIsDrawerOpen(true);
-    setIsHydratingExistingPill(true);
-    setPillQuery(pill.name);
-    form.setFieldsValue(pillToFormValues(pill));
+    setIsOpenedFromEdit(true);
+    setHydratedEditPillId(null);
+    onEditPillChange(pill.id);
   }
 
   function handleCloseDrawer() {
     setIsDrawerOpen(false);
     setPillQuery("");
-    setIsHydratingExistingPill(false);
+    setIsOpenedFromEdit(false);
+    setHydratedEditPillId(null);
+    onEditPillChange(null);
+    resetPillForm();
   }
 
   function toggleExpandedComponentsRow(pillId: number) {
@@ -556,8 +628,11 @@ export function PillsPage() {
       return;
     }
 
-    setIsHydratingExistingPill(true);
-    form.setFieldsValue(pillToFormValues(option.pill));
+    form.setFieldsValue(
+      pillToFormValues(option.pill, {
+        appendNewPeriod: true,
+      }),
+    );
   }
 
   async function syncImagesFromUpload(event: UploadChangeParam<UploadFile<any>>) {
@@ -609,15 +684,14 @@ export function PillsPage() {
     accept: "image/*",
     beforeUpload: () => false,
     disabled: isParsingImages,
-    listType: "picture-card",
     multiple: true,
     fileList: buildUploadFileList(watchedImages),
+    showUploadList: false,
     onChange: (info) => {
       void syncImagesFromUpload(info);
     },
     onRemove: (file) => {
-      const nextImages = watchedImages.filter((image) => image.uid !== file.uid);
-      form.setFieldValue("images", nextImages);
+      form.setFieldValue("images", removeImageByUid(watchedImages, file.uid));
       return true;
     },
   };
@@ -656,7 +730,7 @@ export function PillsPage() {
       remove(fieldIndex);
 
       const remainingPeriods = (form.getFieldValue("periods") ?? []) as PillPeriodFormValue[];
-      if (remainingPeriods.length === 0) {
+      if (remainingPeriods.length === 0 && !isEditMode) {
         form.setFieldValue("periods", [
           createBlankPeriod(
             getNewPeriodDefaults({
@@ -676,7 +750,7 @@ export function PillsPage() {
     } catch {}
   }
 
-  const columns: TableColumnsType<PillRecord> = [
+  const baseColumns: TableColumnsType<PillRecord> = [
     {
       title: "Pill",
       key: "name",
@@ -759,6 +833,29 @@ export function PillsPage() {
     },
   ];
 
+  const activeColumns: TableColumnsType<PillRecord> = [
+    baseColumns[0],
+    {
+      title: "Amount",
+      key: "amount",
+      width: 160,
+      render: (_: unknown, pill: PillRecord) => {
+        const latestPeriod = getLatestPeriod(pill);
+        return (
+          <Typography.Text>
+            {formatServing(
+              latestPeriod?.valueOverride ?? pill.value,
+              latestPeriod?.unitOverride ?? pill.unit,
+            )}
+          </Typography.Text>
+        );
+      },
+    },
+    ...baseColumns.slice(2),
+  ];
+
+  const pastColumns = activeColumns;
+
   const tableExpandable = {
     expandedRowKeys: expandedComponentRowKeys,
     expandedRowRender: (pill: PillRecord) => renderExpandedComponents(pill.components),
@@ -812,7 +909,7 @@ export function PillsPage() {
           <Table
             rowKey="id"
             size="small"
-            columns={columns}
+            columns={activeColumns}
             dataSource={activePills}
             loading={dashboardQuery.isLoading}
             pagination={false}
@@ -834,7 +931,7 @@ export function PillsPage() {
           <Table
             rowKey="id"
             size="small"
-            columns={columns}
+            columns={pastColumns}
             dataSource={pastPills}
             loading={dashboardQuery.isLoading}
             pagination={false}
@@ -850,7 +947,7 @@ export function PillsPage() {
       </div>
 
       <Drawer
-        title={isHydratingExistingPill ? "Edit pill" : "Log pill"}
+        title={isEditMode ? "Edit pill" : "Log pill"}
         placement="right"
         width={920}
         open={isDrawerOpen}
@@ -909,7 +1006,6 @@ export function PillsPage() {
                   const selectedPill = searchResults.find((result) => result.id === currentId);
                   if (selectedPill && selectedPill.name !== value) {
                     form.setFieldValue("id", undefined);
-                    setIsHydratingExistingPill(false);
                   }
                 }}
                 placeholder="Start typing to reuse a canonical pill"
@@ -962,17 +1058,84 @@ export function PillsPage() {
             <Input />
           </Form.Item>
 
-          <Dragger {...uploadProps} className="bg-slate-50">
-            <p className="ant-upload-drag-icon">
-              <UploadOutlined />
-            </p>
-            <Typography.Text className="block text-sm font-medium text-slate-800">
-              Drag images here or click to upload
-            </Typography.Text>
-            <Typography.Text type="secondary" className="text-xs">
-              All selected images are sent together for pill-label extraction.
-            </Typography.Text>
-          </Dragger>
+          <Image.PreviewGroup>
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 8,
+                alignItems: "flex-start",
+              }}
+            >
+              {watchedImages.map((image) => (
+                <div
+                  key={image.uid}
+                  style={{
+                    position: "relative",
+                    width: IMAGE_TILE_SIZE,
+                    height: IMAGE_TILE_SIZE,
+                    borderRadius: 8,
+                    overflow: "hidden",
+                    border: "1px solid var(--ant-color-border-secondary)",
+                    background: "var(--ant-color-bg-container)",
+                  }}
+                >
+                  <Image
+                    src={image.dataUrl}
+                    alt={image.fileName}
+                    width={IMAGE_TILE_SIZE}
+                    height={IMAGE_TILE_SIZE}
+                    style={{ objectFit: "cover" }}
+                  />
+                  <Button
+                    size="small"
+                    danger
+                    icon={<DeleteOutlined />}
+                    onClick={() => {
+                      form.setFieldValue("images", removeImageByUid(watchedImages, image.uid));
+                    }}
+                    style={{
+                      position: "absolute",
+                      top: 6,
+                      right: 6,
+                    }}
+                  />
+                </div>
+              ))}
+
+              <Dragger
+                {...uploadProps}
+                style={{
+                  width: IMAGE_TILE_SIZE,
+                  height: IMAGE_TILE_SIZE,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    height: "100%",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                    padding: 8,
+                  }}
+                >
+                  <UploadOutlined style={{ fontSize: 20 }} />
+                  <Typography.Text
+                    type="secondary"
+                    style={{
+                      fontSize: 12,
+                      lineHeight: 1.2,
+                      textAlign: "center",
+                    }}
+                  >
+                    Drop or upload
+                  </Typography.Text>
+                </div>
+              </Dragger>
+            </div>
+          </Image.PreviewGroup>
 
           {isParsingImages ? (
             <div className="mt-2 flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-700">

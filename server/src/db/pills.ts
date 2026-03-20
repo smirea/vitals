@@ -65,8 +65,8 @@ const pillImageExtractionSchema = z.object({
     note: z.string().nullable().optional().describe('Short optional note with extra packaging context not captured elsewhere.'),
     components: z.array(z.object({
         name: z.string().trim().min(1).describe('Supplement fact or active ingredient name exactly as shown.'),
-        value: z.string().trim().min(1).optional().describe('Amount for this component only, such as "50" or "2000 IU".'),
-        unit: z.string().trim().min(1).optional().describe('Unit for this component only, such as "mg", "mcg", or "IU".'),
+        value: z.string().trim().min(1).nullable().optional().describe('Amount for this component only, such as "50" or "2000 IU".'),
+        unit: z.string().trim().min(1).nullable().optional().describe('Unit for this component only, such as "mg", "mcg", or "IU".'),
     })).optional().default([]).describe('One row per supplement facts component. If a supplement facts panel is visible, include every listed component row.'),
     extractionNotes: z.string().nullable().optional().describe('Short explanation if detection was uncertain or partial.'),
     confidence: z.number().min(0).max(1).nullable().optional().describe('Confidence score from 0 to 1.'),
@@ -484,7 +484,9 @@ export async function extractPillFromImages(input: z.infer<typeof pillImageExtra
     });
 
     const result = await generateText({
-        model: provider(model),
+        model: provider(model, {
+            plugins: [{ id: 'response-healing' }],
+        }),
         messages: [{
             role: 'user',
             content: [
@@ -492,7 +494,7 @@ export async function extractPillFromImages(input: z.infer<typeof pillImageExtra
                     type: 'text',
                     text: [
                         'Analyze all uploaded images together as one pill or supplement label extraction task.',
-                        'Return only valid JSON. Do not wrap it in markdown.',
+                        'Return exactly one valid JSON object and nothing else. Do not wrap it in markdown.',
                         'Schema:',
                         '{',
                         '  "detected": boolean,',
@@ -510,6 +512,9 @@ export async function extractPillFromImages(input: z.infer<typeof pillImageExtra
                         '- Never put the full supplement panel or ingredient list into the top-level value or unit fields.',
                         '- If a Supplement Facts or active ingredients panel is visible, components must contain one row per listed ingredient.',
                         '- Keep values short and exact when possible.',
+                        '- If a label says something like "2 Veggie Capsules", return value="2" and unit="Veggie Capsules".',
+                        '- If a component row says something like "EPA 400 mg", return value="400" and unit="mg".',
+                        '- If the images show a supplement facts panel, capture every visible row.',
                     ].join('\n'),
                 },
                 ...imageParts,
