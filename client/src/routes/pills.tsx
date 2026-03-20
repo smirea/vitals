@@ -105,6 +105,10 @@ type PastPillRow = {
     period: PillPeriod
 }
 
+type NotTrackedPillRow = {
+    pill: PillRecord
+}
+
 const timingOptions = [
     { label: 'Morning', value: 'morning' },
     { label: 'Afternoon', value: 'afternoon' },
@@ -206,12 +210,13 @@ function PillsRouteComponent() {
         [searchResults],
     )
 
+    const allPills = dashboard?.pills ?? []
     const activePills = dashboard?.activePills ?? []
     const pastPills = dashboard?.pastPills ?? []
     const totals = dashboard?.totals ?? { all: 0, active: 0, past: 0 }
     const editedPill = useMemo(
-        () => dashboard?.pills.find(pill => pill.id === editPillId) ?? null,
-        [dashboard?.pills, editPillId],
+        () => allPills.find(pill => pill.id === editPillId) ?? null,
+        [allPills, editPillId],
     )
     const isDrawerOpen =
         isCreateDrawerOpen || (editPillId !== null && (dashboardQuery.isLoading || editedPill !== null))
@@ -235,6 +240,12 @@ function PillsRouteComponent() {
                 })))
             .sort((left, right) => right.period.startDate.localeCompare(left.period.startDate)),
         [pastPills],
+    )
+    const notTrackedRows = useMemo<NotTrackedPillRow[]>(
+        () => allPills
+            .filter(pill => pill.periods.length === 0)
+            .map(pill => ({ pill })),
+        [allPills],
     )
 
     useEffect(() => {
@@ -627,6 +638,54 @@ function PillsRouteComponent() {
         },
     ]
 
+    const notTrackedColumns: TableColumnsType<NotTrackedPillRow> = [
+        {
+            title: 'Pill',
+            key: 'name',
+            width: 220,
+            render: (_: unknown, row: NotTrackedPillRow) => (
+                <Button
+                    type='link'
+                    size='small'
+                    className='pills-link-button'
+                    icon={<EditOutlined />}
+                    onClick={() => openExistingPillDrawer(row.pill)}
+                >
+                    {row.pill.name}
+                </Button>
+            ),
+        },
+        {
+            title: 'Amount',
+            key: 'amount',
+            width: 160,
+            render: (_: unknown, row: NotTrackedPillRow) => (
+                <Typography.Text>{formatServing(row.pill.value, row.pill.unit)}</Typography.Text>
+            ),
+        },
+        {
+            title: 'Components',
+            key: 'components',
+            width: 360,
+            render: (_: unknown, row: NotTrackedPillRow) => renderComponents(row.pill.components),
+            onCell: row =>
+                row.pill.components.length > 0
+                    ? {
+                        onClick: () => {
+                            toggleExpandedComponentsRow(String(row.pill.id))
+                        },
+                        style: { cursor: 'pointer' },
+                    }
+                    : {},
+        },
+        {
+            title: 'Images',
+            key: 'images',
+            width: 220,
+            render: (_: unknown, row: NotTrackedPillRow) => renderImages(row.pill.images),
+        },
+    ]
+
     const activeTableExpandable = {
         expandedRowKeys: expandedComponentRowKeys,
         expandedRowRender: (row: ActivePillRow) => renderExpandedComponents(row.pill.components),
@@ -644,6 +703,16 @@ function PillsRouteComponent() {
             setExpandedComponentRowKeys(keys.map(key => String(key)))
         },
         rowExpandable: (row: PastPillRow) => row.pill.components.length > 0,
+        showExpandColumn: false,
+    }
+
+    const notTrackedTableExpandable = {
+        expandedRowKeys: expandedComponentRowKeys,
+        expandedRowRender: (row: NotTrackedPillRow) => renderExpandedComponents(row.pill.components),
+        onExpandedRowsChange: (keys: readonly Key[]) => {
+            setExpandedComponentRowKeys(keys.map(key => String(key)))
+        },
+        rowExpandable: (row: NotTrackedPillRow) => row.pill.components.length > 0,
         showExpandColumn: false,
     }
 
@@ -704,6 +773,27 @@ function PillsRouteComponent() {
                         locale={{
                             emptyText: (
                                 <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description='No active pills yet' />
+                            ),
+                        }}
+                    />
+                </Card>
+
+                <Card
+                    title='Not tracked yet'
+                    extra={<Typography.Text type='secondary'>{notTrackedRows.length} rows</Typography.Text>}
+                >
+                    <Table
+                        rowKey={row => String(row.pill.id)}
+                        size='small'
+                        columns={notTrackedColumns}
+                        dataSource={notTrackedRows}
+                        loading={dashboardQuery.isLoading}
+                        pagination={false}
+                        scroll={{ x: 1500 }}
+                        expandable={notTrackedTableExpandable}
+                        locale={{
+                            emptyText: (
+                                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description='No untracked pills yet' />
                             ),
                         }}
                     />
