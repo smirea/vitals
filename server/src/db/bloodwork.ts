@@ -1,13 +1,9 @@
-import fs from 'fs';
-import os from 'os';
 import path from 'path';
-import { spawnSync } from 'child_process';
 import { createHash } from 'crypto';
 
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { generateText, Output } from 'ai';
 import { eq } from 'drizzle-orm';
-import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { z } from 'zod';
 
 import { getDatabase, type VitalsDatabase } from 'server/db/client.ts';
@@ -19,8 +15,6 @@ import {
 	type BloodworkMeasurementRow,
 } from 'server/db/schema.ts';
 import env from 'server/env.ts';
-
-const LOCAL_TEXT_MIN_CHARACTERS_PER_PAGE = 320;
 
 const bloodworkUploadFileInputSchema = z.object({
 	fileName: z.string().trim().min(1),
@@ -137,13 +131,6 @@ type NormalizedResultDraft = {
 	confidence: number | null;
 	sourcePage: number | null;
 	evidence: string[];
-};
-
-type PdfProbe = {
-	extractedText: string;
-	extractedTextStatus: string;
-	pageCount: number;
-	parserEngine: 'pdf-text' | 'mistral-ocr';
 };
 
 type StructuredPassResult<T> = {
@@ -550,8 +537,6 @@ async function processBloodworkDocument(db: VitalsDatabase, documentId: number) 
 	}
 
 	try {
-		updateBloodworkDocumentStatus(db, document, 'Extracting text from PDF');
-		const probe = await probePdf(document);
 		const provider = getOpenRouterProvider();
 		const modelId = getBloodworkModelId();
 		const existingMeasurements = db.select().from(bloodworkMeasurements).all();
@@ -560,7 +545,6 @@ async function processBloodworkDocument(db: VitalsDatabase, documentId: number) 
 			provider,
 			modelId,
 			document,
-			probe,
 		});
 		updateBloodworkDocumentStatus(db, document, 'Normalizing measurements');
 		const normalizationOutput = await resolveNormalizationOutput({
@@ -568,15 +552,10 @@ async function processBloodworkDocument(db: VitalsDatabase, documentId: number) 
 			document,
 			provider,
 			modelId,
-			probe,
 			existingMeasurements,
 			extractionPass,
 		});
-		const metadata = normalizeMetadataDraft(
-			extractionPass.output.metadata,
-			document.fileName,
-			probe.extractedText,
-		);
+		const metadata = normalizeMetadataDraft(extractionPass.output.metadata, document.fileName);
 		const { measurementDrafts, resultDrafts } = buildDraftsFromNormalization(normalizationOutput);
 		const savedStatusText = `Saving ${resultDrafts.length} normalized result${resultDrafts.length === 1 ? '' : 's'}`;
 		const completedStatusText = `Imported ${resultDrafts.length} result${resultDrafts.length === 1 ? '' : 's'}`;
@@ -653,42 +632,14 @@ async function processBloodworkDocument(db: VitalsDatabase, documentId: number) 
 	}
 }
 
-async function probePdf(document: BloodworkDocumentRow): Promise<PdfProbe> {
-	const pageCount = await getPdfPageCount(document.pdfData);
-	const extractedWithPdftotext = extractPdfTextWithPdftotext(document.pdfData, document.fileName);
-	if (extractedWithPdftotext) {
-		return {
-			extractedText: extractedWithPdftotext,
-			extractedTextStatus: 'pdftotext',
-			pageCount,
-			parserEngine: choosePdfParserEngine(extractedWithPdftotext, pageCount),
-		};
-	}
-
-	const extractedWithPdfjs = await extractPdfTextWithPdfjs(document.pdfData);
-	return {
-		extractedText: extractedWithPdfjs,
-		extractedTextStatus: 'pdfjs',
-		pageCount,
-		parserEngine: choosePdfParserEngine(extractedWithPdfjs, pageCount),
-	};
-}
-
 async function runExtractionPass(args: {
 	provider: ReturnType<typeof createOpenRouter>;
 	modelId: string;
 	document: BloodworkDocumentRow;
-	probe: PdfProbe;
 }): Promise<StructuredPassResult<ExtractionPassOutput>> {
-	const { provider, modelId, document, probe } = args;
-	const fileModel = provider(modelId, {
+	const { provider, modelId, document } = args;
+	const model = provider(modelId, {
 		plugins: [
-			{
-				id: 'file-parser',
-				pdf: {
-					engine: probe.parserEngine,
-				},
-			},
 			{
 				id: 'response-healing',
 			},
@@ -703,7 +654,6 @@ async function runExtractionPass(args: {
 					type: 'text' as const,
 					text: buildExtractionPrompt({
 						fileName: document.fileName,
-						probe,
 					}),
 				},
 				{
@@ -716,49 +666,11 @@ async function runExtractionPass(args: {
 		},
 	];
 
-	try {
-		const fileResult = await generateStructuredOutput({
-			model: fileModel,
-			schema: extractionPassSchema,
-			messages: fileMessages,
-			maxOutputTokens: 16_384,
-		});
-
-		if (fileResult.output.measurements.length > 0 || !probe.extractedText.trim()) {
-			return fileResult;
-		}
-	} catch (error) {
-		if (!probe.extractedText.trim()) {
-			throw error;
-		}
-	}
-
-	const textModel = provider(modelId, {
-		plugins: [
-			{
-				id: 'response-healing',
-			},
-		],
-	});
-
 	return generateStructuredOutput({
-		model: textModel,
+		model,
 		schema: extractionPassSchema,
-		messages: [
-			{
-				role: 'user',
-				content: [
-					{
-						type: 'text',
-						text: buildTextOnlyExtractionPrompt({
-							fileName: document.fileName,
-							probe,
-						}),
-					},
-				],
-			},
-		],
-		maxOutputTokens: 16_384,
+		messages: fileMessages,
+		maxOutputTokens: 24_576,
 	});
 }
 
@@ -766,11 +678,10 @@ async function runNormalizationPass(args: {
 	provider: ReturnType<typeof createOpenRouter>;
 	modelId: string;
 	document: BloodworkDocumentRow;
-	probe: PdfProbe;
 	existingMeasurements: BloodworkMeasurementRow[];
 	extractionPass: StructuredPassResult<ExtractionPassOutput>;
 }): Promise<StructuredPassResult<NormalizationPassOutput>> {
-	const { provider, modelId, document, probe, existingMeasurements, extractionPass } = args;
+	const { provider, modelId, document, existingMeasurements, extractionPass } = args;
 	const model = provider(modelId, {
 		plugins: [
 			{
@@ -786,7 +697,6 @@ async function runNormalizationPass(args: {
 				type: 'text' as const,
 				text: buildNormalizationPrompt({
 					fileName: document.fileName,
-					probe,
 					existingMeasurements,
 					extractionOutput: extractionPass.output,
 				}),
@@ -802,11 +712,13 @@ async function runNormalizationPass(args: {
 	});
 }
 
-function buildExtractionPrompt(args: { fileName: string; probe: PdfProbe }) {
-	const { fileName, probe } = args;
+function buildExtractionPrompt(args: { fileName: string }) {
+	const { fileName } = args;
 	return [
 		'Analyze this bloodwork PDF as one complete document.',
 		'Return only structured JSON that matches the schema.',
+		'Read the attached raw PDF directly.',
+		'Extract measurements from the entire document, not just the first page or first panel.',
 		'Extract report-level metadata and raw analyte rows.',
 		'Translate analyte names to concise English when needed.',
 		'Preserve the original/raw name separately whenever the source wording differs.',
@@ -814,34 +726,17 @@ function buildExtractionPrompt(args: { fileName: string; probe: PdfProbe }) {
 		'If a value is qualitative, keep it in valueText and leave valueNumeric null.',
 		'If a range is textual like "<1" or "3.5 - 5.2", preserve rangeText and also set numeric bounds when possible.',
 		'Use page numbers when possible.',
+		'Continue until every bloodwork measurement in the PDF has been extracted.',
 		`Source file: ${fileName}`,
-		`Local text probe status: ${probe.extractedTextStatus}`,
-		`Local text probe length: ${probe.extractedText.length} characters across ${probe.pageCount} pages.`,
 	].join('\n');
-}
-
-function buildTextOnlyExtractionPrompt(args: { fileName: string; probe: PdfProbe }) {
-	const { fileName, probe } = args;
-
-	return [
-		buildExtractionPrompt({
-			fileName,
-			probe,
-		}),
-		'The full-PDF extraction path failed or returned no analytes.',
-		'Use the following locally extracted document text as the source of truth for this extraction pass.',
-		'Document text:',
-		probe.extractedText,
-	].join('\n\n');
 }
 
 function buildNormalizationPrompt(args: {
 	fileName: string;
-	probe: PdfProbe;
 	existingMeasurements: BloodworkMeasurementRow[];
 	extractionOutput: ExtractionPassOutput;
 }) {
-	const { fileName, probe, existingMeasurements, extractionOutput } = args;
+	const { fileName, existingMeasurements, extractionOutput } = args;
 	const catalog = existingMeasurements
 		.map(measurement => ({
 			name: measurement.name,
@@ -866,7 +761,6 @@ function buildNormalizationPrompt(args: {
 		'If the source has conflicting ranges for the same analyte, choose one canonical range and explain the evidence briefly.',
 		'Do not output more than one result row for the same logical measurement in this document.',
 		`Source file: ${fileName}`,
-		`Parser engine: ${probe.parserEngine}`,
 		'Existing canonical measurements:',
 		JSON.stringify(catalog, null, 2),
 		'First-pass extraction output:',
@@ -874,12 +768,8 @@ function buildNormalizationPrompt(args: {
 	].join('\n');
 }
 
-function normalizeMetadataDraft(
-	metadata: ExtractionPassOutput['metadata'],
-	fileName: string,
-	extractedText: string,
-) {
-	const inferred = inferMetadataFromFileName(fileName, extractedText);
+function normalizeMetadataDraft(metadata: ExtractionPassOutput['metadata'], fileName: string) {
+	const inferred = inferMetadataFromFileName(fileName);
 
 	return {
 		date: normalizeOptionalIsoDate(metadata.date) ?? inferred.date,
@@ -961,11 +851,10 @@ async function resolveNormalizationOutput(args: {
 	document: BloodworkDocumentRow;
 	provider: ReturnType<typeof createOpenRouter>;
 	modelId: string;
-	probe: PdfProbe;
 	existingMeasurements: BloodworkMeasurementRow[];
 	extractionPass: StructuredPassResult<ExtractionPassOutput>;
 }) {
-	const { db, document, provider, modelId, probe, existingMeasurements, extractionPass } = args;
+	const { db, document, provider, modelId, existingMeasurements, extractionPass } = args;
 
 	let lastError: unknown = null;
 
@@ -983,16 +872,12 @@ async function resolveNormalizationOutput(args: {
 				provider,
 				modelId,
 				document,
-				probe,
 				existingMeasurements,
 				extractionPass,
 			});
 			return normalizationPass.output;
 		} catch (error) {
-			if (
-				extractionPass.output.measurements.length === 0 ||
-				!isRetryableNormalizationFormatError(error)
-			) {
+			if (!isRetryableNormalizationFormatError(error)) {
 				throw error;
 			}
 
@@ -1001,19 +886,7 @@ async function resolveNormalizationOutput(args: {
 				continue;
 			}
 
-			updateBloodworkDocumentStatus(
-				db,
-				document,
-				'Normalization failed, using extracted rows fallback',
-			);
-			logBloodworkDocumentEvent(
-				document,
-				`Normalization fallback reason: ${formatBloodworkError(error)}`,
-			);
-			return buildFallbackNormalizationOutput({
-				existingMeasurements,
-				extractionOutput: extractionPass.output,
-			});
+			throw error;
 		}
 	}
 
@@ -1033,119 +906,6 @@ function isRetryableNormalizationFormatError(error: unknown) {
 		message.includes('expected') ||
 		message.includes('json')
 	);
-}
-
-function buildFallbackNormalizationOutput(args: {
-	existingMeasurements: BloodworkMeasurementRow[];
-	extractionOutput: ExtractionPassOutput;
-}): NormalizationPassOutput {
-	const lookup = buildMeasurementLookup(args.existingMeasurements);
-
-	return {
-		results: args.extractionOutput.measurements.map(row => {
-			const matchedMeasurement = findExistingMeasurementForRow(lookup, row);
-			const normalizedUnit = canonicalizeUnitOrNull(row.unit);
-			const range = resolveRangeDraft({
-				rangeText: row.rangeText,
-				rangeMin: row.rangeMin,
-				rangeMax: row.rangeMax,
-			});
-			const existingAliases = matchedMeasurement
-				? parseJsonArray<string>(matchedMeasurement.aliasesJson)
-				: [];
-			const existingKnownUnits = matchedMeasurement
-				? parseJsonArray<string>(matchedMeasurement.knownUnitsJson)
-				: [];
-			const existingRangeEvidence = matchedMeasurement
-				? parseJsonArray<string>(matchedMeasurement.rangeEvidenceJson)
-				: [];
-			const preferredName = matchedMeasurement?.name ?? normalizeMeasurementName(row.name);
-			const preferredCanonicalUnit = resolvePreferredCanonicalUnit(
-				preferredName,
-				matchedMeasurement?.canonicalUnit ?? normalizedUnit,
-			);
-			const canonicalRange = standardizeMeasurementRangeToCanonicalUnit({
-				measurementName: preferredName,
-				sourceUnit: normalizedUnit,
-				targetUnit: preferredCanonicalUnit,
-				rangeMin: matchedMeasurement?.canonicalRangeMin ?? range.min,
-				rangeMax: matchedMeasurement?.canonicalRangeMax ?? range.max,
-				rangeText: matchedMeasurement?.canonicalRangeText ?? range.text,
-			});
-
-			return {
-				measurement: {
-					name: preferredName,
-					category: resolveCanonicalMeasurementCategory(
-						preferredName,
-						normalizeOptionalText(row.category) ?? matchedMeasurement?.category ?? null,
-					),
-					aliases: unionText(
-						existingAliases,
-						[normalizeOptionalText(row.name), normalizeOptionalText(row.originalName)].filter(
-							(value): value is string => Boolean(value && value !== preferredName),
-						),
-					),
-					canonicalUnit: preferredCanonicalUnit,
-					knownUnits: unionText(existingKnownUnits, normalizedUnit ? [normalizedUnit] : []),
-					canonicalRangeText: canonicalRange.text,
-					canonicalRangeMin: canonicalRange.min,
-					canonicalRangeMax: canonicalRange.max,
-					rangeEvidence: unionText(existingRangeEvidence, range.text ? [range.text] : []),
-				},
-				originalName: normalizeOptionalText(row.originalName) ?? normalizeOptionalText(row.name),
-				originalValueText: normalizeOptionalText(row.valueText),
-				originalValueNumeric: normalizeOptionalNumber(row.valueNumeric),
-				originalUnit: normalizedUnit,
-				originalRangeText: range.text,
-				originalRangeMin: range.min,
-				originalRangeMax: range.max,
-				valueText: normalizeOptionalText(row.valueText),
-				valueNumeric: normalizeOptionalNumber(row.valueNumeric),
-				unit: normalizedUnit,
-				note: normalizeOptionalText(row.note),
-				confidence: null,
-				sourcePage: row.sourcePage ?? null,
-				evidence: range.text ? [range.text] : [],
-			};
-		}),
-	};
-}
-
-function buildMeasurementLookup(existingMeasurements: BloodworkMeasurementRow[]) {
-	const lookup = new Map<string, BloodworkMeasurementRow>();
-
-	for (const measurement of existingMeasurements) {
-		lookup.set(measurement.key, measurement);
-
-		for (const alias of parseJsonArray<string>(measurement.aliasesJson)) {
-			const aliasKey = buildMeasurementKey(alias);
-			if (aliasKey && !lookup.has(aliasKey)) {
-				lookup.set(aliasKey, measurement);
-			}
-		}
-	}
-
-	return lookup;
-}
-
-function findExistingMeasurementForRow(
-	lookup: Map<string, BloodworkMeasurementRow>,
-	row: ExtractionPassOutput['measurements'][number],
-) {
-	const candidateKeys = [
-		buildMeasurementKey(row.name),
-		buildMeasurementKey(normalizeOptionalText(row.originalName) ?? ''),
-	].filter(Boolean);
-
-	for (const key of candidateKeys) {
-		const matched = lookup.get(key);
-		if (matched) {
-			return matched;
-		}
-	}
-
-	return null;
 }
 
 function cleanMeasurementDraft(
@@ -1404,93 +1164,6 @@ function getBloodworkModelId() {
 	return env.BLOODWORK_OPENROUTER_MODEL;
 }
 
-async function getPdfPageCount(pdfData: Buffer) {
-	const document = await getDocument({ data: new Uint8Array(pdfData) }).promise;
-	return document.numPages;
-}
-
-function extractPdfTextWithPdftotext(pdfData: Buffer, fileName: string) {
-	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vitals-bloodwork-'));
-	const pdfPath = path.join(tempDir, fileName);
-
-	try {
-		fs.writeFileSync(pdfPath, pdfData);
-		const result = spawnSync('pdftotext', ['-layout', '-enc', 'UTF-8', pdfPath, '-'], {
-			encoding: 'utf8',
-			maxBuffer: 20 * 1024 * 1024,
-		});
-
-		if (result.status !== 0) {
-			return null;
-		}
-
-		const text = (result.stdout || '').trim();
-		return text || null;
-	} catch {
-		return null;
-	} finally {
-		fs.rmSync(tempDir, { recursive: true, force: true });
-	}
-}
-
-async function extractPdfTextWithPdfjs(pdfData: Buffer) {
-	const document = await getDocument({ data: new Uint8Array(pdfData) }).promise;
-	const pageTexts: string[] = [];
-
-	for (let pageIndex = 1; pageIndex <= document.numPages; pageIndex += 1) {
-		const page = await document.getPage(pageIndex);
-		const textContent = await page.getTextContent();
-		const lines = new Map<number, Array<{ x: number; token: string }>>();
-
-		for (const item of textContent.items) {
-			if (!('str' in item)) continue;
-			const token = item.str.trim();
-			if (!token) continue;
-
-			const transform =
-				'transform' in item && Array.isArray(item.transform) ? item.transform : null;
-			const x = transform ? Number(transform[4]) : Number.NaN;
-			const y = transform ? Number(transform[5]) : Number.NaN;
-			if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-
-			const existingY = Array.from(lines.keys()).find(lineY => Math.abs(lineY - y) <= 1.8);
-			const lineY = existingY ?? y;
-			const line = lines.get(lineY) ?? [];
-			line.push({ x, token });
-			lines.set(lineY, line);
-		}
-
-		const pageBody = Array.from(lines.entries())
-			.sort((left, right) => right[0] - left[0])
-			.map(([, tokens]) =>
-				tokens
-					.sort((left, right) => left.x - right.x)
-					.map(item => item.token)
-					.join(' '),
-			)
-			.map(line => line.replace(/\s+/g, ' ').trim())
-			.filter(Boolean)
-			.join('\n')
-			.trim();
-
-		if (pageBody) {
-			pageTexts.push(pageBody);
-		}
-	}
-
-	return pageTexts.join('\n\n');
-}
-
-function choosePdfParserEngine(extractedText: string, pageCount: number) {
-	const normalizedText = extractedText.trim();
-	if (!normalizedText) {
-		return 'mistral-ocr' as const;
-	}
-
-	const charactersPerPage = normalizedText.length / Math.max(pageCount, 1);
-	return charactersPerPage >= LOCAL_TEXT_MIN_CHARACTERS_PER_PAGE ? 'pdf-text' : 'mistral-ocr';
-}
-
 function normalizeOptionalText(value: string | null | undefined) {
 	if (typeof value !== 'string') {
 		return null;
@@ -1578,22 +1251,22 @@ function resolveRangeDraft(args: {
 	};
 }
 
-function inferMetadataFromFileName(fileName: string, extractedText: string) {
+function inferMetadataFromFileName(fileName: string) {
 	const baseName = path.basename(fileName, path.extname(fileName));
 	const dateMatch = baseName.match(/\d{4}-\d{2}-\d{2}/);
 	const inferredDate = dateMatch ? dateMatch[0] : null;
-	const normalizedText = extractedText.toLowerCase();
+	const normalizedName = baseName.toLowerCase();
 	let labName = 'Unknown Lab';
-	if (normalizedText.includes('quest diagnostics')) {
+	if (normalizedName.includes('quest')) {
 		labName = 'Quest Diagnostics';
-	} else if (
-		normalizedText.includes('labcorp') ||
-		normalizedText.includes('laboratory corporation of america')
-	) {
+	} else if (normalizedName.includes('labcorp')) {
 		labName = 'LabCorp';
-	} else if (normalizedText.includes('physicians lab')) {
+	} else if (
+		normalizedName.includes('physicians-lab') ||
+		normalizedName.includes('physicians_lab')
+	) {
 		labName = 'Physicians Lab';
-	} else if (normalizedText.includes('mdi limbach')) {
+	} else if (normalizedName.includes('limbach') || normalizedName.includes('mdi')) {
 		labName = 'MDI Limbach Berlin GmbH';
 	}
 
