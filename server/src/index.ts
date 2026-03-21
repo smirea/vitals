@@ -1,7 +1,8 @@
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 
 import { PROJECT_ROOT } from 'scripts/project-paths.ts';
-import { startBloodworkProcessor } from 'server/db/bloodwork.ts';
+import { getBloodworkDocumentPdf, startBloodworkProcessor } from 'server/db/bloodwork.ts';
+import { getDatabase } from 'server/db/client.ts';
 import env from 'server/env.ts';
 import { appRouter, createTrpcContext } from 'server/trpc/index.ts';
 
@@ -17,6 +18,32 @@ function getCorsHeaders(req: Request) {
 		'Access-Control-Allow-Headers':
 			req.headers.get('access-control-request-headers') ?? 'content-type',
 	};
+}
+
+function getBloodworkDocumentPdfResponse(req: Request) {
+	const match = new URL(req.url).pathname.match(/^\/bloodwork\/documents\/(\d+)\/pdf$/);
+	if (!match) {
+		return null;
+	}
+
+	const documentId = Number.parseInt(match[1] ?? '', 10);
+	if (!Number.isFinite(documentId) || documentId <= 0) {
+		return Response.json({ ok: false, error: 'Invalid document id' }, { status: 400 });
+	}
+
+	const document = getBloodworkDocumentPdf(getDatabase(), documentId);
+	if (!document) {
+		return Response.json({ ok: false, error: 'Document not found' }, { status: 404 });
+	}
+
+	const headers = new Headers(getCorsHeaders(req));
+	headers.set('Content-Type', document.mimeType || 'application/pdf');
+	headers.set('Content-Disposition', `inline; filename="${document.fileName.replace(/"/g, '')}"`);
+
+	return new Response(new Uint8Array(document.pdfData), {
+		status: 200,
+		headers,
+	});
 }
 
 await Bun.$`bunx drizzle-kit push --config drizzle.config.ts --force`.cwd(PROJECT_ROOT);
@@ -53,6 +80,9 @@ const server = Bun.serve({
 				headers: nextHeaders,
 			});
 		},
+		'/bloodwork/documents/*': req =>
+			getBloodworkDocumentPdfResponse(req) ??
+			Response.json({ ok: false, error: 'Not found' }, { status: 404 }),
 		'/*': Response.json({ ok: false, error: 'Not found' }, { status: 404 }),
 	},
 });

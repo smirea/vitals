@@ -47,6 +47,7 @@ import type {
 import {
 	formatNormalizedYAxisTick,
 	formatPrettyDate,
+	hasCellDisplayValue,
 	MEASUREMENT_COLUMN_WIDTH,
 	OVERVIEW_COLUMN_WIDTH,
 	SELECTION_COLUMN_WIDTH,
@@ -554,6 +555,18 @@ const VitalsScope = styled.div`
 		gap: 4px;
 	}
 
+	.vitals-cell-interactive {
+		cursor: pointer;
+		transition:
+			background-color 120ms ease,
+			box-shadow 120ms ease;
+	}
+
+	.vitals-cell-interactive:hover {
+		background: var(--vitals-bg-hover);
+		box-shadow: inset 0 0 0 1px var(--vitals-primary-border);
+	}
+
 	.vitals-range-track {
 		position: relative;
 		height: 10px;
@@ -705,6 +718,7 @@ type VitalsTableProps = {
 	onToggleCategory: (category: string, checked: boolean) => void;
 	onToggleStar: (measurementKey: string) => void;
 	onToggleOutOfRangeSourceFilter: (sourceId: string) => void;
+	onOpenSourceDocument: (documentId: number) => void;
 };
 
 type SelectionCheckboxProps = {
@@ -1487,6 +1501,7 @@ type MeasurementRowProps = {
 	overview: MeasurementOverviewTally;
 	onToggleRow: (key: string, checked: boolean) => void;
 	onToggleStar: (measurementKey: string) => void;
+	onOpenSourceDocument: (documentId: number) => void;
 };
 
 const MeasurementRow = memo(
@@ -1500,6 +1515,7 @@ const MeasurementRow = memo(
 		overview,
 		onToggleRow,
 		onToggleStar,
+		onOpenSourceDocument,
 	}: MeasurementRowProps) {
 		const { token } = antdTheme.useToken();
 		const hasAnyCounter = overview.inRange > 0 || overview.outOfRange > 0;
@@ -1596,7 +1612,13 @@ const MeasurementRow = memo(
 				{tableSources.map(source => (
 					<td
 						key={`${row.key}-${source.id}`}
-						className={`vitals-cell ${highlightedSourceIdSet.has(source.id) ? 'vitals-source-filter-active' : ''}`}
+						className={`vitals-cell ${highlightedSourceIdSet.has(source.id) ? 'vitals-source-filter-active' : ''} ${hasCellDisplayValue(row.valuesBySourceIndex[source.index]) ? 'vitals-cell-interactive' : ''}`}
+						onClick={() => {
+							const documentId = row.valuesBySourceIndex[source.index]?.documentId;
+							if (documentId) {
+								onOpenSourceDocument(documentId);
+							}
+						}}
 					>
 						<MeasurementValueCell cell={row.valuesBySourceIndex[source.index]} />
 					</td>
@@ -1611,7 +1633,8 @@ const MeasurementRow = memo(
 		prev.selected === next.selected &&
 		prev.starred === next.starred &&
 		prev.tooltip === next.tooltip &&
-		prev.overview === next.overview,
+		prev.overview === next.overview &&
+		prev.onOpenSourceDocument === next.onOpenSourceDocument,
 );
 
 type CategoryRowProps = {
@@ -1691,6 +1714,7 @@ export const VitalsTable = memo(function VitalsTable({
 	onToggleCategory,
 	onToggleStar,
 	onToggleOutOfRangeSourceFilter,
+	onOpenSourceDocument,
 }: VitalsTableProps) {
 	const tableShellRef = useRef<HTMLDivElement | null>(null);
 	const pendingScrollTopRef = useRef<number | null>(null);
@@ -1817,6 +1841,7 @@ export const VitalsTable = memo(function VitalsTable({
 										}
 										onToggleRow={onToggleRow}
 										onToggleStar={onToggleStarWithScrollLock}
+										onOpenSourceDocument={onOpenSourceDocument}
 									/>
 								);
 							})}

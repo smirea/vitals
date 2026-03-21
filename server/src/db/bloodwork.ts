@@ -263,6 +263,24 @@ export async function retryBloodworkDocument(
 	};
 }
 
+export function getBloodworkDocumentPdf(
+	db: VitalsDatabase,
+	documentId: number,
+): Pick<BloodworkDocumentRow, 'id' | 'fileName' | 'mimeType' | 'pdfData'> | null {
+	return (
+		db
+			.select({
+				id: bloodworkDocuments.id,
+				fileName: bloodworkDocuments.fileName,
+				mimeType: bloodworkDocuments.mimeType,
+				pdfData: bloodworkDocuments.pdfData,
+			})
+			.from(bloodworkDocuments)
+			.where(eq(bloodworkDocuments.id, documentId))
+			.get() ?? null
+	);
+}
+
 export function startBloodworkProcessor() {
 	if (processorStarted) {
 		return;

@@ -6,6 +6,7 @@ import {
 	Button,
 	Card,
 	Checkbox,
+	Drawer,
 	Empty,
 	Flex,
 	Popconfirm,
@@ -26,6 +27,7 @@ import {
 	useRef,
 	useState,
 } from 'react';
+import { z } from 'zod';
 
 import {
 	CategoriesOverview,
@@ -75,13 +77,21 @@ import {
 import type { BloodworkImportDocument } from '../utils/api';
 import { useTRPC } from '../utils/trpc';
 
+const bloodworkSearchSchema = z.object({
+	tab: z.enum(['overview', 'documents']).optional(),
+	doc: z.coerce.number().int().positive().optional(),
+});
+
 export const Route = createFileRoute('/bloodwork')({
+	validateSearch: search => bloodworkSearchSchema.parse(search),
 	component: BloodworkPage,
 });
 
 const BLOODWORK_IMPORT_POLL_INTERVAL_MS = 3_000;
 
 function BloodworkPage() {
+	const search = Route.useSearch();
+	const navigate = Route.useNavigate();
 	const viewport = useViewport();
 	const isMobileViewport = viewport.width < 900;
 	const trpc = useTRPC();
@@ -105,6 +115,8 @@ function BloodworkPage() {
 	const [outOfRangeSourceFilterIds, setOutOfRangeSourceFilterIds] = useState<string[]>(() =>
 		readStoredOutOfRangeSourceFilterIds(),
 	);
+	const activeTab = search.tab ?? 'overview';
+	const previewDocumentId = search.doc ?? null;
 
 	const deferredMeasurementFilter = useDeferredValue(measurementFilter);
 	const starredMeasurementSet = useMemo(
@@ -184,6 +196,10 @@ function BloodworkPage() {
 	const measurements = dashboard?.measurements ?? [];
 	const results = dashboard?.results ?? [];
 	const previousHasActiveImportDocumentsRef = useRef(hasActiveImportDocuments);
+	const previewDocument = useMemo(
+		() => importDocuments.find(document => document.id === previewDocumentId) ?? null,
+		[importDocuments, previewDocumentId],
+	);
 
 	useEffect(() => {
 		const previousHadActiveImports = previousHasActiveImportDocumentsRef.current;
@@ -724,6 +740,41 @@ function BloodworkPage() {
 		[deleteDocumentMutation],
 	);
 
+	const onOpenDocumentPreview = useCallback(
+		(documentId: number) => {
+			void navigate({
+				search: previous => ({
+					...previous,
+					doc: documentId,
+				}),
+			});
+		},
+		[navigate],
+	);
+
+	const onCloseDocumentPreview = useCallback(() => {
+		void navigate({
+			search: previous => {
+				const next = { ...previous };
+				delete next.doc;
+				return next;
+			},
+		});
+	}, [navigate]);
+
+	const onTabChange = useCallback(
+		(nextTab: string) => {
+			const normalizedTab = nextTab === 'documents' ? 'documents' : 'overview';
+			void navigate({
+				search: previous => ({
+					...previous,
+					tab: normalizedTab,
+				}),
+			});
+		},
+		[navigate],
+	);
+
 	const onRetryDocument = useCallback(
 		async (documentId: number) => {
 			await retryDocumentMutation.mutateAsync({
@@ -895,7 +946,13 @@ function BloodworkPage() {
 												disabled={!isSelectable || updateDocumentsMutation.isPending}
 											/>
 											<Tag color={statusColor}>{item.status}</Tag>
-											<Typography.Text strong>{item.fileName}</Typography.Text>
+											<Button
+												type='link'
+												style={{ padding: 0, height: 'auto', fontWeight: 600 }}
+												onClick={() => onOpenDocumentPreview(item.id)}
+											>
+												{item.fileName}
+											</Button>
 											{item.group ? <Tag>{'Grouped'}</Tag> : null}
 											{item.statusText ? (
 												<Typography.Text type='secondary'>{item.statusText}</Typography.Text>
@@ -1010,6 +1067,7 @@ function BloodworkPage() {
 				onToggleCategory={onToggleCategory}
 				onToggleStar={onToggleStar}
 				onToggleOutOfRangeSourceFilter={onToggleOutOfRangeSourceFilter}
+				onOpenSourceDocument={onOpenDocumentPreview}
 			/>
 		</div>
 	);
@@ -1069,7 +1127,8 @@ function BloodworkPage() {
 				/>
 			) : (
 				<Tabs
-					defaultActiveKey='overview'
+					activeKey={activeTab}
+					onChange={onTabChange}
 					items={[
 						{
 							key: 'overview',
@@ -1084,6 +1143,22 @@ function BloodworkPage() {
 					]}
 				/>
 			)}
+			<Drawer
+				title={previewDocument?.fileName ?? 'Document preview'}
+				open={previewDocumentId !== null}
+				onClose={onCloseDocumentPreview}
+				width={Math.min(viewport.width - 32, 1080)}
+				destroyOnHidden
+				styles={{ body: { padding: 0 } }}
+			>
+				{previewDocumentId !== null ? (
+					<iframe
+						src={buildBloodworkDocumentPreviewUrl(previewDocumentId)}
+						title={previewDocument?.fileName ?? `Bloodwork document ${previewDocumentId}`}
+						style={{ width: '100%', height: '100%', minHeight: '80vh', border: 0 }}
+					/>
+				) : null}
+			</Drawer>
 		</main>
 	);
 }
@@ -1100,6 +1175,10 @@ function isGroupableBloodworkDocument(_document: BloodworkImportDocument) {
 
 function buildBloodworkDocumentGroupId() {
 	return `group_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
+}
+
+function buildBloodworkDocumentPreviewUrl(documentId: number) {
+	return `${import.meta.env.VITE_API_URL.trim()}/bloodwork/documents/${documentId}/pdf`;
 }
 
 function useViewport() {

@@ -10,6 +10,7 @@ export type BloodworkMeasurementRecord = {
 	key: string;
 	name: string;
 	category: string | null;
+	documentId: number | null;
 	valueText: string | null;
 	valueNumeric: number | null;
 	unit: string | null;
@@ -31,6 +32,7 @@ export type SourceColumn = {
 
 export type MeasurementCell = {
 	display: string;
+	documentId: number | null;
 	numericValue: number | null;
 	rangeMin: number | null;
 	rangeMax: number | null;
@@ -359,6 +361,7 @@ export function formatCell(measurement: BloodworkMeasurementRecord): Measurement
 
 	return {
 		display,
+		documentId: measurement.documentId,
 		numericValue,
 		rangeMin,
 		rangeMax,
@@ -688,6 +691,7 @@ export function getAllMeasurementRows({
 				key,
 				name: measurementDefinition.name,
 				category: measurementDefinition.category,
+				documentId: result.documentId,
 				valueText: result.valueText,
 				valueNumeric: result.valueNumeric,
 				unit: result.unit,
