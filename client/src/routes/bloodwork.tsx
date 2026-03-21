@@ -87,6 +87,8 @@ export const Route = createFileRoute('/bloodwork')({
 });
 
 const BLOODWORK_IMPORT_POLL_INTERVAL_MS = 3_000;
+const PREVIEW_DRAWER_CONTENT_HEIGHT = 'calc(100vh - 108px)';
+const PREVIEW_RESULTS_PANEL_WIDTH = 360;
 
 function BloodworkPage() {
 	const search = Route.useSearch();
@@ -209,6 +211,34 @@ function BloodworkPage() {
 		() => importDocuments.find(document => document.id === previewDocumentId) ?? null,
 		[importDocuments, previewDocumentId],
 	);
+	const previewMeasurementById = useMemo(
+		() => new Map(measurements.map(measurement => [measurement.id, measurement])),
+		[measurements],
+	);
+	const previewRows = useMemo(() => {
+		if (previewDocumentId === null) {
+			return [];
+		}
+
+		return results
+			.filter(result => result.documentId === previewDocumentId)
+			.map(result => {
+				const measurement = previewMeasurementById.get(result.measurementId);
+				const valueText = [result.valueText?.trim() ?? '', result.unit?.trim() ?? '']
+					.filter(Boolean)
+					.join(' ')
+					.trim();
+
+				return {
+					id: result.id,
+					name: measurement?.name ?? result.originalName ?? 'Unknown measurement',
+					category: measurement?.category?.trim() || null,
+					valueText: valueText || '—',
+					rangeText: measurement?.canonicalRangeText?.trim() || null,
+					note: result.note?.trim() || null,
+				};
+			});
+	}, [previewDocumentId, previewMeasurementById, results]);
 
 	useEffect(() => {
 		const previousHadActiveImports = previousHasActiveImportDocumentsRef.current;
@@ -1179,11 +1209,106 @@ function BloodworkPage() {
 				styles={{ body: { padding: 0 } }}
 			>
 				{previewDocumentId !== null ? (
-					<iframe
-						src={buildBloodworkDocumentPreviewUrl(previewDocumentId)}
-						title={previewDocument?.fileName ?? `Bloodwork document ${previewDocumentId}`}
-						style={{ width: '100%', height: '100%', minHeight: '80vh', border: 0 }}
-					/>
+					<Flex
+						style={{
+							height: PREVIEW_DRAWER_CONTENT_HEIGHT,
+							minHeight: PREVIEW_DRAWER_CONTENT_HEIGHT,
+						}}
+					>
+						<div
+							style={{
+								width: PREVIEW_RESULTS_PANEL_WIDTH,
+								minWidth: PREVIEW_RESULTS_PANEL_WIDTH,
+								borderRight: `1px solid ${token.colorBorderSecondary}`,
+								display: 'flex',
+								flexDirection: 'column',
+								minHeight: 0,
+								background: token.colorBgContainer,
+							}}
+						>
+							<div
+								style={{
+									padding: '12px 14px',
+									borderBottom: `1px solid ${token.colorBorderSecondary}`,
+								}}
+							>
+								<Typography.Text strong>Parsed Values ({previewRows.length})</Typography.Text>
+							</div>
+							<div style={{ overflowY: 'auto', minHeight: 0, flex: 1 }}>
+								{previewRows.length === 0 ? (
+									<Empty
+										image={Empty.PRESENTED_IMAGE_SIMPLE}
+										description='No processed values for this document'
+										style={{ marginTop: 24 }}
+									/>
+								) : (
+									<div>
+										{previewRows.map(row => (
+											<div
+												key={row.id}
+												style={{
+													padding: '10px 14px',
+													borderBottom: `1px solid ${token.colorBorderSecondary}`,
+												}}
+											>
+												<Flex justify='space-between' align='flex-start' gap={12}>
+													<div style={{ minWidth: 0 }}>
+														<Typography.Text
+															strong
+															style={{
+																display: 'block',
+																lineHeight: 1.35,
+																overflowWrap: 'break-word',
+															}}
+														>
+															{row.name}
+														</Typography.Text>
+														{row.category ? (
+															<Typography.Text type='secondary' style={{ fontSize: 12 }}>
+																{row.category}
+															</Typography.Text>
+														) : null}
+													</div>
+													<Typography.Text
+														style={{
+															textAlign: 'right',
+															whiteSpace: 'nowrap',
+															flexShrink: 0,
+														}}
+													>
+														{row.valueText}
+													</Typography.Text>
+												</Flex>
+												{row.rangeText ? (
+													<Typography.Text
+														type='secondary'
+														style={{ display: 'block', marginTop: 4, fontSize: 12 }}
+													>
+														ref {row.rangeText}
+													</Typography.Text>
+												) : null}
+												{row.note ? (
+													<Typography.Text
+														type='secondary'
+														style={{ display: 'block', marginTop: 4, fontSize: 12 }}
+													>
+														{row.note}
+													</Typography.Text>
+												) : null}
+											</div>
+										))}
+									</div>
+								)}
+							</div>
+						</div>
+						<div style={{ flex: 1, minWidth: 0 }}>
+							<iframe
+								src={buildBloodworkDocumentPreviewUrl(previewDocumentId)}
+								title={previewDocument?.fileName ?? `Bloodwork document ${previewDocumentId}`}
+								style={{ width: '100%', height: '100%', border: 0 }}
+							/>
+						</div>
+					</Flex>
 				) : null}
 			</Drawer>
 		</main>
