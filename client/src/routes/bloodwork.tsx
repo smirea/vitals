@@ -46,7 +46,6 @@ import {
 	getFilteredMeasurementRows,
 	getMeasurementKeysByCategory,
 	getMeasurementOverviewByKey,
-	getMeasurementRangesTooltipByKey,
 	getOrderedDocuments,
 	getOutOfRangeMeasurementCountBySourceId,
 	getPrunedSelectedRowKeys,
@@ -453,15 +452,6 @@ function BloodworkPage() {
 				selectedRows,
 			}),
 		[selectedRows, visibleSources],
-	);
-
-	const measurementRangesTooltipByKey = useMemo(
-		() =>
-			getMeasurementRangesTooltipByKey({
-				filteredMeasurementRows: tableMeasurementRows,
-				sources,
-			}),
-		[sources, tableMeasurementRows],
 	);
 
 	const measurementOverviewByKey = useMemo(
@@ -1059,7 +1049,6 @@ function BloodworkPage() {
 				categorySelectionByName={categorySelectionByName}
 				starredMeasurementSet={starredMeasurementSet}
 				measurementOverviewByKey={measurementOverviewByKey}
-				measurementRangesTooltipByKey={measurementRangesTooltipByKey}
 				tableScrollX={tableScrollX}
 				tableScrollY={tableScrollY}
 				onToggleRow={onToggleRow}

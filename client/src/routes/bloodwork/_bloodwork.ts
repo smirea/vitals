@@ -944,32 +944,6 @@ export function getSelectedRows({
 	return filteredMeasurementRows.filter(row => selectedRowKeySet.has(row.key));
 }
 
-export function getMeasurementRangesTooltipByKey({
-	filteredMeasurementRows,
-	sources,
-}: {
-	filteredMeasurementRows: VitalsRowModel[];
-	sources: SourceColumn[];
-}): Map<string, string> {
-	const tooltipByKey = new Map<string, string>();
-	filteredMeasurementRows.forEach(row => {
-		const rangeLines = sources
-			.map(source => {
-				const rangeCaption = row.valuesBySourceIndex[source.index]?.rangeCaption;
-				if (!rangeCaption) return null;
-				return `${source.prettyDate}: ${rangeCaption}`;
-			})
-			.filter((entry): entry is string => Boolean(entry));
-
-		const lines = [
-			row.measurement,
-			...(rangeLines.length > 0 ? rangeLines : ['No recorded reference ranges.']),
-		];
-		tooltipByKey.set(row.key, lines.join('\n'));
-	});
-	return tooltipByKey;
-}
-
 export function getMeasurementOverviewByKey({
 	filteredMeasurementRows,
 	tableSources,

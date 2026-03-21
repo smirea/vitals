@@ -710,7 +710,6 @@ type VitalsTableProps = {
 	categorySelectionByName: Map<string, CategorySelectionState>;
 	starredMeasurementSet: Set<string>;
 	measurementOverviewByKey: Map<string, MeasurementOverviewTally>;
-	measurementRangesTooltipByKey: Map<string, string>;
 	tableScrollX: number;
 	tableScrollY: number;
 	onToggleRow: (key: string, checked: boolean) => void;
@@ -1443,47 +1442,53 @@ const MeasurementValueCell = memo(
 
 		return (
 			<div className='vitals-cell-value'>
-				<div style={{ minHeight: 18 }}>
+				<div
+					style={{
+						minHeight: 18,
+						display: 'flex',
+						alignItems: 'flex-start',
+						gap: 8,
+						justifyContent: 'space-between',
+					}}
+				>
 					<span>{cell.display}</span>
+					{cell.flag && cell.flag !== 'normal' ? (
+						<span
+							className={`vitals-flag ${cell.flag === 'high' || cell.flag === 'critical' ? 'vitals-flag-danger' : 'vitals-flag-warning'}`}
+							style={{ marginLeft: 'auto', flexShrink: 0 }}
+						>
+							{cell.flag}
+						</span>
+					) : null}
 				</div>
-				{rangeVisualization && cell.rangeCaption ? (
-					<div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-						<div className='vitals-range-track'>
-							{hasBand ? (
-								<span
-									className='vitals-range-band'
-									style={{
-										left: `${cell.rangeBandLeft}%`,
-										width: `${cell.rangeBandWidth}%`,
-									}}
-								/>
-							) : null}
-							{rangeVisualization.minPosition !== null ? (
-								<span
-									className='vitals-range-marker'
-									style={{ left: `${rangeVisualization.minPosition}%` }}
-								/>
-							) : null}
-							{rangeVisualization.maxPosition !== null ? (
-								<span
-									className='vitals-range-marker'
-									style={{ left: `${rangeVisualization.maxPosition}%` }}
-								/>
-							) : null}
+				{rangeVisualization ? (
+					<div className='vitals-range-track'>
+						{hasBand ? (
 							<span
-								className='vitals-value-marker'
-								style={{ left: `${rangeVisualization.valuePosition}%` }}
+								className='vitals-range-band'
+								style={{
+									left: `${cell.rangeBandLeft}%`,
+									width: `${cell.rangeBandWidth}%`,
+								}}
 							/>
-						</div>
-						<span className='vitals-range-caption'>{cell.rangeCaption}</span>
+						) : null}
+						{rangeVisualization.minPosition !== null ? (
+							<span
+								className='vitals-range-marker'
+								style={{ left: `${rangeVisualization.minPosition}%` }}
+							/>
+						) : null}
+						{rangeVisualization.maxPosition !== null ? (
+							<span
+								className='vitals-range-marker'
+								style={{ left: `${rangeVisualization.maxPosition}%` }}
+							/>
+						) : null}
+						<span
+							className='vitals-value-marker'
+							style={{ left: `${rangeVisualization.valuePosition}%` }}
+						/>
 					</div>
-				) : null}
-				{cell.flag && cell.flag !== 'normal' ? (
-					<span
-						className={`vitals-flag ${cell.flag === 'high' || cell.flag === 'critical' ? 'vitals-flag-danger' : 'vitals-flag-warning'}`}
-					>
-						{cell.flag}
-					</span>
 				) : null}
 			</div>
 		);
@@ -1497,7 +1502,6 @@ type MeasurementRowProps = {
 	highlightedSourceIdSet: Set<string>;
 	selected: boolean;
 	starred: boolean;
-	tooltip: string;
 	overview: MeasurementOverviewTally;
 	onToggleRow: (key: string, checked: boolean) => void;
 	onToggleStar: (measurementKey: string) => void;
@@ -1511,7 +1515,6 @@ const MeasurementRow = memo(
 		highlightedSourceIdSet,
 		selected,
 		starred,
-		tooltip,
 		overview,
 		onToggleRow,
 		onToggleStar,
@@ -1519,6 +1522,8 @@ const MeasurementRow = memo(
 	}: MeasurementRowProps) {
 		const { token } = antdTheme.useToken();
 		const hasAnyCounter = overview.inRange > 0 || overview.outOfRange > 0;
+		const referenceCaption =
+			row.valuesBySourceIndex.find(cell => cell?.rangeCaption)?.rangeCaption ?? null;
 
 		return (
 			<tr className={selected ? 'vitals-row-selected' : ''}>
@@ -1530,10 +1535,7 @@ const MeasurementRow = memo(
 					/>
 				</td>
 				<td className='vitals-cell vitals-col-measurement'>
-					<div
-						style={{ display: 'flex', minWidth: 0, alignItems: 'flex-start', gap: 6 }}
-						title={tooltip}
-					>
+					<div style={{ display: 'flex', minWidth: 0, alignItems: 'flex-start', gap: 6 }}>
 						<button
 							type='button'
 							aria-pressed={starred}
@@ -1557,7 +1559,10 @@ const MeasurementRow = memo(
 								fontWeight: starred ? 600 : undefined,
 							}}
 						>
-							{row.measurement}
+							<span style={{ display: 'block' }}>{row.measurement}</span>
+							{referenceCaption ? (
+								<span className='vitals-range-caption'>{referenceCaption}</span>
+							) : null}
 						</span>
 					</div>
 				</td>
@@ -1632,7 +1637,6 @@ const MeasurementRow = memo(
 		prev.highlightedSourceIdSet === next.highlightedSourceIdSet &&
 		prev.selected === next.selected &&
 		prev.starred === next.starred &&
-		prev.tooltip === next.tooltip &&
 		prev.overview === next.overview &&
 		prev.onOpenSourceDocument === next.onOpenSourceDocument,
 );
@@ -1706,7 +1710,6 @@ export const VitalsTable = memo(function VitalsTable({
 	categorySelectionByName,
 	starredMeasurementSet,
 	measurementOverviewByKey,
-	measurementRangesTooltipByKey,
 	tableScrollX,
 	tableScrollY,
 	onToggleRow,
@@ -1835,7 +1838,6 @@ export const VitalsTable = memo(function VitalsTable({
 										highlightedSourceIdSet={outOfRangeSourceFilterIdSet}
 										selected={selectedRowKeySet.has(row.key)}
 										starred={starredMeasurementSet.has(row.key)}
-										tooltip={measurementRangesTooltipByKey.get(row.key) ?? row.measurement}
 										overview={
 											measurementOverviewByKey.get(row.key) ?? { inRange: 0, outOfRange: 0 }
 										}
