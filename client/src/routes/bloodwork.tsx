@@ -5,12 +5,14 @@ import {
 	Alert,
 	Button,
 	Card,
+	Checkbox,
 	Empty,
 	Flex,
 	Popconfirm,
 	Splitter,
 	Spin,
 	Tag,
+	Tabs,
 	Typography,
 	message,
 	theme as antdTheme,
@@ -90,6 +92,7 @@ function BloodworkPage() {
 
 	const [measurementFilter, setMeasurementFilter] = useState('');
 	const [deletingDocumentId, setDeletingDocumentId] = useState<number | null>(null);
+	const [selectedImportDocumentIds, setSelectedImportDocumentIds] = useState<number[]>([]);
 	const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>(() =>
 		readStoredSelectedRowKeys(),
 	);
@@ -151,6 +154,29 @@ function BloodworkPage() {
 		},
 		onSettled: () => {
 			setDeletingDocumentId(null);
+		},
+	});
+	const updateDocumentsMutation = useMutation({
+		...trpc.table.bloodworkDocuments.updateMany.mutationOptions(),
+		onSuccess: async data => {
+			await queryClient.invalidateQueries();
+			messageApi.success(
+				data.updatedCount === 1 ? '1 document updated.' : `${data.updatedCount} documents updated.`,
+			);
+			setSelectedImportDocumentIds([]);
+		},
+		onError: error => {
+			messageApi.error(error.message);
+		},
+	});
+	const retryDocumentMutation = useMutation({
+		...trpc.bloodwork.retryDocument.mutationOptions(),
+		onSuccess: async () => {
+			await queryClient.invalidateQueries();
+			messageApi.success('Document queued for retry.');
+		},
+		onError: error => {
+			messageApi.error(error.message);
 		},
 	});
 	const dashboard = dashboardQuery.data;
@@ -226,13 +252,22 @@ function BloodworkPage() {
 	const allMeasurementRows = useMemo(
 		() =>
 			getAllMeasurementRows({
-				orderedDocuments,
+				sources,
 				measurements,
 				results,
-				sourceCount: sources.length,
 			}),
-		[measurements, orderedDocuments, results, sources.length],
+		[measurements, results, sources],
 	);
+
+	useEffect(() => {
+		const groupableDocumentIds = new Set(
+			importDocuments.filter(isGroupableBloodworkDocument).map(document => document.id),
+		);
+		setSelectedImportDocumentIds(previous => {
+			const next = previous.filter(documentId => groupableDocumentIds.has(documentId));
+			return next.length === previous.length ? previous : next;
+		});
+	}, [importDocuments]);
 
 	useEffect(() => {
 		if (typeof window === 'undefined') return;
@@ -689,12 +724,90 @@ function BloodworkPage() {
 		[deleteDocumentMutation],
 	);
 
+	const onRetryDocument = useCallback(
+		async (documentId: number) => {
+			await retryDocumentMutation.mutateAsync({
+				documentId,
+			});
+		},
+		[retryDocumentMutation],
+	);
+
+	const onToggleImportDocument = useCallback((documentId: number, checked: boolean) => {
+		setSelectedImportDocumentIds(previous => {
+			if (checked) {
+				if (previous.includes(documentId)) {
+					return previous;
+				}
+				return [...previous, documentId];
+			}
+			return previous.filter(item => item !== documentId);
+		});
+	}, []);
+
+	const onGroupDocuments = useCallback(async () => {
+		const documentIds = importDocuments
+			.filter(document => selectedImportDocumentIds.includes(document.id))
+			.filter(isGroupableBloodworkDocument)
+			.map(document => document.id);
+		if (documentIds.length < 2) {
+			return;
+		}
+
+		await updateDocumentsMutation.mutateAsync({
+			where: [
+				{
+					column: 'id',
+					operator: 'in',
+					value: documentIds,
+				},
+			],
+			values: {
+				group: buildBloodworkDocumentGroupId(),
+			},
+		});
+	}, [importDocuments, selectedImportDocumentIds, updateDocumentsMutation]);
+
+	const onClearDocumentGroup = useCallback(async () => {
+		const documentIds = importDocuments
+			.filter(document => selectedImportDocumentIds.includes(document.id))
+			.filter(document => isGroupableBloodworkDocument(document) && Boolean(document.group))
+			.map(document => document.id);
+		if (documentIds.length === 0) {
+			return;
+		}
+
+		await updateDocumentsMutation.mutateAsync({
+			where: [
+				{
+					column: 'id',
+					operator: 'in',
+					value: documentIds,
+				},
+			],
+			values: {
+				group: null,
+			},
+		});
+	}, [importDocuments, selectedImportDocumentIds, updateDocumentsMutation]);
+
+	const selectedGroupableDocuments = useMemo(
+		() =>
+			importDocuments
+				.filter(document => selectedImportDocumentIds.includes(document.id))
+				.filter(isGroupableBloodworkDocument),
+		[importDocuments, selectedImportDocumentIds],
+	);
+	const hasSelectedDocumentGroup = selectedGroupableDocuments.some(document =>
+		Boolean(document.group),
+	);
+
 	const importPanel = (
 		<Card
 			size='small'
-			title='Imports'
+			title='Documents'
 			extra={
-				<>
+				<Flex align='center' gap={8} wrap>
 					<input
 						ref={importInputRef}
 						type='file'
@@ -707,13 +820,32 @@ function BloodworkPage() {
 					/>
 					<Button
 						type='default'
+						onClick={() => {
+							void onGroupDocuments();
+						}}
+						disabled={selectedGroupableDocuments.length < 2 || updateDocumentsMutation.isPending}
+						loading={updateDocumentsMutation.isPending}
+					>
+						Group documents
+					</Button>
+					<Button
+						type='default'
+						onClick={() => {
+							void onClearDocumentGroup();
+						}}
+						disabled={!hasSelectedDocumentGroup || updateDocumentsMutation.isPending}
+					>
+						Clear group
+					</Button>
+					<Button
+						type='default'
 						icon={<UploadSimple size={16} />}
 						onClick={onOpenImportPicker}
 						loading={uploadDocumentsMutation.isPending}
 					>
 						Import File
 					</Button>
-				</>
+				</Flex>
 			}
 			styles={{ body: { padding: 0 } }}
 		>
@@ -732,20 +864,39 @@ function BloodworkPage() {
 									: item.status === 'processing'
 										? 'processing'
 										: 'default';
+						const previousItem = importDocuments[index - 1];
+						const nextItem = importDocuments[index + 1];
+						const hasGroup = Boolean(item.group);
+						const isGroupStart = hasGroup && previousItem?.group !== item.group;
+						const isGroupEnd = hasGroup && nextItem?.group !== item.group;
+						const isSelectable = isGroupableBloodworkDocument(item);
 
 						return (
 							<div
 								key={item.id}
 								style={{
 									padding: '12px 16px',
+									marginTop: isGroupStart ? 12 : 0,
+									marginBottom: isGroupEnd ? 12 : 0,
 									borderTop: index === 0 ? 'none' : `1px solid ${token.colorBorderSecondary}`,
+									background: hasGroup ? token.colorFillAlter : undefined,
+									borderRadius:
+										isGroupStart || isGroupEnd
+											? `${isGroupStart ? 8 : 0}px ${isGroupStart ? 8 : 0}px ${isGroupEnd ? 8 : 0}px ${isGroupEnd ? 8 : 0}px`
+											: 0,
 								}}
 							>
 								<Flex vertical style={{ width: '100%' }} gap={4}>
 									<Flex justify='space-between' align='center' gap={12} wrap>
 										<Flex align='center' gap={8} wrap>
+											<Checkbox
+												checked={selectedImportDocumentIds.includes(item.id)}
+												onChange={event => onToggleImportDocument(item.id, event.target.checked)}
+												disabled={!isSelectable || updateDocumentsMutation.isPending}
+											/>
 											<Tag color={statusColor}>{item.status}</Tag>
 											<Typography.Text strong>{item.fileName}</Typography.Text>
+											{item.group ? <Tag>{'Grouped'}</Tag> : null}
 											{item.statusText ? (
 												<Typography.Text type='secondary'>{item.statusText}</Typography.Text>
 											) : null}
@@ -777,6 +928,19 @@ function BloodworkPage() {
 													Delete
 												</Button>
 											</Popconfirm>
+											{item.status === 'failed' ? (
+												<Button
+													size='small'
+													type='text'
+													onClick={() => {
+														void onRetryDocument(item.id);
+													}}
+													loading={retryDocumentMutation.isPending}
+													disabled={retryDocumentMutation.isPending}
+												>
+													Retry
+												</Button>
+											) : null}
 										</Flex>
 									</Flex>
 									{item.lastError ? (
@@ -816,7 +980,6 @@ function BloodworkPage() {
 
 	const tablePanel = (
 		<div>
-			{importPanel}
 			<CategoriesOverview items={categoryOverview} />
 			<MeaningfulChanges items={sixMonthChanges} />
 			<VitalsControls
@@ -850,14 +1013,35 @@ function BloodworkPage() {
 			/>
 		</div>
 	);
-	const emptyStatePanel = (
+	const overviewPanel = !hasAnyData ? (
+		<Card styles={{ body: { padding: 24 } }}>
+			<Flex justify='center' align='center' style={{ minHeight: '40vh' }}>
+				<Empty description='No bloodwork data found yet.' />
+			</Flex>
+		</Card>
+	) : showSplitLayout ? (
+		<Splitter
+			style={{ height: Math.max(viewport.height - 96, 680) }}
+			styles={{
+				root: { height: Math.max(viewport.height - 96, 680) },
+				panel: { overflow: 'hidden' },
+				dragger: {
+					default: { background: token.colorFillSecondary },
+					active: { background: token.colorPrimary },
+				},
+			}}
+		>
+			<Splitter.Panel defaultSize='68%' min={560}>
+				<div style={{ height: '100%', overflowY: 'auto', paddingRight: 12 }}>{tablePanel}</div>
+			</Splitter.Panel>
+			<Splitter.Panel min={MIN_CHART_PANE_WIDTH}>
+				<div style={{ height: '100%', overflowY: 'auto', paddingLeft: 12 }}>{chartCard}</div>
+			</Splitter.Panel>
+		</Splitter>
+	) : (
 		<Flex vertical gap={16}>
-			{importPanel}
-			<Card styles={{ body: { padding: 24 } }}>
-				<Flex justify='center' align='center' style={{ minHeight: '40vh' }}>
-					<Empty description='No bloodwork data found yet.' />
-				</Flex>
-			</Card>
+			{tablePanel}
+			{hasSelectedRows ? chartCard : null}
 		</Flex>
 	);
 
@@ -883,32 +1067,22 @@ function BloodworkPage() {
 					message='Unable to load bloodwork data'
 					description={dashboardQuery.error.message}
 				/>
-			) : !hasAnyData ? (
-				emptyStatePanel
-			) : showSplitLayout ? (
-				<Splitter
-					style={{ height: Math.max(viewport.height - 32, 680) }}
-					styles={{
-						root: { height: Math.max(viewport.height - 32, 680) },
-						panel: { overflow: 'hidden' },
-						dragger: {
-							default: { background: token.colorFillSecondary },
-							active: { background: token.colorPrimary },
-						},
-					}}
-				>
-					<Splitter.Panel defaultSize='68%' min={560}>
-						<div style={{ height: '100%', overflowY: 'auto', paddingRight: 12 }}>{tablePanel}</div>
-					</Splitter.Panel>
-					<Splitter.Panel min={MIN_CHART_PANE_WIDTH}>
-						<div style={{ height: '100%', overflowY: 'auto', paddingLeft: 12 }}>{chartCard}</div>
-					</Splitter.Panel>
-				</Splitter>
 			) : (
-				<Flex vertical gap={16}>
-					{tablePanel}
-					{hasSelectedRows ? chartCard : null}
-				</Flex>
+				<Tabs
+					defaultActiveKey='overview'
+					items={[
+						{
+							key: 'overview',
+							label: 'Overview',
+							children: overviewPanel,
+						},
+						{
+							key: 'documents',
+							label: 'Documents',
+							children: importPanel,
+						},
+					]}
+				/>
 			)}
 		</main>
 	);
@@ -918,6 +1092,14 @@ function hasActiveBloodworkImports(documents: BloodworkImportDocument[]) {
 	return documents.some(
 		document => document.status === 'pending' || document.status === 'processing',
 	);
+}
+
+function isGroupableBloodworkDocument(_document: BloodworkImportDocument) {
+	return true;
+}
+
+function buildBloodworkDocumentGroupId() {
+	return `group_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
 }
 
 function useViewport() {

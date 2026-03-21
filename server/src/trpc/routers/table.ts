@@ -206,6 +206,38 @@ function buildDeleteSchema<TTable extends AnySQLiteTable>(table: TTable) {
 	}) as z.ZodType<{ where: TableFilterCondition<TTable>[] }>;
 }
 
+function buildUpdateValuesSchema<TTable extends AnySQLiteTable>(table: TTable) {
+	const columns = getTableColumns(table);
+	const shape = Object.fromEntries(
+		Object.entries(columns).map(([columnName, column]) => [
+			columnName,
+			(column.notNull
+				? getColumnValueSchema(column)
+				: getColumnValueSchema(column).nullable()
+			).optional(),
+		]),
+	) as Record<string, z.ZodTypeAny>;
+
+	return z
+		.object(shape)
+		.refine(values => Object.keys(values).length > 0, 'updateMany requires at least one value.');
+}
+
+function buildUpdateSchema<TTable extends AnySQLiteTable>(table: TTable) {
+	const whereSchema = buildWhereSchema(table) as unknown as z.ZodArray<z.ZodTypeAny>;
+	const valuesSchema = buildUpdateValuesSchema(table);
+
+	return z.object({
+		where: whereSchema.min(1),
+		values: valuesSchema,
+	}) as unknown as z.ZodType<{
+		where: TableFilterCondition<TTable>[];
+		values: Partial<{
+			[TColumnName in TableColumnName<TTable>]: TableColumns<TTable>[TColumnName]['_']['data'];
+		}>;
+	}>;
+}
+
 function buildWhereClause<TTable extends AnySQLiteTable>(
 	table: TTable,
 	where: TableFilterCondition<TTable>[] | undefined,
@@ -258,6 +290,7 @@ function buildOrderBy<TTable extends AnySQLiteTable>(
 function createTableAccessRouter<TTable extends AnySQLiteTable>(table: TTable) {
 	const querySchema = buildTableQuerySchema(table);
 	const deleteSchema = buildDeleteSchema(table);
+	const updateSchema = buildUpdateSchema(table);
 
 	return createRouter({
 		findMany: publicProcedure.input(querySchema.optional()).query(({ ctx, input }) => {
@@ -336,6 +369,37 @@ function createTableAccessRouter<TTable extends AnySQLiteTable>(table: TTable) {
 
 			return {
 				deletedCount,
+			};
+		}),
+		updateMany: publicProcedure.input(updateSchema).mutation(({ ctx, input }) => {
+			const whereClause = buildWhereClause(table, input.where);
+			if (!whereClause) {
+				throw new Error('updateMany requires at least one where condition.');
+			}
+
+			const updatedCount =
+				ctx.db
+					.select({
+						value: countAll(),
+					})
+					.from(table)
+					.where(whereClause)
+					.get()?.value ?? 0;
+
+			if (updatedCount === 0) {
+				return {
+					updatedCount: 0,
+				};
+			}
+
+			ctx.db
+				.update(table)
+				.set(input.values as Record<string, unknown>)
+				.where(whereClause)
+				.run();
+
+			return {
+				updatedCount,
 			};
 		}),
 	});

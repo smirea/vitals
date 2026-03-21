@@ -32,6 +32,10 @@ export const bloodworkUploadDocumentsInputSchema = z.object({
 	files: z.array(bloodworkUploadFileInputSchema).min(1).max(12),
 });
 
+export const bloodworkRetryDocumentInputSchema = z.object({
+	documentId: z.number().int().positive(),
+});
+
 const nullableTextSchema = z.string().trim().min(1).nullable().optional();
 const nullableNumberSchema = z.number().finite().nullable().optional();
 
@@ -154,6 +158,7 @@ export function getBloodworkDashboard(db: VitalsDatabase) {
 		.select({
 			id: bloodworkDocuments.id,
 			date: bloodworkDocuments.date,
+			group: bloodworkDocuments.group,
 			queuedAt: bloodworkDocuments.queuedAt,
 		})
 		.from(bloodworkDocuments)
@@ -184,6 +189,7 @@ export function listBloodworkDocuments(db: VitalsDatabase) {
 			fileName: bloodworkDocuments.fileName,
 			status: bloodworkDocuments.status,
 			statusText: bloodworkDocuments.statusText,
+			group: bloodworkDocuments.group,
 			date: bloodworkDocuments.date,
 			labName: bloodworkDocuments.labName,
 			queuedAt: bloodworkDocuments.queuedAt,
@@ -212,6 +218,48 @@ export async function uploadBloodworkDocuments(
 	scheduleBloodworkProcessing();
 	return {
 		documents: queued,
+	};
+}
+
+export async function retryBloodworkDocument(
+	db: VitalsDatabase,
+	input: z.infer<typeof bloodworkRetryDocumentInputSchema>,
+) {
+	const parsed = bloodworkRetryDocumentInputSchema.parse(input);
+	const document = db
+		.select({
+			id: bloodworkDocuments.id,
+			fileName: bloodworkDocuments.fileName,
+			status: bloodworkDocuments.status,
+		})
+		.from(bloodworkDocuments)
+		.where(eq(bloodworkDocuments.id, parsed.documentId))
+		.get();
+
+	if (!document) {
+		throw new Error('Document not found.');
+	}
+	if (document.status !== 'failed') {
+		throw new Error('Only failed documents can be retried.');
+	}
+
+	db.update(bloodworkDocuments)
+		.set({
+			status: 'pending',
+			statusText: 'Queued for retry',
+			startedAt: null,
+			completedAt: null,
+			failedAt: null,
+			lastError: null,
+		})
+		.where(eq(bloodworkDocuments.id, parsed.documentId))
+		.run();
+
+	logBloodworkDocumentEvent(document, 'Queued for retry');
+	scheduleBloodworkProcessing();
+
+	return {
+		documentId: parsed.documentId,
 	};
 }
 

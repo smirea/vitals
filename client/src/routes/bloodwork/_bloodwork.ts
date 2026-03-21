@@ -21,7 +21,9 @@ export type BloodworkMeasurementRecord = {
 
 export type SourceColumn = {
 	id: string;
-	documentId: number;
+	documentIds: number[];
+	group: string | null;
+	documentCount: number;
 	date: string;
 	prettyDate: string;
 	index: number;
@@ -525,13 +527,63 @@ export function getOrderedDocuments(
 }
 
 export function getSources(orderedDocuments: BloodworkDashboardDocument[]): SourceColumn[] {
-	return orderedDocuments.map((document, index) => ({
-		id: String(document.id),
-		documentId: document.id,
-		date: document.date ?? document.queuedAt.slice(0, 10),
-		prettyDate: formatPrettyDate(document.date ?? document.queuedAt.slice(0, 10)),
+	const groupedSources: Array<Omit<SourceColumn, 'index'>> = [];
+	const sourceIndexByGroup = new Map<string, number>();
+
+	orderedDocuments.forEach(document => {
+		const date = document.date ?? document.queuedAt.slice(0, 10);
+		const group = document.group?.trim() || null;
+
+		if (!group) {
+			groupedSources.push({
+				id: `document:${document.id}`,
+				documentIds: [document.id],
+				group: null,
+				documentCount: 1,
+				date,
+				prettyDate: formatPrettyDate(date),
+			});
+			return;
+		}
+
+		const existingIndex = sourceIndexByGroup.get(group);
+		if (existingIndex === undefined) {
+			sourceIndexByGroup.set(group, groupedSources.length);
+			groupedSources.push({
+				id: `group:${group}`,
+				documentIds: [document.id],
+				group,
+				documentCount: 1,
+				date,
+				prettyDate: formatGroupedSourceLabel(1, date),
+			});
+			return;
+		}
+
+		const existingSource = groupedSources[existingIndex];
+		if (!existingSource) {
+			return;
+		}
+
+		existingSource.documentIds.push(document.id);
+		existingSource.documentCount = existingSource.documentIds.length;
+		existingSource.prettyDate = formatGroupedSourceLabel(
+			existingSource.documentCount,
+			existingSource.date,
+		);
+	});
+
+	return groupedSources.map((source, index) => ({
+		...source,
 		index,
 	}));
+}
+
+function formatGroupedSourceLabel(documentCount: number, date: string) {
+	const prettyDate = formatPrettyDate(date);
+	return documentCount === 1
+		? `1 Lab from ${prettyDate}`
+		: `${documentCount} Labs from ${prettyDate}`;
 }
 
 export function getDateBounds(sources: SourceColumn[]): { min: string; max: string } {
@@ -586,21 +638,16 @@ export function getChartSources({
 }
 
 export function getAllMeasurementRows({
-	orderedDocuments,
+	sources,
 	measurements,
 	results,
-	sourceCount,
 }: {
-	orderedDocuments: BloodworkDashboardDocument[];
+	sources: SourceColumn[];
 	measurements: BloodworkDashboardMeasurement[];
 	results: BloodworkDashboardResult[];
-	sourceCount: number;
 }): VitalsRowModel[] {
 	const grouped = new Map<string, VitalsRowModel>();
 	const measurementById = new Map(measurements.map(measurement => [measurement.id, measurement]));
-	const sourceIndexByDocumentId = new Map(
-		orderedDocuments.map((document, index) => [document.id, index]),
-	);
 	const resultsByDocumentId = new Map<number, BloodworkDashboardResult[]>();
 
 	results.forEach(result => {
@@ -612,14 +659,19 @@ export function getAllMeasurementRows({
 		resultsByDocumentId.set(result.documentId, [result]);
 	});
 
-	orderedDocuments.forEach(document => {
-		const sourceIndex = sourceIndexByDocumentId.get(document.id);
-		if (sourceIndex === undefined) {
-			return;
-		}
+	sources.forEach(source => {
+		const resultsByMeasurementId = new Map<number, BloodworkDashboardResult>();
 
-		const documentResults = resultsByDocumentId.get(document.id) ?? [];
-		documentResults.forEach(result => {
+		source.documentIds.forEach(documentId => {
+			const documentResults = resultsByDocumentId.get(documentId) ?? [];
+			documentResults.forEach(result => {
+				if (!resultsByMeasurementId.has(result.measurementId)) {
+					resultsByMeasurementId.set(result.measurementId, result);
+				}
+			});
+		});
+
+		resultsByMeasurementId.forEach(result => {
 			const measurementDefinition = measurementById.get(result.measurementId);
 			if (!measurementDefinition) {
 				return;
@@ -646,7 +698,7 @@ export function getAllMeasurementRows({
 			};
 
 			if (existing) {
-				existing.valuesBySourceIndex[sourceIndex] = formatCell(measurement);
+				existing.valuesBySourceIndex[source.index] = formatCell(measurement);
 				if (
 					existing.category === UNCATEGORIZED_CATEGORY_LABEL &&
 					category !== UNCATEGORIZED_CATEGORY_LABEL
@@ -657,10 +709,10 @@ export function getAllMeasurementRows({
 				return;
 			}
 
-			const valuesBySourceIndex = Array.from({ length: sourceCount }, () => undefined) as Array<
+			const valuesBySourceIndex = Array.from({ length: sources.length }, () => undefined) as Array<
 				ReturnType<typeof formatCell> | undefined
 			>;
-			valuesBySourceIndex[sourceIndex] = formatCell(measurement);
+			valuesBySourceIndex[source.index] = formatCell(measurement);
 			grouped.set(key, {
 				key,
 				rowType: 'measurement',
