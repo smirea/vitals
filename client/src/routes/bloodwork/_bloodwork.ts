@@ -147,7 +147,7 @@ export const STARRED_MEASUREMENTS_STORAGE_KEY = 'vitals.starred.measurements';
 export const SELECTED_ROWS_STORAGE_KEY = 'vitals.selected.rows';
 export const GROUP_BY_CATEGORY_STORAGE_KEY = 'vitals.group-by-category';
 export const OUT_OF_RANGE_SOURCE_FILTERS_STORAGE_KEY = 'vitals.out-of-range.source-filters';
-export const UNCATEGORIZED_CATEGORY_LABEL = 'Uncategorized';
+export const UNCATEGORIZED_CATEGORY_LABEL = 'Other';
 export const CHART_PALETTE = ['#0f172a', '#2563eb', '#0f766e', '#15803d', '#7c3aed', '#ca8a04'];
 
 export function clamp(value: number, min: number, max: number): number {

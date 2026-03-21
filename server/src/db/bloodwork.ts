@@ -201,6 +201,32 @@ export function listBloodworkDocuments(db: VitalsDatabase) {
 		.reverse();
 }
 
+export function syncBloodworkMeasurementCategories(db: VitalsDatabase) {
+	const now = new Date().toISOString();
+	const measurements = db.select().from(bloodworkMeasurements).all();
+
+	for (const measurement of measurements) {
+		const category = resolveCanonicalMeasurementCategory(measurement.name, measurement.category);
+		if (category === measurement.category) {
+			continue;
+		}
+
+		db.update(bloodworkMeasurements)
+			.set({
+				category,
+				updatedAt: now,
+			})
+			.where(eq(bloodworkMeasurements.id, measurement.id))
+			.run();
+
+		if (category === OTHER_CATEGORY) {
+			console.log(
+				`[bloodwork] measurement ${measurement.name} (${measurement.key}) fell back to ${OTHER_CATEGORY}`,
+			);
+		}
+	}
+}
+
 export async function uploadBloodworkDocuments(
 	db: VitalsDatabase,
 	input: BloodworkUploadDocumentsInput,
@@ -1050,7 +1076,10 @@ function buildFallbackNormalizationOutput(args: {
 			return {
 				measurement: {
 					name: preferredName,
-					category: normalizeOptionalText(row.category) ?? matchedMeasurement?.category ?? null,
+					category: resolveCanonicalMeasurementCategory(
+						preferredName,
+						normalizeOptionalText(row.category) ?? matchedMeasurement?.category ?? null,
+					),
 					aliases: unionText(
 						existingAliases,
 						[normalizeOptionalText(row.name), normalizeOptionalText(row.originalName)].filter(
@@ -1139,7 +1168,7 @@ function cleanMeasurementDraft(
 
 	return {
 		name: normalizeMeasurementName(input.name),
-		category: normalizeOptionalText(input.category),
+		category: resolveCanonicalMeasurementCategory(input.name, input.category),
 		aliases: unionText(normalizeTextArray(input.aliases), []),
 		canonicalUnit: preferredCanonicalUnit,
 		knownUnits: normalizeTextArray(input.knownUnits).map(canonicalizeUnitLabel),
@@ -1264,6 +1293,11 @@ function upsertMeasurementDrafts(db: VitalsDatabase, drafts: MeasurementDraft[])
 				})
 				.get();
 			idByKey.set(draft.key, inserted.id);
+			if (draft.category === OTHER_CATEGORY) {
+				console.log(
+					`[bloodwork] new measurement ${draft.name} (${draft.key}) assigned to ${OTHER_CATEGORY}`,
+				);
+			}
 			continue;
 		}
 
@@ -1279,7 +1313,7 @@ function upsertMeasurementDrafts(db: VitalsDatabase, drafts: MeasurementDraft[])
 		db.update(bloodworkMeasurements)
 			.set({
 				name: draft.name,
-				category: draft.category ?? existing.category,
+				category: draft.category,
 				aliasesJson: JSON.stringify(aliases),
 				canonicalUnit: draft.canonicalUnit ?? existing.canonicalUnit,
 				knownUnitsJson: JSON.stringify(knownUnits),
@@ -1291,6 +1325,12 @@ function upsertMeasurementDrafts(db: VitalsDatabase, drafts: MeasurementDraft[])
 			})
 			.where(eq(bloodworkMeasurements.id, existing.id))
 			.run();
+
+		if (draft.category === OTHER_CATEGORY && existing.category !== OTHER_CATEGORY) {
+			console.log(
+				`[bloodwork] measurement ${draft.name} (${draft.key}) reassigned to ${OTHER_CATEGORY}`,
+			);
+		}
 
 		idByKey.set(draft.key, existing.id);
 	}
@@ -1570,6 +1610,231 @@ function buildMeasurementKey(name: string) {
 		.toLowerCase()
 		.replace(/[^a-z0-9]+/g, ' ')
 		.trim();
+}
+
+const HEMATOLOGY_CATEGORY = 'Hematology';
+const LIPIDS_CATEGORY = 'Lipids';
+const METABOLISM_CATEGORY = 'Metabolism';
+const KIDNEY_ELECTROLYTES_CATEGORY = 'Kidney & Electrolytes';
+const LIVER_BILIARY_CATEGORY = 'Liver & Biliary';
+const THYROID_CATEGORY = 'Thyroid';
+const HORMONES_CATEGORY = 'Hormones';
+const IRON_CATEGORY = 'Iron';
+const VITAMINS_MINERALS_CATEGORY = 'Vitamins & Minerals';
+const IMMUNE_INFLAMMATION_CATEGORY = 'Immune & Inflammation';
+const INFECTIOUS_DISEASE_CATEGORY = 'Infectious Disease';
+const URINALYSIS_CATEGORY = 'Urinalysis';
+const GUT_HEALTH_CATEGORY = 'Gut Health';
+const AMINO_ACIDS_CATEGORY = 'Amino Acids';
+const FATTY_ACIDS_CATEGORY = 'Fatty Acids';
+const PHYSICAL_MEASURES_CATEGORY = 'Physical Measures';
+const OTHER_CATEGORY = 'Other';
+
+const CANONICAL_BLOODWORK_CATEGORIES = new Set([
+	HEMATOLOGY_CATEGORY,
+	LIPIDS_CATEGORY,
+	METABOLISM_CATEGORY,
+	KIDNEY_ELECTROLYTES_CATEGORY,
+	LIVER_BILIARY_CATEGORY,
+	THYROID_CATEGORY,
+	HORMONES_CATEGORY,
+	IRON_CATEGORY,
+	VITAMINS_MINERALS_CATEGORY,
+	IMMUNE_INFLAMMATION_CATEGORY,
+	INFECTIOUS_DISEASE_CATEGORY,
+	URINALYSIS_CATEGORY,
+	GUT_HEALTH_CATEGORY,
+	AMINO_ACIDS_CATEGORY,
+	FATTY_ACIDS_CATEGORY,
+	PHYSICAL_MEASURES_CATEGORY,
+	OTHER_CATEGORY,
+]);
+
+const BLOODWORK_CATEGORY_BY_KEY: Record<string, string> = {
+	'alpha pregnanediol': HORMONES_CATEGORY,
+	'blood pressure': PHYSICAL_MEASURES_CATEGORY,
+	'body mass index': PHYSICAL_MEASURES_CATEGORY,
+	bilirubin: URINALYSIS_CATEGORY,
+	'cholesterol hdl ratio': LIPIDS_CATEGORY,
+	'creatine kinase': METABOLISM_CATEGORY,
+	'health quotient score': PHYSICAL_MEASURES_CATEGORY,
+	height: PHYSICAL_MEASURES_CATEGORY,
+	'height feet': PHYSICAL_MEASURES_CATEGORY,
+	'height inches': PHYSICAL_MEASURES_CATEGORY,
+	ldh: METABOLISM_CATEGORY,
+	mpv: HEMATOLOGY_CATEGORY,
+	protein: URINALYSIS_CATEGORY,
+	'prostate specific antigen': OTHER_CATEGORY,
+	weight: PHYSICAL_MEASURES_CATEGORY,
+	'waist circumference': PHYSICAL_MEASURES_CATEGORY,
+};
+
+const BLOODWORK_CATEGORY_BY_SOURCE_CATEGORY: Record<string, string> = {
+	Autoimmune: IMMUNE_INFLAMMATION_CATEGORY,
+	'Actin (Smooth Muscle) Antibody': IMMUNE_INFLAMMATION_CATEGORY,
+	'B-Vitamin/Methylation Cofactor Assessment': VITAMINS_MINERALS_CATEGORY,
+	'Bone Health': VITAMINS_MINERALS_CATEGORY,
+	CBC: HEMATOLOGY_CATEGORY,
+	'CBC With Differential/Platelet': HEMATOLOGY_CATEGORY,
+	'C-Reactive Protein, Quant': IMMUNE_INFLAMMATION_CATEGORY,
+	'Cellular Energy Production': METABOLISM_CATEGORY,
+	'Comp. Metabolic Panel (14)': KIDNEY_ELECTROLYTES_CATEGORY,
+	'Cortisol - AM': HORMONES_CATEGORY,
+	'Creatine Kinase,Total': METABOLISM_CATEGORY,
+	'Diabetes Risk': METABOLISM_CATEGORY,
+	Electrolytes: KIDNEY_ELECTROLYTES_CATEGORY,
+	Enzymes: METABOLISM_CATEGORY,
+	'Essential Amino Acids': AMINO_ACIDS_CATEGORY,
+	'Fatty Acids': FATTY_ACIDS_CATEGORY,
+	'Folate (Folic Acid), Serum': VITAMINS_MINERALS_CATEGORY,
+	'General Health': KIDNEY_ELECTROLYTES_CATEGORY,
+	'Glucose (2 Spec, WHO) Toler,S': METABOLISM_CATEGORY,
+	'Gut Assessment': GUT_HEALTH_CATEGORY,
+	'HBsAg Screen': INFECTIOUS_DISEASE_CATEGORY,
+	'HCV Antibody reflex to NAA': INFECTIOUS_DISEASE_CATEGORY,
+	'HEMOGLOBIN A1C W/CALC MPG': METABOLISM_CATEGORY,
+	'Hep A Ab, IgM': INFECTIOUS_DISEASE_CATEGORY,
+	'Hepatic Function Panel (7)': LIVER_BILIARY_CATEGORY,
+	'Hepatitis B Core Ab W/Reflex': INFECTIOUS_DISEASE_CATEGORY,
+	Hematology: HEMATOLOGY_CATEGORY,
+	Hormones: HORMONES_CATEGORY,
+	Immunology: IMMUNE_INFLAMMATION_CATEGORY,
+	'Infectious Disease': INFECTIOUS_DISEASE_CATEGORY,
+	Inflammation: IMMUNE_INFLAMMATION_CATEGORY,
+	'Inflammation and Oxidative Stress': IMMUNE_INFLAMMATION_CATEGORY,
+	'Iron and TIBC': IRON_CATEGORY,
+	'Iron Status': IRON_CATEGORY,
+	'Kidney Function': KIDNEY_ELECTROLYTES_CATEGORY,
+	'Kidney Health': KIDNEY_ELECTROLYTES_CATEGORY,
+	'Lipid Panel': LIPIDS_CATEGORY,
+	Lipids: LIPIDS_CATEGORY,
+	'Liver Fibrosis': LIVER_BILIARY_CATEGORY,
+	'Liver Function': LIVER_BILIARY_CATEGORY,
+	'Liver Health': LIVER_BILIARY_CATEGORY,
+	Magnesium: VITAMINS_MINERALS_CATEGORY,
+	Metabolism: METABOLISM_CATEGORY,
+	Microbiology: INFECTIOUS_DISEASE_CATEGORY,
+	Minerals: VITAMINS_MINERALS_CATEGORY,
+	'Muscle Assessment': AMINO_ACIDS_CATEGORY,
+	'NASH FibroSure': LIVER_BILIARY_CATEGORY,
+	'Non-Essential Amino Acids': AMINO_ACIDS_CATEGORY,
+	'Physical Measures': PHYSICAL_MEASURES_CATEGORY,
+	Proteins: LIVER_BILIARY_CATEGORY,
+	'Prostate Health': OTHER_CATEGORY,
+	TSH: THYROID_CATEGORY,
+	'Thyroid Antibodies': THYROID_CATEGORY,
+	'Urinalysis, Complete': URINALYSIS_CATEGORY,
+	Vitamins: VITAMINS_MINERALS_CATEGORY,
+};
+
+const BLOODWORK_CATEGORY_RULES: Array<{ category: string; pattern: RegExp }> = [
+	{
+		category: URINALYSIS_CATEGORY,
+		pattern:
+			/^(?:appearance|bacteria|casts?|color \(urine\)|epithelial cells \(non renal\)|glucose \(urine\)|hyaline cast|ketones|leukocyte esterase|nitrite(?:, urine)?|occult blood|ph|specific gravity|squamous epithelial cells|urine color|urobilinogen|wbc esterase)$/i,
+	},
+	{
+		category: HEMATOLOGY_CATEGORY,
+		pattern:
+			/^(?:absolute .+|basophils|eosinophils|hematocrit|hemoglobin|immature granulocytes|lymphocytes|mch|mchc|mcv|monocytes|mpv|neutrophils|nucleated red blood cells|platelet count|platelets|rdw|red blood cells|white blood cells)$/i,
+	},
+	{
+		category: LIPIDS_CATEGORY,
+		pattern:
+			/^(?:apolipoprotein a[- ]?1|apolipoprotein b|cholesterol\/hdl ratio|hdl cholesterol|ldl cholesterol|lipoprotein \(a\)|non-hdl cholesterol|total cholesterol|triglycerides|vldl cholesterol)$/i,
+	},
+	{
+		category: METABOLISM_CATEGORY,
+		pattern:
+			/^(?:3-hydroxy-3-methylglutaric acid|3-hydroxybutyric acid|adipic acid|amylase|cis-aconitic acid|derived mean glucose|estimated average glucose|glucose|glucose, fasting|glucose, 2 hour|hba1c \(hplc\)|hba1c \(ifcc\)|hemoglobin a1c|homa-ir|lactic acid|lipase|mean plasma glucose|pyruvic acid|suberic acid|succinic acid|uric acid)$/i,
+	},
+	{
+		category: KIDNEY_ELECTROLYTES_CATEGORY,
+		pattern:
+			/^(?:bun|bun\/creatinine ratio|carbon dioxide|chloride|creatinine|egfr \(ckd-epi\)|egfr african american|egfr non-african american|estimated glomerular filtration rate|potassium|sodium)$/i,
+	},
+	{
+		category: LIVER_BILIARY_CATEGORY,
+		pattern:
+			/^(?:alanine aminotransferase|alt \(gpt\)|albumin|albumin\/globulin ratio|alkaline phosphatase|alpha-2-macroglobulin|apolipoprotein a-1|aspartate aminotransferase|ast \(got\)|direct bilirubin|fibrosis interpretation|fibrosis score|fibrosis stage|gamma-gt|gamma-glutamyl transferase|haptoglobin|indirect bilirubin|nash grade|nash score|necroinflammatory activity grade|necroinflammatory activity score|necroinflammatory interpretation|steatosis grade|steatosis score|total bilirubin|total globulin|total protein)$/i,
+	},
+	{
+		category: THYROID_CATEGORY,
+		pattern:
+			/^(?:free t3|free t4|thyroglobulin antibody|thyroid peroxidase antibody|tsh|tsh \(basal\))$/i,
+	},
+	{
+		category: HORMONES_CATEGORY,
+		pattern:
+			/^(?:alpha-pregnanediol|bioavailable testosterone|cortisol - am|dhea-s|estradiol|estradiol \(e2\)|follicle stimulating hormone \(fsh\)|free testosterone|free testosterone index|insulin|luteinizing hormone \(lh\)|prolactin|sex hormone binding globulin|testosterone)$/i,
+	},
+	{
+		category: IRON_CATEGORY,
+		pattern:
+			/^(?:ferritin|iron|iron saturation|total iron binding capacity|transferrin|transferrin saturation|unsaturated iron binding capacity)$/i,
+	},
+	{
+		category: VITAMINS_MINERALS_CATEGORY,
+		pattern:
+			/^(?:albumin-corrected calcium|calcium|ceruloplasmin|folate|folic acid|holotranscobalamin \(holotc\)|magnesium|magnesium in erythrocytes|selenium|vitamin b12|vitamin b2|vitamin b6|vitamin d, 25-hydroxy|vitamin d3 \(25-oh\)|zinc)$/i,
+	},
+	{
+		category: IMMUNE_INFLAMMATION_CATEGORY,
+		pattern:
+			/^(?:actin \(smooth muscle\) antibody|alpha-1-antitrypsin|ana screen|c-reactive protein|high-sensitivity c-reactive protein|igg|immunoglobulin a|immunoglobulin g|immunoglobulin m|smooth muscle antibody screen|smooth muscle antibody titer|wheat \(f4\) igg)$/i,
+	},
+	{
+		category: INFECTIOUS_DISEASE_CATEGORY,
+		pattern:
+			/^(?:beta hemolytic streptococcus, group c|hcv index|hepatitis a antibody igm|hepatitis a antibody total|hepatitis b core antibody total|hepatitis b surface antigen screen|hepatitis c antibody|upper respiratory culture)$/i,
+	},
+	{
+		category: GUT_HEALTH_CATEGORY,
+		pattern: /^(?:allantoin|benzoic acid|glutamine|hippuric acid|histidine|xanthurenic acid)$/i,
+	},
+	{
+		category: AMINO_ACIDS_CATEGORY,
+		pattern:
+			/^(?:1-methyl-histidine|2-aminobutyric acid|3-methyl-histidine|alanine|asparagine|beta-alanine|citrulline|gamma-aminobutyric acid|glycine|hydroxyproline|isoleucine|leucine|methionine|phenylalanine|proline|serine|taurine|threonine|tryptophan|tyrosine|valine)$/i,
+	},
+	{
+		category: FATTY_ACIDS_CATEGORY,
+		pattern:
+			/^(?:docosahexaenoic acid \(dha\)|eicosapentaenoic acid \(epa\)|omega-3 index|total fatty acids)$/i,
+	},
+	{
+		category: PHYSICAL_MEASURES_CATEGORY,
+		pattern:
+			/^(?:blood pressure|body mass index|height|height \(feet\)|height \(inches\)|waist circumference|weight)$/i,
+	},
+];
+
+function resolveCanonicalMeasurementCategory(name: string, sourceCategory?: string | null) {
+	const key = buildMeasurementKey(name);
+	const mappedByKey = BLOODWORK_CATEGORY_BY_KEY[key];
+	if (mappedByKey) {
+		return mappedByKey;
+	}
+
+	for (const rule of BLOODWORK_CATEGORY_RULES) {
+		if (rule.pattern.test(name)) {
+			return rule.category;
+		}
+	}
+
+	const normalizedSourceCategory = normalizeOptionalText(sourceCategory);
+	if (normalizedSourceCategory) {
+		if (CANONICAL_BLOODWORK_CATEGORIES.has(normalizedSourceCategory)) {
+			return normalizedSourceCategory;
+		}
+
+		const remappedSourceCategory = BLOODWORK_CATEGORY_BY_SOURCE_CATEGORY[normalizedSourceCategory];
+		if (remappedSourceCategory) {
+			return remappedSourceCategory;
+		}
+	}
+
+	return OTHER_CATEGORY;
 }
 
 const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
