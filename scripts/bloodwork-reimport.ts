@@ -8,13 +8,19 @@ import {
 } from 'server/db/bloodwork.ts';
 import { getDatabase, type VitalsDatabase } from 'server/db/client.ts';
 import { bloodworkDocuments, bloodworkMeasurements, bloodworkResults } from 'server/db/schema.ts';
-import { PROJECT_ROOT, PROJECT_TO_IMPORT_DIR } from 'scripts/project-paths.ts';
+import env from 'server/env.ts';
 
 type CliOptions = {
 	reset: boolean;
 	all: boolean;
 	filePaths: string[];
 };
+
+const projectRoot = path.resolve(import.meta.dir, '..');
+const projectDataDir = path.isAbsolute(env.VITALS_DATA_DIR)
+	? env.VITALS_DATA_DIR
+	: path.resolve(projectRoot, env.VITALS_DATA_DIR);
+const projectToImportDir = path.join(projectDataDir, 'to-import');
 
 function parseCliOptions(argv: string[]): CliOptions {
 	const reset = argv.includes('--reset');
@@ -31,7 +37,7 @@ function parseCliOptions(argv: string[]): CliOptions {
 function resolveImportFilePath(input: string) {
 	const candidates = [
 		path.isAbsolute(input) ? input : path.resolve(process.cwd(), input),
-		path.join(PROJECT_TO_IMPORT_DIR, input),
+		path.join(projectToImportDir, input),
 	];
 
 	for (const candidate of candidates) {
@@ -44,14 +50,14 @@ function resolveImportFilePath(input: string) {
 }
 
 function getDefaultImportFilePaths() {
-	if (!fs.existsSync(PROJECT_TO_IMPORT_DIR)) {
+	if (!fs.existsSync(projectToImportDir)) {
 		return [];
 	}
 
 	return fs
-		.readdirSync(PROJECT_TO_IMPORT_DIR)
+		.readdirSync(projectToImportDir)
 		.filter(fileName => fileName.toLowerCase().endsWith('.pdf'))
-		.map(fileName => path.join(PROJECT_TO_IMPORT_DIR, fileName))
+		.map(fileName => path.join(projectToImportDir, fileName))
 		.sort((left, right) => left.localeCompare(right));
 }
 
@@ -90,7 +96,7 @@ async function processQueuedDocumentsUntilIdle(db: VitalsDatabase) {
 async function main() {
 	const options = parseCliOptions(process.argv.slice(2));
 
-	await Bun.$`bunx drizzle-kit push --config drizzle.config.ts --force`.cwd(PROJECT_ROOT);
+	await Bun.$`bunx drizzle-kit push --config drizzle.config.ts --force`.cwd(projectRoot);
 
 	const db = getDatabase();
 	if (options.reset) {

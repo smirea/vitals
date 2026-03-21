@@ -1,12 +1,14 @@
+import path from 'path';
+
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 
-import { PROJECT_ROOT } from 'scripts/project-paths.ts';
 import { getBloodworkDocumentPdf, startBloodworkProcessor } from 'server/db/bloodwork.ts';
 import { getDatabase } from 'server/db/client.ts';
 import env from 'server/env.ts';
 import { appRouter, createTrpcContext } from 'server/trpc/index.ts';
 
 const port = env.API_PORT;
+const projectRoot = path.resolve(import.meta.dir, '..', '..');
 
 function getCorsHeaders(req: Request) {
 	const origin = req.headers.get('origin');
@@ -46,7 +48,7 @@ function getBloodworkDocumentPdfResponse(req: Request) {
 	});
 }
 
-await Bun.$`bunx drizzle-kit push --config drizzle.config.ts --force`.cwd(PROJECT_ROOT);
+await Bun.$`bunx drizzle-kit push --config drizzle.config.ts --force`.cwd(projectRoot);
 startBloodworkProcessor();
 
 const server = Bun.serve({

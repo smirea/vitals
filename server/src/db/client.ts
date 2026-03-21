@@ -4,12 +4,17 @@ import path from 'path';
 import { Database } from 'bun:sqlite';
 import { drizzle, type BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite';
 
-import { PROJECT_DB_PATH } from 'scripts/project-paths.ts';
 import { schema } from 'server/db/schema.ts';
+import env from 'server/env.ts';
 
 export type VitalsDatabase = BunSQLiteDatabase<typeof schema> & {
 	$client: Database;
 };
+
+const projectRoot = path.resolve(import.meta.dir, '..', '..', '..');
+const defaultDbPath = path.isAbsolute(env.VITALS_DB_PATH)
+	? env.VITALS_DB_PATH
+	: path.resolve(projectRoot, env.VITALS_DB_PATH);
 
 function ensureRuntimeDatabaseObjects(client: Database) {
 	client.exec(`
@@ -43,7 +48,7 @@ function createSqliteClient(dbPath: string): Database {
 	return client;
 }
 
-export function createDatabase(dbPath = PROJECT_DB_PATH): VitalsDatabase {
+export function createDatabase(dbPath = defaultDbPath): VitalsDatabase {
 	const client = createSqliteClient(dbPath);
 	return drizzle(client, {
 		schema,
