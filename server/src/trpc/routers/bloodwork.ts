@@ -1,8 +1,10 @@
 import {
+	bloodworkReprocessDocumentInputSchema,
 	bloodworkRetryDocumentInputSchema,
 	bloodworkUploadDocumentsInputSchema,
 	getBloodworkDashboard,
 	listBloodworkDocuments,
+	reprocessBloodworkDocument,
 	retryBloodworkDocument,
 	uploadBloodworkDocuments,
 } from 'server/db/bloodwork.ts';
@@ -17,4 +19,7 @@ export const bloodworkRouter = createRouter({
 	retryDocument: publicProcedure
 		.input(bloodworkRetryDocumentInputSchema)
 		.mutation(({ ctx, input }) => retryBloodworkDocument(ctx.db, input)),
+	reprocessDocument: publicProcedure
+		.input(bloodworkReprocessDocumentInputSchema)
+		.mutation(({ ctx, input }) => reprocessBloodworkDocument(ctx.db, input)),
 });

@@ -30,6 +30,10 @@ export const bloodworkRetryDocumentInputSchema = z.object({
 	documentId: z.number().int().positive(),
 });
 
+export const bloodworkReprocessDocumentInputSchema = z.object({
+	documentId: z.number().int().positive(),
+});
+
 const nullableTextSchema = z.string().trim().min(1).nullable().optional();
 const nullableNumberSchema = z.number().finite().nullable().optional();
 
@@ -269,6 +273,48 @@ export async function retryBloodworkDocument(
 		.run();
 
 	logBloodworkDocumentEvent(document, 'Queued for retry');
+	scheduleBloodworkProcessing();
+
+	return {
+		documentId: parsed.documentId,
+	};
+}
+
+export async function reprocessBloodworkDocument(
+	db: VitalsDatabase,
+	input: z.infer<typeof bloodworkReprocessDocumentInputSchema>,
+) {
+	const parsed = bloodworkReprocessDocumentInputSchema.parse(input);
+	const document = db
+		.select({
+			id: bloodworkDocuments.id,
+			fileName: bloodworkDocuments.fileName,
+			status: bloodworkDocuments.status,
+		})
+		.from(bloodworkDocuments)
+		.where(eq(bloodworkDocuments.id, parsed.documentId))
+		.get();
+
+	if (!document) {
+		throw new Error('Document not found.');
+	}
+	if (document.status !== 'completed') {
+		throw new Error('Only completed documents can be reprocessed.');
+	}
+
+	db.update(bloodworkDocuments)
+		.set({
+			status: 'pending',
+			statusText: 'Queued for reprocess',
+			startedAt: null,
+			completedAt: null,
+			failedAt: null,
+			lastError: null,
+		})
+		.where(eq(bloodworkDocuments.id, parsed.documentId))
+		.run();
+
+	logBloodworkDocumentEvent(document, 'Queued for reprocess');
 	scheduleBloodworkProcessing();
 
 	return {
@@ -526,6 +572,29 @@ function logBloodworkDocumentEvent(
 	console.log(`[bloodwork] #${document.id} ${document.fileName}: ${message}`);
 }
 
+function clearBloodworkDocumentDerivedData(db: VitalsDatabase, documentId: number) {
+	db.transaction(tx => {
+		tx.delete(bloodworkResults).where(eq(bloodworkResults.documentId, documentId)).run();
+		tx.update(bloodworkDocuments)
+			.set({
+				completedAt: null,
+				failedAt: null,
+				lastError: null,
+				date: null,
+				collectionDate: null,
+				reportedDate: null,
+				receivedDate: null,
+				labName: null,
+				location: null,
+				language: null,
+				country: null,
+				notes: null,
+			})
+			.where(eq(bloodworkDocuments.id, documentId))
+			.run();
+	});
+}
+
 async function processBloodworkDocument(db: VitalsDatabase, documentId: number) {
 	const document = db
 		.select()
@@ -537,6 +606,8 @@ async function processBloodworkDocument(db: VitalsDatabase, documentId: number) 
 	}
 
 	try {
+		updateBloodworkDocumentStatus(db, document, 'Clearing previous imported data');
+		clearBloodworkDocumentDerivedData(db, documentId);
 		const provider = getOpenRouterProvider();
 		const modelId = getBloodworkModelId();
 		const existingMeasurements = db.select().from(bloodworkMeasurements).all();
@@ -563,8 +634,6 @@ async function processBloodworkDocument(db: VitalsDatabase, documentId: number) 
 		updateBloodworkDocumentStatus(db, document, savedStatusText);
 
 		db.transaction(tx => {
-			tx.delete(bloodworkResults).where(eq(bloodworkResults.documentId, documentId)).run();
-
 			const measurementIdByKey = upsertMeasurementDrafts(
 				tx as unknown as VitalsDatabase,
 				measurementDrafts,

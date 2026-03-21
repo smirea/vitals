@@ -190,6 +190,16 @@ function BloodworkPage() {
 			messageApi.error(error.message);
 		},
 	});
+	const reprocessDocumentMutation = useMutation({
+		...trpc.bloodwork.reprocessDocument.mutationOptions(),
+		onSuccess: async () => {
+			await queryClient.invalidateQueries();
+			messageApi.success('Document queued for reprocess.');
+		},
+		onError: error => {
+			messageApi.error(error.message);
+		},
+	});
 	const dashboard = dashboardQuery.data;
 	const documents = dashboard?.documents ?? [];
 	const measurements = dashboard?.measurements ?? [];
@@ -774,6 +784,15 @@ function BloodworkPage() {
 		[retryDocumentMutation],
 	);
 
+	const onReprocessDocument = useCallback(
+		async (documentId: number) => {
+			await reprocessDocumentMutation.mutateAsync({
+				documentId,
+			});
+		},
+		[reprocessDocumentMutation],
+	);
+
 	const onToggleImportDocument = useCallback((documentId: number, checked: boolean) => {
 		setSelectedImportDocumentIds(previous => {
 			if (checked) {
@@ -953,6 +972,25 @@ function BloodworkPage() {
 												{item.date ?? item.queuedAt.slice(0, 10)}
 												{item.labName ? ` · ${item.labName}` : ''}
 											</Typography.Text>
+											{item.status === 'completed' ? (
+												<Popconfirm
+													title='Reprocess imported file?'
+													description='This clears all derived data for the document and imports it again from the PDF.'
+													okText='Reprocess'
+													onConfirm={() => onReprocessDocument(item.id)}
+													disabled={reprocessDocumentMutation.isPending}
+												>
+													<Button
+														size='small'
+														type='text'
+														style={{ color: token.colorWarning }}
+														loading={reprocessDocumentMutation.isPending}
+														disabled={reprocessDocumentMutation.isPending}
+													>
+														Reprocess
+													</Button>
+												</Popconfirm>
+											) : null}
 											<Popconfirm
 												title='Delete imported file?'
 												description='This removes the document and every result derived from it.'
