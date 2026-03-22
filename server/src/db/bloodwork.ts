@@ -2,8 +2,9 @@ import path from 'path';
 import { createHash } from 'crypto';
 
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
-import { generateText, Output } from 'ai';
+import { generateText } from 'ai';
 import { eq } from 'drizzle-orm';
+import { PDFDocument } from 'pdf-lib';
 import { z } from 'zod';
 
 import { getDatabase, type VitalsDatabase } from 'server/db/client.ts';
@@ -15,6 +16,7 @@ import {
 	type BloodworkMeasurementRow,
 } from 'server/db/schema.ts';
 import env from 'server/env.ts';
+import { promiseParallel } from 'server/promise-parallel.ts';
 
 const bloodworkUploadFileInputSchema = z.object({
 	fileName: z.string().trim().min(1),
@@ -35,20 +37,21 @@ export const bloodworkReprocessDocumentInputSchema = z.object({
 });
 
 const nullableTextSchema = z.string().trim().min(1).nullable().optional();
-const nullableNumberSchema = z.number().finite().nullable().optional();
+const looseNullableTextSchema = z.union([z.string(), z.null()]).optional();
+const looseNullableNumberSchema = z.union([z.number(), z.string(), z.null()]).optional();
 
 const extractionMeasurementSchema = z.object({
-	name: z.string().trim().min(1),
-	category: nullableTextSchema,
-	originalName: nullableTextSchema,
-	valueText: nullableTextSchema,
-	valueNumeric: nullableNumberSchema,
-	unit: nullableTextSchema,
-	rangeText: nullableTextSchema,
-	rangeMin: nullableNumberSchema,
-	rangeMax: nullableNumberSchema,
-	note: nullableTextSchema,
-	sourcePage: z.number().int().positive().nullable().optional(),
+	name: looseNullableTextSchema,
+	sourceName: looseNullableTextSchema,
+	measurementName: looseNullableTextSchema,
+	analyteName: looseNullableTextSchema,
+	canonicalName: looseNullableTextSchema,
+	englishName: looseNullableTextSchema,
+	standardizedName: looseNullableTextSchema,
+	valueText: looseNullableTextSchema,
+	value: looseNullableTextSchema,
+	valueNumeric: looseNullableNumberSchema,
+	unit: looseNullableTextSchema,
 });
 
 const extractionMetadataSchema = z.object({
@@ -63,39 +66,27 @@ const extractionMetadataSchema = z.object({
 	notes: nullableTextSchema,
 });
 
-const extractionPassSchema = z.object({
-	metadata: extractionMetadataSchema,
+const extractionPageSchema = z.object({
+	metadata: extractionMetadataSchema.optional(),
 	measurements: z.array(extractionMeasurementSchema),
 });
 
-const normalizationMeasurementSchema = z.object({
-	name: z.string().trim().min(1),
-	category: nullableTextSchema,
+const normalizationResultSchema = z.object({
+	canonicalName: looseNullableTextSchema,
+	name: looseNullableTextSchema,
+	sourceName: looseNullableTextSchema,
+	originalName: looseNullableTextSchema,
 	aliases: z.array(z.string().trim().min(1)).optional().default([]),
 	canonicalUnit: nullableTextSchema,
 	knownUnits: z.array(z.string().trim().min(1)).optional().default([]),
 	canonicalRangeText: nullableTextSchema,
-	canonicalRangeMin: nullableNumberSchema,
-	canonicalRangeMax: nullableNumberSchema,
+	canonicalRangeMin: looseNullableNumberSchema,
+	canonicalRangeMax: looseNullableNumberSchema,
 	rangeEvidence: z.array(z.string().trim().min(1)).optional().default([]),
-});
-
-const normalizationResultSchema = z.object({
-	measurement: normalizationMeasurementSchema,
-	originalName: nullableTextSchema,
-	originalValueText: nullableTextSchema,
-	originalValueNumeric: nullableNumberSchema,
-	originalUnit: nullableTextSchema,
-	originalRangeText: nullableTextSchema,
-	originalRangeMin: nullableNumberSchema,
-	originalRangeMax: nullableNumberSchema,
 	valueText: nullableTextSchema,
-	valueNumeric: nullableNumberSchema,
+	valueNumeric: looseNullableNumberSchema,
 	unit: nullableTextSchema,
-	note: nullableTextSchema,
-	confidence: z.number().finite().min(0).max(1).nullable().optional(),
-	sourcePage: z.number().int().positive().nullable().optional(),
-	evidence: z.array(z.string().trim().min(1)).optional().default([]),
+	sourcePage: z.union([z.number().int().positive(), z.string(), z.null()]).optional(),
 });
 
 const normalizationPassSchema = z.object({
@@ -103,8 +94,36 @@ const normalizationPassSchema = z.object({
 });
 
 type BloodworkUploadDocumentsInput = z.infer<typeof bloodworkUploadDocumentsInputSchema>;
-type ExtractionPassOutput = z.infer<typeof extractionPassSchema>;
-type NormalizationPassOutput = z.infer<typeof normalizationPassSchema>;
+type ExtractionMeasurementOutput = {
+	name: string;
+	canonicalName: string;
+	valueText: string | null;
+	valueNumeric: number | null;
+	unit: string | null;
+	sourcePage: number;
+};
+type ExtractionPassOutput = {
+	metadata?: z.infer<typeof extractionMetadataSchema>;
+	measurements: ExtractionMeasurementOutput[];
+};
+type NormalizationResultOutput = {
+	canonicalName: string;
+	sourceName: string | null;
+	aliases: string[];
+	canonicalUnit: string | null;
+	knownUnits: string[];
+	canonicalRangeText: string | null;
+	canonicalRangeMin: number | null;
+	canonicalRangeMax: number | null;
+	rangeEvidence: string[];
+	valueText: string | null;
+	valueNumeric: number | null;
+	unit: string | null;
+	sourcePage: number | null;
+};
+type NormalizationPassOutput = {
+	results: NormalizationResultOutput[];
+};
 
 type MeasurementDraft = {
 	key: string;
@@ -141,10 +160,28 @@ type StructuredPassResult<T> = {
 	output: T;
 };
 
+type BloodworkPdfPage = {
+	pageNumber: number;
+	pageCount: number;
+	fileName: string;
+	pdfData: Uint8Array;
+};
+
+type PageNormalizationInput = {
+	page: BloodworkPdfPage;
+	measurements: ExtractionPassOutput['measurements'];
+};
+
+type LooseExtractionMeasurement = z.infer<typeof extractionMeasurementSchema>;
+type LooseNormalizationPassOutput = z.infer<typeof normalizationPassSchema>;
+type LooseNormalizationResult = z.infer<typeof normalizationResultSchema>;
+
 let processorPromise: Promise<void> | null = null;
 let processorStarted = false;
 
 export function getBloodworkDashboard(db: VitalsDatabase) {
+	syncBloodworkMeasurementCategories(db);
+
 	const documents = db
 		.select({
 			id: bloodworkDocuments.id,
@@ -595,6 +632,28 @@ function clearBloodworkDocumentDerivedData(db: VitalsDatabase, documentId: numbe
 	});
 }
 
+async function splitBloodworkPdfIntoPages(document: BloodworkDocumentRow) {
+	const sourcePdf = await PDFDocument.load(document.pdfData);
+	const pageCount = sourcePdf.getPageCount();
+	const pages: BloodworkPdfPage[] = [];
+	const baseName = path.basename(document.fileName, path.extname(document.fileName));
+
+	for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
+		const pagePdf = await PDFDocument.create();
+		const [page] = await pagePdf.copyPages(sourcePdf, [pageIndex]);
+		pagePdf.addPage(page);
+
+		pages.push({
+			pageNumber: pageIndex + 1,
+			pageCount,
+			fileName: `${baseName}_page_${pageIndex + 1}.pdf`,
+			pdfData: await pagePdf.save(),
+		});
+	}
+
+	return pages;
+}
+
 async function processBloodworkDocument(db: VitalsDatabase, documentId: number) {
 	const document = db
 		.select()
@@ -608,23 +667,34 @@ async function processBloodworkDocument(db: VitalsDatabase, documentId: number) 
 	try {
 		updateBloodworkDocumentStatus(db, document, 'Clearing previous imported data');
 		clearBloodworkDocumentDerivedData(db, documentId);
-		const provider = getOpenRouterProvider();
-		const modelId = getBloodworkModelId();
+		const provider = createOpenRouter({ apiKey: env.OPENROUTER_API_KEY });
 		const existingMeasurements = db.select().from(bloodworkMeasurements).all();
-		updateBloodworkDocumentStatus(db, document, 'Extracting measurements from document');
+		updateBloodworkDocumentStatus(db, document, 'Splitting document into pages');
+		const pages = await splitBloodworkPdfIntoPages(document);
+		updateBloodworkDocumentStatus(
+			db,
+			document,
+			`Extracting measurements from ${pages.length} page${pages.length === 1 ? '' : 's'}`,
+		);
 		const extractionPass = await runExtractionPass({
 			provider,
-			modelId,
+			modelId: env.BLOODWORK_OPENROUTER_MODEL,
 			document,
+			pages,
 		});
-		updateBloodworkDocumentStatus(db, document, 'Normalizing measurements');
+		updateBloodworkDocumentStatus(
+			db,
+			document,
+			`Normalizing ${extractionPass.output.measurements.length} measurement${extractionPass.output.measurements.length === 1 ? '' : 's'}`,
+		);
 		const normalizationOutput = await resolveNormalizationOutput({
 			db,
 			document,
 			provider,
-			modelId,
+			modelId: env.BLOODWORK_OPENROUTER_MODEL,
 			existingMeasurements,
 			extractionPass,
+			pages,
 		});
 		const metadata = normalizeMetadataDraft(extractionPass.output.metadata, document.fileName);
 		const { measurementDrafts, resultDrafts } = buildDraftsFromNormalization(normalizationOutput);
@@ -705,97 +775,140 @@ async function runExtractionPass(args: {
 	provider: ReturnType<typeof createOpenRouter>;
 	modelId: string;
 	document: BloodworkDocumentRow;
+	pages: BloodworkPdfPage[];
 }): Promise<StructuredPassResult<ExtractionPassOutput>> {
-	const { provider, modelId, document } = args;
-	const model = provider(modelId, {
-		plugins: [
-			{
-				id: 'response-healing',
-			},
-		],
-	});
+	const { provider, modelId, document, pages } = args;
 
-	const fileMessages = [
-		{
-			role: 'user' as const,
-			content: [
-				{
-					type: 'text' as const,
-					text: buildExtractionPrompt({
-						fileName: document.fileName,
-					}),
-				},
-				{
-					type: 'file' as const,
-					mediaType: 'application/pdf',
-					filename: document.fileName,
-					data: new Uint8Array(document.pdfData),
-				},
-			],
+	const pageOutputs = await promiseParallel(
+		pages,
+		async page => {
+			const model = provider(modelId);
+			const result = await generateStructuredOutput({
+				model,
+				schema: extractionPageSchema,
+				messages: [
+					{
+						role: 'user' as const,
+						content: [
+							{
+								type: 'text' as const,
+								text: buildExtractionPrompt({
+									fileName: document.fileName,
+									pageNumber: page.pageNumber,
+									pageCount: page.pageCount,
+								}),
+							},
+							{
+								type: 'file' as const,
+								mediaType: 'application/pdf',
+								filename: page.fileName,
+								data: page.pdfData,
+							},
+						],
+					},
+				],
+				maxOutputTokens: 3_072,
+			});
+
+			return {
+				metadata: page.pageNumber === 1 ? result.output.metadata : undefined,
+				measurements: result.output.measurements
+					.map(measurement => normalizeExtractionMeasurement(measurement))
+					.filter(isPresent)
+					.map(measurement => ({
+						...measurement,
+						sourcePage: page.pageNumber,
+					})),
+			};
 		},
-	];
+		{
+			concurrency: 5,
+			retries: 1,
+		},
+	);
 
-	return generateStructuredOutput({
-		model,
-		schema: extractionPassSchema,
-		messages: fileMessages,
-		maxOutputTokens: 24_576,
-	});
+	const firstMetadata = pageOutputs.find(page => page.metadata)?.metadata;
+
+	return {
+		output: {
+			metadata: firstMetadata,
+			measurements: pageOutputs.flatMap(page => page.measurements),
+		},
+	};
 }
 
 async function runNormalizationPass(args: {
 	provider: ReturnType<typeof createOpenRouter>;
 	modelId: string;
-	document: BloodworkDocumentRow;
+	fileName: string;
 	existingMeasurements: BloodworkMeasurementRow[];
-	extractionPass: StructuredPassResult<ExtractionPassOutput>;
-}): Promise<StructuredPassResult<NormalizationPassOutput>> {
-	const { provider, modelId, document, existingMeasurements, extractionPass } = args;
-	const model = provider(modelId, {
-		plugins: [
-			{
-				id: 'response-healing',
-			},
-		],
-	});
-
-	const normalizationUserMessage = {
-		role: 'user' as const,
-		content: [
-			{
-				type: 'text' as const,
-				text: buildNormalizationPrompt({
-					fileName: document.fileName,
-					existingMeasurements,
-					extractionOutput: extractionPass.output,
-				}),
-			},
-		],
-	};
+	input: PageNormalizationInput;
+}): Promise<StructuredPassResult<LooseNormalizationPassOutput>> {
+	const { provider, modelId, fileName, existingMeasurements, input } = args;
+	const model = provider(modelId);
 
 	return generateStructuredOutput({
 		model,
 		schema: normalizationPassSchema,
-		messages: [normalizationUserMessage],
-		maxOutputTokens: 12_288,
+		messages: [
+			{
+				role: 'user' as const,
+				content: [
+					{
+						type: 'text' as const,
+						text: buildNormalizationPrompt({
+							fileName,
+							existingMeasurements,
+							input,
+						}),
+					},
+					{
+						type: 'file' as const,
+						mediaType: 'application/pdf',
+						filename: input.page.fileName,
+						data: input.page.pdfData,
+					},
+				],
+			},
+		],
+		maxOutputTokens: 4_096,
 	});
 }
 
-function buildExtractionPrompt(args: { fileName: string }) {
-	const { fileName } = args;
+function buildExtractionPrompt(args: { fileName: string; pageNumber: number; pageCount: number }) {
+	const { fileName, pageNumber, pageCount } = args;
 	return [
-		'Analyze this bloodwork PDF as one complete document.',
-		'Return only structured JSON that matches the schema.',
-		'Read the attached raw PDF directly.',
-		'Extract measurements from the entire document, not just the first page or first panel.',
-		'Extract report-level metadata and raw analyte rows.',
-		'Translate analyte names to concise English when needed.',
-		'Preserve the original/raw name separately whenever the source wording differs.',
-		'Keep one item per visible row even if rows appear duplicated elsewhere in the PDF.',
-		'If a value is qualitative, keep it in valueText and leave valueNumeric null.',
-		'If a range is textual like "<1" or "3.5 - 5.2", preserve rangeText and also set numeric bounds when possible.',
-		'Use page numbers when possible.',
-		'Continue until every bloodwork measurement in the PDF has been extracted.',
+		'Analyze this bloodwork PDF page and return only structured JSON that matches the schema.',
+		`This file contains original page ${pageNumber} of ${pageCount}.`,
+		'Read the attached raw PDF page directly.',
+		'Return only lab measurement rows that have a visible result value on this page.',
+		'For each row, return the source name exactly as shown, a concise English canonical name, the value, and the unit.',
+		'Do not return panel titles, section headers, explanations, or reference range rows by themselves.',
+		'If the result is textual, keep it in valueText and leave valueNumeric null.',
+		'If the result is numeric, set valueNumeric and also preserve the display form in valueText when useful.',
+		'Do not invent measurements that are not visibly present on this page.',
+		'If this is page 1 and report metadata is visible, include it. Otherwise omit metadata.',
+		'Write the final JSON inside a <result_json>...</result_json> tag.',
+		'Example:',
+		[
+			'<result_json>',
+			'{',
+			'  "metadata": {',
+			'    "date": "2026-01-20",',
+			'    "labName": "Quest Diagnostics"',
+			'  },',
+			'  "measurements": [',
+			'    {',
+			'      "name": "LDL Cholesterol",',
+			'      "canonicalName": "LDL Cholesterol",',
+			'      "valueText": "104",',
+			'      "valueNumeric": 104,',
+			'      "unit": "mg/dL"',
+			'    }',
+			'  ]',
+			'}',
+			'</result_json>',
+		].join('\n'),
 		`Source file: ${fileName}`,
 	].join('\n');
 }
@@ -803,13 +916,12 @@ function buildExtractionPrompt(args: { fileName: string }) {
 function buildNormalizationPrompt(args: {
 	fileName: string;
 	existingMeasurements: BloodworkMeasurementRow[];
-	extractionOutput: ExtractionPassOutput;
+	input: PageNormalizationInput;
 }) {
-	const { fileName, existingMeasurements, extractionOutput } = args;
+	const { fileName, existingMeasurements, input } = args;
 	const catalog = existingMeasurements
 		.map(measurement => ({
 			name: measurement.name,
-			category: measurement.category,
 			aliases: parseJsonArray<string>(measurement.aliasesJson),
 			canonicalUnit: measurement.canonicalUnit,
 			canonicalRangeMin: measurement.canonicalRangeMin,
@@ -819,25 +931,62 @@ function buildNormalizationPrompt(args: {
 		.slice(0, 600);
 
 	return [
-		'Normalize the previously parsed bloodwork document into one final result per logical measurement.',
-		'Use existing canonical measurement names whenever they are clearly the same analyte.',
-		'Create new canonical measurements when no existing entry is a clean match.',
-		'Return English canonical measurement names only.',
-		'Deduplicate same-document duplicates and keep the best final value/range/unit combination.',
-		'Normalize result units to the canonical measurement unit.',
-		'Choose exactly one canonical range per canonical measurement.',
-		'Preserve original/raw fields on each result row.',
-		'If the source has conflicting ranges for the same analyte, choose one canonical range and explain the evidence briefly.',
-		'Do not output more than one result row for the same logical measurement in this document.',
+		'Normalize the extracted bloodwork rows from this PDF page.',
+		`This file contains original page ${input.page.pageNumber} of ${input.page.pageCount}.`,
+		'Use the attached raw PDF page to verify values, units, and reference ranges for the listed rows.',
+		'Return one final result per logical measurement from the extracted rows on this page.',
+		'Use an existing canonical measurement name when it is clearly the same analyte; otherwise return a concise English canonical name.',
+		'Do not repeat a nested measurement object. Return the flat fields only.',
+		'Preserve the source row name in sourceName.',
+		`Use sourcePage = ${input.page.pageNumber} for rows from this page unless a row clearly belongs to another page in the attached PDF.`,
+		'Set canonical unit and canonical range only when they are clearly visible or already established.',
+		'Keep aliases limited to names clearly matching this analyte.',
+		'Keep rangeEvidence brief and only when a canonical range is returned.',
+		'Write the final JSON inside a <result_json>...</result_json> tag.',
+		'Example:',
+		[
+			'<result_json>',
+			'{',
+			'  "results": [',
+			'    {',
+			'      "canonicalName": "LDL Cholesterol",',
+			'      "sourceName": "LDL-C",',
+			'      "aliases": ["LDL-C"],',
+			'      "canonicalUnit": "mg/dL",',
+			'      "knownUnits": ["mg/dL"],',
+			'      "canonicalRangeText": "<100",',
+			'      "canonicalRangeMin": null,',
+			'      "canonicalRangeMax": 100,',
+			'      "rangeEvidence": ["reference range shown as <100 mg/dL"],',
+			'      "valueText": "104",',
+			'      "valueNumeric": 104,',
+			'      "unit": "mg/dL",',
+			'      "sourcePage": 1',
+			'    }',
+			'  ]',
+			'}',
+			'</result_json>',
+		].join('\n'),
 		`Source file: ${fileName}`,
 		'Existing canonical measurements:',
 		JSON.stringify(catalog, null, 2),
-		'First-pass extraction output:',
-		JSON.stringify(extractionOutput, null, 2),
+		'Extracted rows for this page:',
+		JSON.stringify(
+			input.measurements.map(measurement => ({
+				name: measurement.name,
+				canonicalName: measurement.canonicalName,
+				valueText: measurement.valueText,
+				valueNumeric: measurement.valueNumeric,
+				unit: measurement.unit,
+				sourcePage: measurement.sourcePage,
+			})),
+			null,
+			2,
+		),
 	].join('\n');
 }
 
-function normalizeMetadataDraft(metadata: ExtractionPassOutput['metadata'], fileName: string) {
+function normalizeMetadataDraft(metadata: ExtractionPassOutput['metadata'] = {}, fileName: string) {
 	const inferred = inferMetadataFromFileName(fileName);
 
 	return {
@@ -853,12 +1002,68 @@ function normalizeMetadataDraft(metadata: ExtractionPassOutput['metadata'], file
 	};
 }
 
+function normalizeExtractionMeasurement(
+	input: LooseExtractionMeasurement,
+): Omit<ExtractionMeasurementOutput, 'sourcePage'> | null {
+	const name = normalizeOptionalText(
+		input.name ??
+			input.sourceName ??
+			input.measurementName ??
+			input.analyteName ??
+			input.canonicalName ??
+			input.englishName ??
+			input.standardizedName,
+	);
+	const canonicalName = normalizeOptionalText(
+		input.canonicalName ?? input.englishName ?? input.standardizedName ?? input.name,
+	);
+
+	if (!name || !canonicalName) {
+		return null;
+	}
+
+	return {
+		name,
+		canonicalName,
+		valueText: normalizeOptionalText(input.valueText ?? input.value),
+		valueNumeric: normalizeLooseNumber(input.valueNumeric),
+		unit: normalizeOptionalText(input.unit),
+	};
+}
+
+function normalizeNormalizationResult(
+	input: LooseNormalizationResult,
+): NormalizationResultOutput | null {
+	const canonicalName = normalizeOptionalText(
+		input.canonicalName ?? input.name ?? input.sourceName,
+	);
+	if (!canonicalName) {
+		return null;
+	}
+
+	return {
+		canonicalName,
+		sourceName: normalizeOptionalText(input.sourceName ?? input.originalName ?? input.name),
+		aliases: normalizeTextArray(input.aliases),
+		canonicalUnit: normalizeOptionalText(input.canonicalUnit),
+		knownUnits: normalizeTextArray(input.knownUnits),
+		canonicalRangeText: normalizeOptionalText(input.canonicalRangeText),
+		canonicalRangeMin: normalizeLooseNumber(input.canonicalRangeMin),
+		canonicalRangeMax: normalizeLooseNumber(input.canonicalRangeMax),
+		rangeEvidence: normalizeTextArray(input.rangeEvidence),
+		valueText: normalizeOptionalText(input.valueText),
+		valueNumeric: normalizeLooseNumber(input.valueNumeric),
+		unit: normalizeOptionalText(input.unit),
+		sourcePage: normalizePositiveInteger(input.sourcePage),
+	};
+}
+
 function buildDraftsFromNormalization(output: NormalizationPassOutput) {
 	const measurementDraftMap = new Map<string, MeasurementDraft>();
 	const resultDrafts: NormalizedResultDraft[] = [];
 
 	for (const row of output.results) {
-		const cleanedMeasurement = cleanMeasurementDraft(row.measurement);
+		const cleanedMeasurement = cleanMeasurementDraft(row);
 		const measurementKey = buildMeasurementKey(cleanedMeasurement.name);
 		if (!measurementKey) {
 			continue;
@@ -922,44 +1127,92 @@ async function resolveNormalizationOutput(args: {
 	modelId: string;
 	existingMeasurements: BloodworkMeasurementRow[];
 	extractionPass: StructuredPassResult<ExtractionPassOutput>;
+	pages: BloodworkPdfPage[];
 }) {
-	const { db, document, provider, modelId, existingMeasurements, extractionPass } = args;
+	const { db, document, provider, modelId, existingMeasurements, extractionPass, pages } = args;
+	const measurementsByPage = new Map<number, ExtractionPassOutput['measurements']>();
 
-	let lastError: unknown = null;
-
-	for (let attempt = 1; attempt <= 2; attempt += 1) {
-		if (attempt === 2 && lastError) {
-			updateBloodworkDocumentStatus(db, document, 'Retrying normalization after invalid response');
-			logBloodworkDocumentEvent(
-				document,
-				`Normalization retry reason: ${formatBloodworkError(lastError)}`,
-			);
-		}
-
-		try {
-			const normalizationPass = await runNormalizationPass({
-				provider,
-				modelId,
-				document,
-				existingMeasurements,
-				extractionPass,
-			});
-			return normalizationPass.output;
-		} catch (error) {
-			if (!isRetryableNormalizationFormatError(error)) {
-				throw error;
-			}
-
-			lastError = error;
-			if (attempt === 1) {
-				continue;
-			}
-
-			throw error;
-		}
+	for (const measurement of extractionPass.output.measurements) {
+		const pageMeasurements = measurementsByPage.get(measurement.sourcePage) ?? [];
+		pageMeasurements.push(measurement);
+		measurementsByPage.set(measurement.sourcePage, pageMeasurements);
 	}
 
-	throw new Error('Normalization retry flow ended without a result.');
+	const pageInputs = pages
+		.map(page => ({
+			page,
+			measurements: measurementsByPage.get(page.pageNumber) ?? [],
+		}))
+		.filter(input => input.measurements.length > 0);
+
+	if (pageInputs.length === 0) {
+		return {
+			results: [],
+		};
+	}
+
+	const normalizationOutputs = await promiseParallel(
+		pageInputs,
+		async input => {
+			try {
+				const normalizationPass = await runNormalizationPass({
+					provider,
+					modelId,
+					fileName: document.fileName,
+					existingMeasurements,
+					input,
+				});
+				return {
+					results: normalizationPass.output.results
+						.map(result => normalizeNormalizationResult(result))
+						.filter(isPresent)
+						.map(result => ({
+							...result,
+							sourcePage: result.sourcePage ?? input.page.pageNumber,
+						})),
+				};
+			} catch (error) {
+				if (!isRetryableNormalizationFormatError(error)) {
+					throw error;
+				}
+
+				updateBloodworkDocumentStatus(
+					db,
+					document,
+					`Retrying normalization for page ${input.page.pageNumber}`,
+				);
+				logBloodworkDocumentEvent(
+					document,
+					`Normalization retry reason on page ${input.page.pageNumber}: ${formatBloodworkError(error)}`,
+				);
+
+				const retryPass = await runNormalizationPass({
+					provider,
+					modelId,
+					fileName: document.fileName,
+					existingMeasurements,
+					input,
+				});
+				return {
+					results: retryPass.output.results
+						.map(result => normalizeNormalizationResult(result))
+						.filter(isPresent)
+						.map(result => ({
+							...result,
+							sourcePage: result.sourcePage ?? input.page.pageNumber,
+						})),
+				};
+			}
+		},
+		{
+			concurrency: 5,
+			retries: 0,
+		},
+	);
+
+	return {
+		results: normalizationOutputs.flatMap(output => output.results),
+	};
 }
 
 function formatBloodworkError(error: unknown) {
@@ -978,16 +1231,19 @@ function isRetryableNormalizationFormatError(error: unknown) {
 }
 
 function cleanMeasurementDraft(
-	input: NormalizationPassOutput['results'][number]['measurement'],
+	input: NormalizationPassOutput['results'][number],
 ): Omit<MeasurementDraft, 'key'> {
-	const preferredCanonicalUnit = resolvePreferredCanonicalUnit(input.name, input.canonicalUnit);
+	const preferredCanonicalUnit = resolvePreferredCanonicalUnit(
+		input.canonicalName,
+		input.canonicalUnit,
+	);
 	const canonicalRange = resolveRangeDraft({
 		rangeText: input.canonicalRangeText,
 		rangeMin: input.canonicalRangeMin,
 		rangeMax: input.canonicalRangeMax,
 	});
 	const standardizedCanonicalRange = standardizeMeasurementRangeToCanonicalUnit({
-		measurementName: input.name,
+		measurementName: input.canonicalName,
 		sourceUnit: input.canonicalUnit,
 		targetUnit: preferredCanonicalUnit,
 		rangeMin: canonicalRange.min,
@@ -996,8 +1252,8 @@ function cleanMeasurementDraft(
 	});
 
 	return {
-		name: normalizeMeasurementName(input.name),
-		category: resolveCanonicalMeasurementCategory(input.name, input.category),
+		name: normalizeMeasurementName(input.canonicalName),
+		category: resolveCanonicalMeasurementCategory(input.canonicalName, null),
 		aliases: unionText(normalizeTextArray(input.aliases), []),
 		canonicalUnit: preferredCanonicalUnit,
 		knownUnits: normalizeTextArray(input.knownUnits).map(canonicalizeUnitLabel),
@@ -1013,11 +1269,6 @@ function standardizeResultDraft(args: {
 	row: NormalizationPassOutput['results'][number];
 }) {
 	const { measurement, row } = args;
-	const originalRange = resolveRangeDraft({
-		rangeText: row.originalRangeText,
-		rangeMin: row.originalRangeMin,
-		rangeMax: row.originalRangeMax,
-	});
 	const resultRange = resolveRangeDraft({
 		rangeText: null,
 		rangeMin: measurement.canonicalRangeMin,
@@ -1029,28 +1280,27 @@ function standardizeResultDraft(args: {
 		valueNumeric: row.valueNumeric ?? null,
 		valueText: normalizeOptionalText(row.valueText),
 		unit: canonicalizeUnitOrNull(row.unit),
-		originalValueNumeric: row.originalValueNumeric ?? row.valueNumeric ?? null,
-		originalValueText:
-			normalizeOptionalText(row.originalValueText) ?? normalizeOptionalText(row.valueText),
-		originalUnit: canonicalizeUnitOrNull(row.originalUnit) ?? canonicalizeUnitOrNull(row.unit),
+		originalValueNumeric: row.valueNumeric ?? null,
+		originalValueText: normalizeOptionalText(row.valueText),
+		originalUnit: canonicalizeUnitOrNull(row.unit),
 	});
 
 	return {
-		originalName: normalizeOptionalText(row.originalName),
+		originalName: normalizeOptionalText(row.sourceName),
 		originalValueText: normalized.originalValueText,
 		originalValueNumeric: normalized.originalValueNumeric,
 		originalUnit: normalized.originalUnit,
-		originalRangeText: originalRange.text,
-		originalRangeMin: originalRange.min,
-		originalRangeMax: originalRange.max,
+		originalRangeText: null,
+		originalRangeMin: null,
+		originalRangeMax: null,
 		valueText: normalizeNormalizedValueText(normalized.valueNumeric, normalized.valueText),
 		valueNumeric: normalized.valueNumeric,
 		unit: normalized.unit ?? measurement.canonicalUnit ?? null,
-		note: normalizeOptionalText(row.note),
-		confidence: normalizeOptionalNumber(row.confidence),
+		note: null,
+		confidence: null,
 		sourcePage: row.sourcePage ?? null,
 		evidence: unionText(
-			normalizeTextArray(row.evidence),
+			normalizeTextArray(row.rangeEvidence),
 			resultRange.text ? [resultRange.text] : [],
 		),
 	};
@@ -1168,69 +1418,109 @@ function upsertMeasurementDrafts(db: VitalsDatabase, drafts: MeasurementDraft[])
 }
 
 async function generateStructuredOutput<T>(args: {
-	model: ReturnType<ReturnType<typeof createOpenRouter>>;
+	model: any;
 	schema: z.ZodType<T>;
 	messages: any[];
 	maxOutputTokens?: number;
 }): Promise<StructuredPassResult<T>> {
-	try {
-		const result = await generateText({
-			model: args.model,
-			output: Output.object({
-				schema: args.schema,
-			}),
-			temperature: 0.25,
-			maxRetries: 2,
-			messages: args.messages,
-			maxOutputTokens: args.maxOutputTokens,
-		});
+	let lastError: unknown = null;
+	const messages = injectResultJsonInstruction(args.messages);
 
-		return {
-			output: args.schema.parse(result.output),
-		};
-	} catch {
-		const textResult = await generateText({
-			model: args.model,
-			temperature: 0.75,
-			maxRetries: 1,
-			messages: args.messages,
-			maxOutputTokens: args.maxOutputTokens,
-		});
+	for (let attempt = 0; attempt < 2; attempt += 1) {
+		try {
+			const result = await generateText({
+				model: args.model,
+				temperature: 0,
+				maxRetries: 1,
+				messages,
+				maxOutputTokens: args.maxOutputTokens,
+			});
 
-		const parsed = args.schema.parse(parseJsonObjectFromText(textResult.text));
-		return {
-			output: parsed,
-		};
+			return {
+				output: args.schema.parse(parseJsonObjectFromTaggedText(result.text)),
+			};
+		} catch (error) {
+			lastError = error;
+			if (!isRetryableNormalizationFormatError(error) || attempt === 1) {
+				throw error;
+			}
+		}
 	}
+
+	throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
-function parseJsonObjectFromText(text: string) {
+function injectResultJsonInstruction(messages: any[]) {
+	if (messages.length === 0) {
+		return [
+			{
+				role: 'assistant' as const,
+				content: [{ type: 'text' as const, text: '<result_json>' }],
+			},
+		];
+	}
+
+	const [firstMessage, ...restMessages] = messages;
+	if (!firstMessage || !Array.isArray(firstMessage.content)) {
+		return messages;
+	}
+
+	return [
+		{
+			...firstMessage,
+			content: [
+				{
+					type: 'text' as const,
+					text: [
+						'You may think and reason freely.',
+						'Start your final answer with <result_json> and end it with </result_json>.',
+						'Output exactly one <result_json>...</result_json> block containing the final JSON object.',
+						'Do not put JSON outside the <result_json> tags.',
+					].join('\n'),
+				},
+				...firstMessage.content,
+			],
+		},
+		...restMessages,
+		{
+			role: 'assistant' as const,
+			content: [{ type: 'text' as const, text: '<result_json>' }],
+		},
+	];
+}
+
+function parseJsonObjectFromTaggedText(text: string) {
 	const trimmed = text.trim();
 	if (!trimmed) {
 		throw new Error('No output generated.');
 	}
 
-	const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-	const candidate =
-		fencedMatch?.[1]?.trim() ??
-		(() => {
-			const objectStart = trimmed.indexOf('{');
-			const objectEnd = trimmed.lastIndexOf('}');
-			if (objectStart >= 0 && objectEnd > objectStart) {
-				return trimmed.slice(objectStart, objectEnd + 1);
-			}
-			return trimmed;
-		})();
+	const startTag = '<result_json>';
+	const endTag = '</result_json>';
+	const startIndex = trimmed.indexOf(startTag);
+	const endIndex = trimmed.lastIndexOf(endTag);
+
+	if (startIndex < 0 || endIndex < 0 || endIndex <= startIndex) {
+		return parseJsonObjectFromText(trimmed);
+	}
+
+	const candidate = trimmed.slice(startIndex + startTag.length, endIndex).trim();
+
+	if (!candidate) {
+		throw new Error('Empty <result_json> block.');
+	}
 
 	return JSON.parse(candidate);
 }
 
-function getOpenRouterProvider() {
-	return createOpenRouter({ apiKey: env.OPENROUTER_API_KEY });
-}
+function parseJsonObjectFromText(text: string) {
+	const objectStart = text.indexOf('{');
+	const objectEnd = text.lastIndexOf('}');
+	if (objectStart < 0 || objectEnd <= objectStart) {
+		throw new Error('Missing <result_json> block.');
+	}
 
-function getBloodworkModelId() {
-	return env.BLOODWORK_OPENROUTER_MODEL;
+	return JSON.parse(text.slice(objectStart, objectEnd + 1));
 }
 
 function normalizeOptionalText(value: string | null | undefined) {
@@ -1244,6 +1534,44 @@ function normalizeOptionalText(value: string | null | undefined) {
 
 function normalizeOptionalNumber(value: number | null | undefined) {
 	return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function normalizeLooseNumber(value: number | string | null | undefined) {
+	if (typeof value === 'number' && Number.isFinite(value)) {
+		return value;
+	}
+
+	if (typeof value !== 'string') {
+		return null;
+	}
+
+	const normalized = value
+		.replace(',', '.')
+		.replace(/[^0-9.+-]/g, '')
+		.trim();
+	if (!normalized) {
+		return null;
+	}
+
+	const parsed = Number.parseFloat(normalized);
+	return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizePositiveInteger(value: number | string | null | undefined) {
+	if (typeof value === 'number' && Number.isInteger(value) && value > 0) {
+		return value;
+	}
+
+	if (typeof value !== 'string') {
+		return null;
+	}
+
+	const parsed = Number.parseInt(value.trim(), 10);
+	return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function isPresent<T>(value: T | null | undefined): value is T {
+	return value !== null && value !== undefined;
 }
 
 function normalizeTextArray(values: string[] | null | undefined) {
@@ -1393,20 +1721,82 @@ const CANONICAL_BLOODWORK_CATEGORIES = new Set([
 ]);
 
 const BLOODWORK_CATEGORY_BY_KEY: Record<string, string> = {
+	'aalp apo a1': LIPIDS_CATEGORY,
+	'aalp apo c1': LIPIDS_CATEGORY,
+	'aalp apo c2': LIPIDS_CATEGORY,
+	'aalp apo c3': LIPIDS_CATEGORY,
+	'aalp apo c4': LIPIDS_CATEGORY,
 	'alpha pregnanediol': HORMONES_CATEGORY,
+	adiponectin: METABOLISM_CATEGORY,
+	androstenedione: HORMONES_CATEGORY,
+	'apoe genotype': LIPIDS_CATEGORY,
+	'apolipoprotein b a1 ratio': LIPIDS_CATEGORY,
+	'apolipoprotein c1': LIPIDS_CATEGORY,
+	'apolipoprotein c2': LIPIDS_CATEGORY,
+	'apolipoprotein c3': LIPIDS_CATEGORY,
+	'apolipoprotein c4': LIPIDS_CATEGORY,
+	'arachidonic acid': FATTY_ACIDS_CATEGORY,
+	'arachidonic acid epa ratio': FATTY_ACIDS_CATEGORY,
+	'adma sdma': KIDNEY_ELECTROLYTES_CATEGORY,
 	'blood pressure': PHYSICAL_MEASURES_CATEGORY,
 	'body mass index': PHYSICAL_MEASURES_CATEGORY,
 	bilirubin: URINALYSIS_CATEGORY,
+	'c peptide': METABOLISM_CATEGORY,
 	'cholesterol hdl ratio': LIPIDS_CATEGORY,
 	'creatine kinase': METABOLISM_CATEGORY,
+	'cystatin c': KIDNEY_ELECTROLYTES_CATEGORY,
+	dha: FATTY_ACIDS_CATEGORY,
+	dihydrotestosterone: HORMONES_CATEGORY,
+	dpa: FATTY_ACIDS_CATEGORY,
+	egfr: KIDNEY_ELECTROLYTES_CATEGORY,
+	epa: FATTY_ACIDS_CATEGORY,
+	'erythrocyte sedimentation rate': IMMUNE_INFLAMMATION_CATEGORY,
+	'f2 isoprostanes creatinine': IMMUNE_INFLAMMATION_CATEGORY,
+	fasting: METABOLISM_CATEGORY,
+	'fibrinogen antigen': HEMATOLOGY_CATEGORY,
 	'health quotient score': PHYSICAL_MEASURES_CATEGORY,
 	height: PHYSICAL_MEASURES_CATEGORY,
 	'height feet': PHYSICAL_MEASURES_CATEGORY,
 	'height inches': PHYSICAL_MEASURES_CATEGORY,
+	'hdl efflux capacity': LIPIDS_CATEGORY,
+	'hdl efflux pcad score': LIPIDS_CATEGORY,
+	'hdl pcad score': LIPIDS_CATEGORY,
+	'hdlfx pcad score': LIPIDS_CATEGORY,
+	'hdlfx pcec': LIPIDS_CATEGORY,
+	'igf 1': HORMONES_CATEGORY,
+	'igf 1 z score': HORMONES_CATEGORY,
+	'insulin intact': METABOLISM_CATEGORY,
+	'insulin resistance score': METABOLISM_CATEGORY,
+	'intact parathyroid hormone': HORMONES_CATEGORY,
+	'ionized calcium': VITAMINS_MINERALS_CATEGORY,
+	'large hdl': LIPIDS_CATEGORY,
+	'ldl particle number': LIPIDS_CATEGORY,
+	'ldl pattern': LIPIDS_CATEGORY,
+	'ldl peak size': LIPIDS_CATEGORY,
 	ldh: METABOLISM_CATEGORY,
+	'linoleic acid': FATTY_ACIDS_CATEGORY,
+	'lipoprotein associated phospholipase a2 activity': LIPIDS_CATEGORY,
+	'lp pla2 activity': LIPIDS_CATEGORY,
+	'medium ldl': LIPIDS_CATEGORY,
 	mpv: HEMATOLOGY_CATEGORY,
+	myeloperoxidase: IMMUNE_INFLAMMATION_CATEGORY,
+	'nasem recommended summation': FATTY_ACIDS_CATEGORY,
+	'omega 6 total': FATTY_ACIDS_CATEGORY,
+	'omega 6 omega 3 ratio': FATTY_ACIDS_CATEGORY,
+	omegacheck: FATTY_ACIDS_CATEGORY,
+	'oxidized ldl': LIPIDS_CATEGORY,
+	'plasminogen activator inhibitor pai 1 ag': HEMATOLOGY_CATEGORY,
+	'plasminogen activator inhibitor 1 antigen': HEMATOLOGY_CATEGORY,
 	protein: URINALYSIS_CATEGORY,
 	'prostate specific antigen': OTHER_CATEGORY,
+	'serum igg': IMMUNE_INFLAMMATION_CATEGORY,
+	'serum osmolality': KIDNEY_ELECTROLYTES_CATEGORY,
+	'small ldl': LIPIDS_CATEGORY,
+	'thyroid stimulating immunoglobulin': THYROID_CATEGORY,
+	'thyroxine binding globulin': THYROID_CATEGORY,
+	tmao: METABOLISM_CATEGORY,
+	'total omega 3': FATTY_ACIDS_CATEGORY,
+	trab: THYROID_CATEGORY,
 	weight: PHYSICAL_MEASURES_CATEGORY,
 	'waist circumference': PHYSICAL_MEASURES_CATEGORY,
 };
@@ -1483,32 +1873,32 @@ const BLOODWORK_CATEGORY_RULES: Array<{ category: string; pattern: RegExp }> = [
 	{
 		category: LIPIDS_CATEGORY,
 		pattern:
-			/^(?:apolipoprotein a[- ]?1|apolipoprotein b|cholesterol\/hdl ratio|hdl cholesterol|ldl cholesterol|lipoprotein \(a\)|non-hdl cholesterol|total cholesterol|triglycerides|vldl cholesterol)$/i,
+			/^(?:apolipoprotein a[- ]?1|apolipoprotein b(?:\/a[- ]?1 ratio)?|apolipoprotein c[1-4]|cholesterol\/hdl ratio|hdl cholesterol|hdl efflux (?:capacity|pcad score)|hdlfx (?:pcad score|pcec)|large hdl|ldl cholesterol|ldl particle number|ldl pattern|ldl peak size|lipoprotein \(a\)|lipoprotein-associated phospholipase a2 activity|lp-pla2 activity|medium ldl|non-hdl cholesterol|oxidized ldl|small ldl|total cholesterol|triglycerides|vldl cholesterol)$/i,
 	},
 	{
 		category: METABOLISM_CATEGORY,
 		pattern:
-			/^(?:3-hydroxy-3-methylglutaric acid|3-hydroxybutyric acid|adipic acid|amylase|cis-aconitic acid|derived mean glucose|estimated average glucose|glucose|glucose, fasting|glucose, 2 hour|hba1c \(hplc\)|hba1c \(ifcc\)|hemoglobin a1c|homa-ir|lactic acid|lipase|mean plasma glucose|pyruvic acid|suberic acid|succinic acid|uric acid)$/i,
+			/^(?:3-hydroxy-3-methylglutaric acid|3-hydroxybutyric acid|adipic acid|adiponectin|amylase|c-peptide|cis-aconitic acid|derived mean glucose|estimated average glucose|glucose|glucose, fasting|glucose, 2 hour|hba1c \(hplc\)|hba1c \(ifcc\)|hemoglobin a1c|homa-ir|insulin resistance score|insulin intact|lactic acid|lipase|mean plasma glucose|pyruvic acid|suberic acid|succinic acid|tmao|uric acid)$/i,
 	},
 	{
 		category: KIDNEY_ELECTROLYTES_CATEGORY,
 		pattern:
-			/^(?:bun|bun\/creatinine ratio|carbon dioxide|chloride|creatinine|egfr \(ckd-epi\)|egfr african american|egfr non-african american|estimated glomerular filtration rate|potassium|sodium)$/i,
+			/^(?:bun|bun\/creatinine ratio|carbon dioxide|chloride|creatinine|cystatin c|egfr|egfr \(ckd-epi\)|egfr african american|egfr non-african american|estimated glomerular filtration rate|potassium|serum osmolality|sodium)$/i,
 	},
 	{
 		category: LIVER_BILIARY_CATEGORY,
 		pattern:
-			/^(?:alanine aminotransferase|alt \(gpt\)|albumin|albumin\/globulin ratio|alkaline phosphatase|alpha-2-macroglobulin|apolipoprotein a-1|aspartate aminotransferase|ast \(got\)|direct bilirubin|fibrosis interpretation|fibrosis score|fibrosis stage|gamma-gt|gamma-glutamyl transferase|haptoglobin|indirect bilirubin|nash grade|nash score|necroinflammatory activity grade|necroinflammatory activity score|necroinflammatory interpretation|steatosis grade|steatosis score|total bilirubin|total globulin|total protein)$/i,
+			/^(?:alanine aminotransferase|alt \(gpt\)|albumin|albumin\/globulin ratio|alkaline phosphatase|alpha [12] globulin|alpha-2-macroglobulin|apolipoprotein a-1|aspartate aminotransferase|ast \(got\)|beta [12] globulin|direct bilirubin|fibrosis interpretation|fibrosis score|fibrosis stage|gamma globulin|gamma-gt|gamma-glutamyl transferase|haptoglobin|indirect bilirubin|nash grade|nash score|necroinflammatory activity grade|necroinflammatory activity score|necroinflammatory interpretation|protein electrophoresis interpretation|serum protein electrophoresis interpretation|steatosis grade|steatosis score|total bilirubin|total globulin|total protein)$/i,
 	},
 	{
 		category: THYROID_CATEGORY,
 		pattern:
-			/^(?:free t3|free t4|thyroglobulin antibody|thyroid peroxidase antibody|tsh|tsh \(basal\))$/i,
+			/^(?:free t3|free t4|thyroglobulin antibody|thyroid peroxidase antibody|thyroid stimulating immunoglobulin|thyroxine binding globulin|trab|tsh|tsh \(basal\))$/i,
 	},
 	{
 		category: HORMONES_CATEGORY,
 		pattern:
-			/^(?:alpha-pregnanediol|bioavailable testosterone|cortisol - am|dhea-s|estradiol|estradiol \(e2\)|follicle stimulating hormone \(fsh\)|free testosterone|free testosterone index|insulin|luteinizing hormone \(lh\)|prolactin|sex hormone binding globulin|testosterone)$/i,
+			/^(?:alpha-pregnanediol|androstenedione|bioavailable testosterone|cortisol - am|dhea-s|dihydrotestosterone|estradiol|estradiol \(e2\)|follicle stimulating hormone \(fsh\)|free testosterone|free testosterone index|igf-1|igf-1 z score|insulin|intact parathyroid hormone|luteinizing hormone \(lh\)|prolactin|sex hormone binding globulin|testosterone)$/i,
 	},
 	{
 		category: IRON_CATEGORY,
@@ -1518,17 +1908,17 @@ const BLOODWORK_CATEGORY_RULES: Array<{ category: string; pattern: RegExp }> = [
 	{
 		category: VITAMINS_MINERALS_CATEGORY,
 		pattern:
-			/^(?:albumin-corrected calcium|calcium|ceruloplasmin|folate|folic acid|holotranscobalamin \(holotc\)|magnesium|magnesium in erythrocytes|selenium|vitamin b12|vitamin b2|vitamin b6|vitamin d, 25-hydroxy|vitamin d3 \(25-oh\)|zinc)$/i,
+			/^(?:albumin-corrected calcium|calcium|ceruloplasmin|folate|folic acid|holotranscobalamin \(holotc\)|ionized calcium|magnesium|magnesium in erythrocytes|selenium|vitamin b12|vitamin b2|vitamin b6|vitamin d, 25-hydroxy|vitamin d3 \(25-oh\)|zinc)$/i,
 	},
 	{
 		category: IMMUNE_INFLAMMATION_CATEGORY,
 		pattern:
-			/^(?:actin \(smooth muscle\) antibody|alpha-1-antitrypsin|ana screen|c-reactive protein|high-sensitivity c-reactive protein|igg|immunoglobulin a|immunoglobulin g|immunoglobulin m|smooth muscle antibody screen|smooth muscle antibody titer|wheat \(f4\) igg)$/i,
+			/^(?:actin \(smooth muscle\) antibody|alpha-1-antitrypsin|ana screen|anti-dsdna antibody ifa|b2 glycoprotein i \(iga\)ab|beta-2 glycoprotein i ig[agm](?: antibody)?|c-reactive protein|cardiolipin (?:ab|antibody) ?(?:\((?:iga|igg|igm)\)|ig[agm])|centromere b antibody|chromatin(?: \(nucleosomal\))? antibody|complement c[34]|complement component c3c|complement component c4[ac]|cyclic citrullinated peptide \(ccp\) antibody \(igg\)|deamidated gliadin peptide (?:antibody )?ig[ag]|dna ab \(ds\) crithidia,ifa|erythrocyte sedimentation rate|(?:almond|brazil nut|cacao|casein|cashew nut|clam|codfish|coffee|cow's milk|crab|egg white|hazelnut|lobster|macadamia nut|maize\/corn|peanut|salmon|scallop|sesame seed|shrimp|soybean|tomato|tuna|walnut|wheat|yeast)(?: \([^)]+\))? ig[eg](?: class)?|f2-isoprostanes\/creatinine|high-sensitivity c-reactive protein|igg|igg subclass [1-4]|immunoglobulin a|immunoglobulin g|immunoglobulin g subclass [1-4]|immunoglobulin m|jo-1 antibody|mmp9|mutated citrullinated vimentin \(mcv\) antibody|myeloperoxidase|rheumatoid factor ig[agm]|rnp antibody|scl-70 antibody|serum igg|sjogren's antibody \(ss-[ab]\)|sm(?:\/rnp)? antibody|smith antibody|smooth muscle antibody screen|smooth muscle antibody titer|tissue transglutaminase (?:ab, )?igg|tissue transglutaminase antibody ig[ag]|tissue transglutaminase iga|wheat \(f4\) igg)$/i,
 	},
 	{
 		category: INFECTIOUS_DISEASE_CATEGORY,
 		pattern:
-			/^(?:beta hemolytic streptococcus, group c|hcv index|hepatitis a antibody igm|hepatitis a antibody total|hepatitis b core antibody total|hepatitis b surface antigen screen|hepatitis c antibody|upper respiratory culture)$/i,
+			/^(?:beta hemolytic streptococcus, group c|chlamydia trachomatis rna|hcv index|hepatitis a antibody igm|hepatitis a antibody total|hepatitis b core antibody total|hepatitis b surface antigen screen|hepatitis c antibody|hiv (?:ag\/ab screen|antigen\/antibody screen|final interpretation)|hsv [12] igg(?: inhibition| type specific antibody)?|neisseria gonorrhoeae rna|rapid plasma reagin|rpr|trichomonas vaginalis rna|upper respiratory culture)$/i,
 	},
 	{
 		category: GUT_HEALTH_CATEGORY,
@@ -1542,7 +1932,7 @@ const BLOODWORK_CATEGORY_RULES: Array<{ category: string; pattern: RegExp }> = [
 	{
 		category: FATTY_ACIDS_CATEGORY,
 		pattern:
-			/^(?:docosahexaenoic acid \(dha\)|eicosapentaenoic acid \(epa\)|omega-3 index|total fatty acids)$/i,
+			/^(?:arachidonic acid(?:\/epa ratio)?|dha|docosahexaenoic acid \(dha\)|dpa|eicosapentaenoic acid \(epa\)|epa|linoleic acid|omega-3 index|omega-6(?:\/omega-3 ratio| total)?|omegacheck|total fatty acids|total omega-3)$/i,
 	},
 	{
 		category: PHYSICAL_MEASURES_CATEGORY,
