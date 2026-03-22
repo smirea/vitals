@@ -39,6 +39,10 @@ export const bloodworkReprocessDocumentInputSchema = z.object({
 const nullableTextSchema = z.string().trim().min(1).nullable().optional();
 const looseNullableTextSchema = z.union([z.string(), z.null()]).optional();
 const looseNullableNumberSchema = z.union([z.number(), z.string(), z.null()]).optional();
+const looseTextArraySchema = z
+	.array(z.string().trim().min(1))
+	.nullish()
+	.transform(values => values ?? []);
 
 const extractionMeasurementSchema = z.object({
 	name: looseNullableTextSchema,
@@ -76,13 +80,13 @@ const normalizationResultSchema = z.object({
 	name: looseNullableTextSchema,
 	sourceName: looseNullableTextSchema,
 	originalName: looseNullableTextSchema,
-	aliases: z.array(z.string().trim().min(1)).optional().default([]),
+	aliases: looseTextArraySchema,
 	canonicalUnit: nullableTextSchema,
-	knownUnits: z.array(z.string().trim().min(1)).optional().default([]),
+	knownUnits: looseTextArraySchema,
 	canonicalRangeText: nullableTextSchema,
 	canonicalRangeMin: looseNullableNumberSchema,
 	canonicalRangeMax: looseNullableNumberSchema,
-	rangeEvidence: z.array(z.string().trim().min(1)).optional().default([]),
+	rangeEvidence: looseTextArraySchema,
 	valueText: nullableTextSchema,
 	valueNumeric: looseNullableNumberSchema,
 	unit: nullableTextSchema,
@@ -175,6 +179,8 @@ type PageNormalizationInput = {
 type LooseExtractionMeasurement = z.infer<typeof extractionMeasurementSchema>;
 type LooseNormalizationPassOutput = z.infer<typeof normalizationPassSchema>;
 type LooseNormalizationResult = z.infer<typeof normalizationResultSchema>;
+
+const NORMALIZATION_BATCH_SIZE = 10;
 
 let processorPromise: Promise<void> | null = null;
 let processorStarted = false;
@@ -1297,10 +1303,17 @@ async function resolveNormalizationOutput(args: {
 	}
 
 	const pageInputs = pages
-		.map(page => ({
-			page,
-			measurements: measurementsByPage.get(page.pageNumber) ?? [],
-		}))
+		.flatMap(page => {
+			const measurements = measurementsByPage.get(page.pageNumber) ?? [];
+			const batches = chunkItems(measurements, NORMALIZATION_BATCH_SIZE);
+
+			return batches.map((batch, batchIndex) => ({
+				page,
+				measurements: batch,
+				batchIndex,
+				batchCount: batches.length,
+			}));
+		})
 		.filter(input => input.measurements.length > 0);
 
 	if (pageInputs.length === 0) {
@@ -1337,11 +1350,11 @@ async function resolveNormalizationOutput(args: {
 				updateBloodworkDocumentStatus(
 					db,
 					document,
-					`Retrying normalization for page ${input.page.pageNumber}`,
+					`Retrying normalization for page ${formatNormalizationBatchLabel(input)}`,
 				);
 				logBloodworkDocumentEvent(
 					document,
-					`Normalization retry reason on page ${input.page.pageNumber}: ${formatBloodworkError(error)}`,
+					`Normalization retry reason on page ${formatNormalizationBatchLabel(input)}: ${formatBloodworkError(error)}`,
 				);
 
 				const retryPass = await runNormalizationPass({
@@ -1371,6 +1384,31 @@ async function resolveNormalizationOutput(args: {
 	return {
 		results: normalizationOutputs.flatMap(output => output.results),
 	};
+}
+
+function formatNormalizationBatchLabel(input: {
+	page: Pick<BloodworkPdfPage, 'pageNumber'>;
+	batchIndex: number;
+	batchCount: number;
+}) {
+	if (input.batchCount <= 1) {
+		return String(input.page.pageNumber);
+	}
+
+	return `${input.page.pageNumber} (${input.batchIndex + 1}/${input.batchCount})`;
+}
+
+function chunkItems<T>(items: T[], chunkSize: number) {
+	if (chunkSize <= 0) {
+		throw new Error('Chunk size must be positive.');
+	}
+
+	const chunks: T[][] = [];
+	for (let index = 0; index < items.length; index += chunkSize) {
+		chunks.push(items.slice(index, index + chunkSize));
+	}
+
+	return chunks;
 }
 
 function formatBloodworkError(error: unknown) {
@@ -1668,7 +1706,7 @@ function parseJsonObjectFromTaggedText(text: string) {
 		throw new Error('Empty <result_json> block.');
 	}
 
-	return JSON.parse(candidate);
+	return parseJsonObject(candidate);
 }
 
 function parseJsonObjectFromText(text: string) {
@@ -1678,7 +1716,24 @@ function parseJsonObjectFromText(text: string) {
 		throw new Error('Missing <result_json> block.');
 	}
 
-	return JSON.parse(text.slice(objectStart, objectEnd + 1));
+	return parseJsonObject(text.slice(objectStart, objectEnd + 1));
+}
+
+function parseJsonObject(text: string) {
+	try {
+		return JSON.parse(text);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		const trimmed = text.trimEnd();
+		const likelyTruncated =
+			message.includes("Expected ']'") ||
+			message.includes("Expected '}'") ||
+			(!trimmed.endsWith('}') && !trimmed.endsWith(']'));
+
+		throw new Error(
+			`JSON parse error: ${message}${likelyTruncated ? ' (output appears truncated)' : ''}`,
+		);
+	}
 }
 
 function normalizeOptionalText(value: string | null | undefined) {
