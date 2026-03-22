@@ -181,6 +181,7 @@ let processorStarted = false;
 
 export function getBloodworkDashboard(db: VitalsDatabase) {
 	syncBloodworkMeasurementCategories(db);
+	repairBloodworkMeasurementRanges(db);
 
 	const documents = db
 		.select({
@@ -253,6 +254,163 @@ export function syncBloodworkMeasurementCategories(db: VitalsDatabase) {
 			);
 		}
 	}
+}
+
+function repairBloodworkMeasurementRanges(db: VitalsDatabase) {
+	const now = new Date().toISOString();
+	const measurements = db.select().from(bloodworkMeasurements).all();
+
+	for (const measurement of measurements) {
+		const repairedRange = resolveCanonicalMeasurementRangeRepair(measurement);
+		if (!repairedRange) {
+			continue;
+		}
+
+		db.update(bloodworkMeasurements)
+			.set({
+				canonicalRangeMin: repairedRange.min,
+				canonicalRangeMax: repairedRange.max,
+				canonicalRangeText: repairedRange.text,
+				updatedAt: now,
+			})
+			.where(eq(bloodworkMeasurements.id, measurement.id))
+			.run();
+	}
+}
+
+function resolveCanonicalMeasurementRangeRepair(measurement: BloodworkMeasurementRow) {
+	if (!hasClearlyBrokenCanonicalRange(measurement)) {
+		return null;
+	}
+
+	const unit = canonicalizeUnitOrNull(measurement.canonicalUnit);
+	if (!unit) {
+		return null;
+	}
+
+	const rule = findMeasurementUnitStandardizationRule(measurement.name);
+	const evidence = parseJsonArray<string>(measurement.rangeEvidenceJson);
+	const candidates: Array<{
+		min: number | null;
+		max: number | null;
+		text: string | null;
+		score: number;
+	}> = [];
+
+	evidence.forEach((rawText, index) => {
+		const parsed = parseReferenceRangeBoundsFromText(rawText);
+		if (!parsed) {
+			return;
+		}
+
+		const boundedScore = parsed.min !== undefined && parsed.max !== undefined ? 4 : 3;
+		candidates.push({
+			min: parsed.min ?? null,
+			max: parsed.max ?? null,
+			text: formatCanonicalRangeText(parsed.min ?? null, parsed.max ?? null),
+			score: 100 - index * 2 + boundedScore,
+		});
+
+		if (!rule) {
+			return;
+		}
+
+		Object.keys(rule.convertersByUnitKey).forEach(sourceUnitKey => {
+			if (sourceUnitKey === normalizeUnitKey(unit)) {
+				return;
+			}
+
+			const converted = standardizeMeasurementRangeToCanonicalUnit({
+				measurementName: measurement.name,
+				sourceUnit: sourceUnitKey,
+				targetUnit: unit,
+				rangeMin: parsed.min ?? null,
+				rangeMax: parsed.max ?? null,
+				rangeText: null,
+			});
+
+			candidates.push({
+				min: converted.min,
+				max: converted.max,
+				text: converted.text,
+				score: 100 - index * 2,
+			});
+		});
+	});
+
+	const repaired = candidates
+		.filter(candidate => isPlausibleCanonicalRange(unit, candidate.min, candidate.max))
+		.sort((left, right) => right.score - left.score)[0];
+
+	if (!repaired) {
+		return null;
+	}
+
+	if (
+		repaired.min === measurement.canonicalRangeMin &&
+		repaired.max === measurement.canonicalRangeMax &&
+		repaired.text === measurement.canonicalRangeText
+	) {
+		return null;
+	}
+
+	return repaired;
+}
+
+function hasClearlyBrokenCanonicalRange(measurement: BloodworkMeasurementRow) {
+	const unit = canonicalizeUnitOrNull(measurement.canonicalUnit);
+	if (!unit) {
+		return false;
+	}
+
+	return !isPlausibleCanonicalRange(
+		unit,
+		measurement.canonicalRangeMin,
+		measurement.canonicalRangeMax,
+	);
+}
+
+function isPlausibleCanonicalRange(
+	unit: string,
+	min: number | null | undefined,
+	max: number | null | undefined,
+) {
+	if (min !== null && min !== undefined && !Number.isFinite(min)) {
+		return false;
+	}
+	if (max !== null && max !== undefined && !Number.isFinite(max)) {
+		return false;
+	}
+	if (min !== null && min !== undefined && max !== null && max !== undefined && max < min) {
+		return false;
+	}
+
+	const upperBound = getCanonicalRangeUpperBound(unit);
+	if (min !== null && min !== undefined && Math.abs(min) > upperBound) {
+		return false;
+	}
+	if (max !== null && max !== undefined && Math.abs(max) > upperBound) {
+		return false;
+	}
+
+	return min !== null || max !== null;
+}
+
+function getCanonicalRangeUpperBound(unit: string) {
+	if (unit === '%') {
+		return 100;
+	}
+	if (unit === 'mg/dL') {
+		return 2_000;
+	}
+	if (unit === 'g/dL') {
+		return 100;
+	}
+	if (unit === 'mmol/L') {
+		return 200;
+	}
+
+	return 10_000;
 }
 
 export async function uploadBloodworkDocuments(

@@ -254,9 +254,12 @@ export function parseNumericValue(value: number | string | null | undefined): nu
 }
 
 function formatNumericLabel(value: number): string {
-	const absolute = Math.abs(value);
-	const decimals = absolute >= 100 ? 0 : absolute >= 10 ? 1 : 2;
-	return value.toFixed(decimals).replace(/\.?0+$/, '');
+	const decimals = Math.abs(value) < 10 ? 1 : 0;
+	const rounded = Number.parseFloat(value.toFixed(decimals));
+	if (Object.is(rounded, -0)) {
+		return decimals === 0 ? '0' : '0.0';
+	}
+	return rounded.toFixed(decimals);
 }
 
 function formatRangeCaption({
@@ -336,10 +339,11 @@ export function normalizeCategoryLabel(value: string | null | undefined): string
 export function formatCell(measurement: BloodworkMeasurementRecord): MeasurementCell {
 	const valueText = measurement.valueText?.trim() ?? '';
 	const unitText = measurement.unit?.trim() ?? '';
-	const display = [valueText, unitText].filter(Boolean).join(' ').trim() || '—';
 	const rangeMin = measurement.referenceRangeMin;
 	const rangeMax = measurement.referenceRangeMax;
 	const numericValue = measurement.valueNumeric ?? parseNumericValue(valueText);
+	const normalizedValueText = numericValue === null ? valueText : formatNumericLabel(numericValue);
+	const display = [normalizedValueText, unitText].filter(Boolean).join(' ').trim() || '—';
 	const rangeVisualization = getRangeVisualization({
 		numericValue,
 		rangeMin,
@@ -1047,7 +1051,7 @@ export function getCategoryOverviewByLatestAcrossAllLabs({
 	});
 
 	return Array.from(overviewByCategory.values())
-		.filter(item => item.total > 0)
+		.filter(item => item.total > 0 && item.category !== UNCATEGORIZED_CATEGORY_LABEL)
 		.sort((left, right) => left.category.localeCompare(right.category));
 }
 
