@@ -4,6 +4,8 @@ NEVER EVER WRITE A DATABASE MIGRATION: just update the database shape and import
 
 Never ever write a fallback or silently fail: it's ok to throw errors and when systems or services that are supposed to work do not. DO NOT WRITE ANY FALLBACK
 
+All the environment variables are in `.env` and `.env.local` and are managed with the global `env-manager` utility
+
 # Broad guidelines
 
 This is an information dense, concise but comprehensive tool to analyze all sorts of information about 1 person: medical information such as bloodwork, food tracking, supplement tracking,workouts and the like

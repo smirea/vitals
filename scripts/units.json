@@ -1,0 +1,9 @@
+{
+	"example_source_mapped": { "count": 42, "unit": "example_target" },
+	"exmple_source_leaf": "canonical_example_source_name",
+	"mmol/l": "mmol/L",
+	"mg/dl": "mg/dL",
+	"g/dl": "g/dL",
+	"ml/min/1.73m2 ": "mL/min/1.73m2",
+	"%": "%"
+}

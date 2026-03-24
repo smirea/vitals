@@ -187,6 +187,7 @@ let processorStarted = false;
 
 export function getBloodworkDashboard(db: VitalsDatabase) {
 	syncBloodworkMeasurementCategories(db);
+	syncBloodworkMeasurementUnitConversions(db);
 	repairBloodworkMeasurementRanges(db);
 
 	const documents = db
@@ -259,6 +260,26 @@ export function syncBloodworkMeasurementCategories(db: VitalsDatabase) {
 				`[bloodwork] measurement ${measurement.name} (${measurement.key}) fell back to ${OTHER_CATEGORY}`,
 			);
 		}
+	}
+}
+
+export function syncBloodworkMeasurementUnitConversions(db: VitalsDatabase) {
+	const now = new Date().toISOString();
+	const measurements = db.select().from(bloodworkMeasurements).all();
+
+	for (const measurement of measurements) {
+		const unitConversions = resolveMeasurementUnitConversions(measurement.name);
+		if (JSON.stringify(unitConversions) === JSON.stringify(measurement.unitConversionsJson)) {
+			continue;
+		}
+
+		db.update(bloodworkMeasurements)
+			.set({
+				unitConversionsJson: unitConversions,
+				updatedAt: now,
+			})
+			.where(eq(bloodworkMeasurements.id, measurement.id))
+			.run();
 	}
 }
 
@@ -1556,6 +1577,7 @@ function upsertMeasurementDrafts(db: VitalsDatabase, drafts: MeasurementDraft[])
 					aliasesJson: draft.aliases.filter(alias => alias !== draft.name),
 					canonicalUnit: draft.canonicalUnit,
 					knownUnitsJson: draft.knownUnits,
+					unitConversionsJson: resolveMeasurementUnitConversions(draft.name),
 					canonicalRangeMin: draft.canonicalRangeMin,
 					canonicalRangeMax: draft.canonicalRangeMax,
 					canonicalRangeText: draft.canonicalRangeText,
@@ -1592,6 +1614,7 @@ function upsertMeasurementDrafts(db: VitalsDatabase, drafts: MeasurementDraft[])
 				aliasesJson: aliases,
 				canonicalUnit: draft.canonicalUnit ?? existing.canonicalUnit,
 				knownUnitsJson: knownUnits,
+				unitConversionsJson: resolveMeasurementUnitConversions(draft.name),
 				canonicalRangeMin: draft.canonicalRangeMin ?? existing.canonicalRangeMin,
 				canonicalRangeMax: draft.canonicalRangeMax ?? existing.canonicalRangeMax,
 				canonicalRangeText: draft.canonicalRangeText ?? existing.canonicalRangeText,
@@ -2278,6 +2301,8 @@ function parseReferenceRangeBoundsFromText(text: string) {
 
 type UnitStandardizationConverter = {
 	convert: (value: number) => number;
+	factor: number;
+	offset: number;
 };
 
 type MeasurementUnitStandardizationRule = {
@@ -2288,11 +2313,15 @@ type MeasurementUnitStandardizationRule = {
 
 const IDENTITY_UNIT_CONVERTER: UnitStandardizationConverter = {
 	convert: value => value,
+	factor: 1,
+	offset: 0,
 };
 
 function scaledUnitConverter(factor: number): UnitStandardizationConverter {
 	return {
 		convert: value => value * factor,
+		factor,
+		offset: 0,
 	};
 }
 
@@ -2302,6 +2331,8 @@ function shiftedScaledUnitConverter(args: {
 }): UnitStandardizationConverter {
 	return {
 		convert: value => value * args.factor + args.offset,
+		factor: args.factor,
+		offset: args.offset,
 	};
 }
 
@@ -2494,6 +2525,19 @@ const MEASUREMENT_UNIT_STANDARDIZATION_RULES: MeasurementUnitStandardizationRule
 		]),
 	},
 ];
+
+function resolveMeasurementUnitConversions(measurementName: string) {
+	const rule = findMeasurementUnitStandardizationRule(measurementName);
+	if (!rule) {
+		return [];
+	}
+
+	return Object.entries(rule.convertersByUnitKey).map(([unitKey, converter]) => ({
+		unit: canonicalizeUnitLabel(unitKey),
+		factor: converter.factor,
+		...(converter.offset ? { offset: converter.offset } : {}),
+	}));
+}
 
 function canonicalizeUnitLabel(unit: string) {
 	const normalizedKey = normalizeUnitKey(unit);

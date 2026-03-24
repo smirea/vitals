@@ -26,6 +26,7 @@
         "antd": "^6.3.0",
         "chalk": "^5.6.2",
         "concurrently": "^9.2.1",
+        "convert": "^7.0.0",
         "date-fns": "^4.1.0",
         "drizzle-orm": "0.45.1",
         "drizzle-zod": "0.8.3",
@@ -591,6 +592,8 @@
     "compute-scroll-into-view": ["compute-scroll-into-view@3.1.1", "", {}, "sha512-VRhuHOLoKYOy4UbilLbUzbYg93XLjv2PncJC50EuTWPA3gaja1UjBsUP/D/9/juV3vQFr6XBEzn9KCAHdUvOHw=="],
 
     "concurrently": ["concurrently@9.2.1", "", { "dependencies": { "chalk": "4.1.2", "rxjs": "7.8.2", "shell-quote": "1.8.3", "supports-color": "8.1.1", "tree-kill": "1.2.2", "yargs": "17.7.2" }, "bin": { "conc": "dist/bin/concurrently.js", "concurrently": "dist/bin/concurrently.js" } }, "sha512-fsfrO0MxV64Znoy8/l1vVIjjHa29SZyyqPgQBwhiDcaW8wJc2W3XWVOGx4M3oJBnv/zdUZIIp1gDeS98GzP8Ng=="],
+
+    "convert": ["convert@7.0.0", "", {}, "sha512-Sc8P9MeZBPtaAG/hiSYO28LvVjEDfP+iecvP1nvhJxvXcS3d9WQJIQma9XMPRwIWPifA2X8epIR9zbLxJPrT8w=="],
 
     "convert-source-map": ["convert-source-map@1.9.0", "", {}, "sha512-ASFBup0Mz1uyiIjANan1jzLQami9z1PoYSZCiiYW2FczPbenXc45FZdBZLzOT+r6+iciuEModtmCti+hjaAk0A=="],
 

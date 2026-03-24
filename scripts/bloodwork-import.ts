@@ -10,9 +10,12 @@ import { bloodworkMeasurements } from 'server/db/schema';
 import { textBlock } from 'shared/textBlock';
 import z from 'zod';
 import { createHash } from 'crypto';
+import convert, { getMeasureKind } from 'convert';
+import typedUnits from './units.json';
 
 const tmpDir = path.join('/tmp', 'vitals');
 fs.mkdirSync(tmpDir, { recursive: true });
+const units = typedUnits as Record<string, string | { count: number; unit: string }>;
 
 const openrouter = createOpenRouter({ apiKey: env.OPENROUTER_API_KEY });
 
@@ -29,23 +32,7 @@ void createScript(async () => {
 
 	const markdown = extractMarkdown(file);
 
-	/*
-	Parse the <markdown /> extracted from a pdf of a lab result according to the following <schema />.
-	<result_json>${JSON.stringify({
-		date: '2026-01-20',
-		labName: 'Quest Diagnostics',
-		measurements: [
-			{
-				name: 'LDL Cholesterol',
-				canonicalName: 'LDL Cholesterol',
-				valueText: '104',
-				valueNumeric: 104,
-				unit: 'mg/dL',
-				reference: '<= 50',
-			},
-		],
-	})}</result_json>
-	*/
+	const measurementsDb = await compileMeasurementDatabase();
 
 	const result = await generateText({
 		model: openrouter('google/gemini-2.5-flash'),
@@ -62,8 +49,8 @@ void createScript(async () => {
 						name: z.string(),
 						sourceName: z.string(),
 						valueText: z.string(),
+						unit: z.string(),
 						valueNumeric: z.number().optional(),
-						unit: z.string().optional(),
 						rangeText: z.string().optional(),
 						rangeMin: z.number().optional(),
 						rangeMax: z.number().optional(),
@@ -75,11 +62,15 @@ void createScript(async () => {
 		system: textBlock`
 			You must explicitly extract values visible in the <markdown /> and do not infer any data not provided.
 			You must translate all text to english if it's not already in english.
-			Do not invent measurements that are not visibly present on this page.
 			The <markdown /> was extracted by parsing a multi-page PDF of lab results. The parsing is pretty good but not 100% reliable so there might be areas to fix - a usual pitfall is tables that are missing headers because they spanned across multiple pages and the parser did not detect that.
 			You are provided a <database /> of the existing canonical names, it is not exhaustive as we are using this process to build it. If you find matches in the <database /> then use those as the canonical names, otherwise take your best guess given the context.
 
-			<database>${JSON.stringify(await extractMeasurementDatabase())}</database>
+			<database>${Object.entries(measurementsDb)
+				.map(
+					([name, { aliases }]) =>
+						`- '${name}'${aliases.length ? ' known known aliases: ' + aliases.join('; ') : 'no other known aliases'}`,
+				)
+				.join('\n')}</database>
 
 			type output_json_schema = {
 				date?: string; // the date the lab was made, if provided
@@ -90,7 +81,7 @@ void createScript(async () => {
 					sourceName: string; // the literal name from the source, unaltered
 					valueText: string; // the literal value from the source, unaltered and without the unit
 					valueNumeric?: number; // the number value if this is a numeric value
-					unit?: string; // only if present in the file, do not create one if not in the source
+					unit: 'n/a' | string; // the unit for this measurement
 					rangeText?: string; // the literal reference range if provided
 					rangeMin?: number; // parse min reference value if provided
 					rangeMax?: number; // parsed max reference value if provided
@@ -101,17 +92,83 @@ void createScript(async () => {
 		prompt: `<markdown>${markdown}</markdown>`,
 	});
 
+	const toFigureOut: { measurement: string; unit: string }[] = [];
+	const canonicalUnits = Object.fromEntries(
+		Object.entries(measurementsDb).map(x => [x[0].toLocaleLowerCase(), x[1].unit]),
+	);
+
 	for (const item of result.output.measurements) {
-		if (item.valueNumeric != null) continue;
-		if (/^\d+?$/.test(item.valueText)) item.valueNumeric = parseInt(item.valueText, 10);
-		else if (/^\d+(\.\d+)?$/.test(item.valueText)) item.valueNumeric = parseFloat(item.valueText);
+		let added = false;
+		const matchedDb = measurementsDb[item.name];
+		if (item.valueNumeric == null) {
+			if (/^\d+?$/.test(item.valueText)) item.valueNumeric = parseInt(item.valueText, 10);
+			else if (/^\d+(\.\d+)?$/.test(item.valueText)) item.valueNumeric = parseFloat(item.valueText);
+		}
+		if (item.unit) {
+			item.unit = item.unit.toLocaleLowerCase().trim();
+			if (item.unit === 'n/a') {
+				delete (item as any).unit;
+			} else if (!getMeasureKind(item.unit)) {
+				const mapped = units[item.unit];
+				if (mapped) {
+					if (typeof mapped === 'string') item.unit = mapped;
+					else {
+						item.unit = mapped.unit;
+						if (item.valueNumeric) item.valueNumeric *= mapped.count || 1;
+					}
+				} else {
+					toFigureOut.push({ unit: item.unit, measurement: item.name });
+					added = true;
+				}
+			}
+		} else if (canonicalUnits[item.name.toLocaleLowerCase().trim()]) {
+			item.unit = canonicalUnits[item.name.toLocaleLowerCase().trim()]!;
+		}
 	}
 
 	console.dir(result.output, { depth: null });
+	console.log({ unitsToFigureOut: toFigureOut });
+
+	const unitsMapped = await generateText({
+		model: openrouter('google/gemini-3.1-pro'),
+		temperature: 0.5,
+		maxOutputTokens: 5e3,
+		output: Output.array({
+			element: z.object({
+				measurement: z.string(),
+				canonicalUnit: z.string(),
+				canonicalName: z.string(),
+				multiplier: z.number(),
+			}),
+		}),
+		system: textBlock`
+			Sanitize and find the canonical units of measurement for the given list of <measurements />.
+			These values were extracted from various lab bloodwork via a combination of OCR and LLM parsing, so they were created from potentially different standards and also have some parsing errors. Map the units and provide the conversion multiplier to go from 1 of the source unit to 1 of the target unit.
+			It could also be that the unit is actually correct for the measurement, in which case just clean it up if needed and return it back as { multiplier: 1 }
+			Reply with 1 object for each with the appropriate mapping:
+			type output_object = {
+				measurement: string; // the EXACT name given to you in the input <measurements />
+				canonicalName: string; // the canonical sanitized name for this measurement
+				canonicalUnit: string; // the canonical unit for this measurement
+				multiplier: number; // the conversion multiplier to convert 1 count of the original unit to the new canonicalUnit (e.g. if original is "grams" and the correct is "mg", then the multiplier is 1000)
+			}
+
+			Example, for input:
+			- measurement "GLUCOSE" with unit "g/dL"
+			- measurement "NON HDL CHOLESTEROL" with unit "mg/dL (calc)"
+
+			Example output
+			[
+				{"measurement":"GLUCOSE","canonicalName":"glucose","canonicalUnit":"mg/dL","multiplier":1000},
+				{"measurement":"NON HDL CHOLESTEROL (calculated)","canonical name": "Non HDL Cholesterol","canonicalUnit":"mg/dL","multiplier":1}
+			]
+		`,
+		prompt: `<measurements>${toFigureOut.map(x => `measurement "${x.measurement}" with unit "${x.unit}"`).join('\n')}</measurements>`,
+	});
 });
 
-async function extractMeasurementDatabase() {
-	const result: Record<string, { aliases: string[]; unit?: string; range?: string }> = {};
+async function compileMeasurementDatabase() {
+	const result: Record<string, { aliases: string[]; unit: string | null }> = {};
 	const db = getDatabase();
 	const measurements = db
 		.select()
@@ -121,26 +178,14 @@ async function extractMeasurementDatabase() {
 
 	for (const measurement of measurements) {
 		const aliases = measurement.aliasesJson.filter(alias => alias && alias !== measurement.name);
-		const range =
-			measurement.canonicalRangeText ??
-			formatRange(measurement.canonicalRangeMin, measurement.canonicalRangeMax) ??
-			undefined;
 
 		result[measurement.name] = {
 			aliases,
-			...(measurement.canonicalUnit ? { unit: measurement.canonicalUnit } : {}),
-			...(range ? { range } : {}),
+			unit: measurement.unit,
 		};
 	}
 
 	return result;
-}
-
-function formatRange(min: number | null, max: number | null) {
-	if (min != null && max != null) return `${min}-${max}`;
-	if (min != null) return `>= ${min}`;
-	if (max != null) return `<= ${max}`;
-	return null;
 }
 
 function extractMarkdown(file: string) {

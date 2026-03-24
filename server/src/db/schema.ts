@@ -37,6 +37,7 @@ export const bloodworkDocuments = sqliteTable(
 		language: text('language'),
 		country: text('country'),
 		notes: text('notes'),
+		rawMarkdown: text('raw_markdown'),
 	},
 	table => [
 		uniqueIndex('bloodwork_documents_sha256_idx').on(table.sha256),
@@ -55,19 +56,11 @@ export const bloodworkMeasurements = sqliteTable(
 		aliasesJson: text('aliases_json', { mode: 'json' })
 			.$type<string[]>()
 			.notNull()
-			.default(sql`(json_array())`),
-		canonicalUnit: text('canonical_unit'),
-		knownUnitsJson: text('known_units_json', { mode: 'json' })
-			.$type<string[]>()
-			.notNull()
-			.default(sql`(json_array())`),
-		canonicalRangeMin: real('canonical_range_min'),
-		canonicalRangeMax: real('canonical_range_max'),
-		canonicalRangeText: text('canonical_range_text'),
-		rangeEvidenceJson: text('range_evidence_json', { mode: 'json' })
-			.$type<string[]>()
-			.notNull()
-			.default(sql`(json_array())`),
+			.default(sql`'[]'`),
+		unit: text('unit'),
+		range: text('range_text'),
+		rangeMin: real('range_min'),
+		rangeMax: real('range_max'),
 		createdAt: text('created_at').notNull(),
 		updatedAt: text('updated_at').notNull(),
 	},
@@ -104,7 +97,7 @@ export const bloodworkResults = sqliteTable(
 		evidenceJson: text('evidence_json', { mode: 'json' })
 			.$type<string[]>()
 			.notNull()
-			.default(sql`(json_array())`),
+			.default(sql`'[]'`),
 	},
 	table => [
 		uniqueIndex('bloodwork_results_document_measurement_idx').on(
