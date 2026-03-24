@@ -5,6 +5,8 @@ import path from 'path';
 import { generateText, Output } from 'ai';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import env from 'server/env';
+import { getDatabase } from 'server/db/client';
+import { bloodworkMeasurements } from 'server/db/schema';
 import { textBlock } from 'shared/textBlock';
 import z from 'zod';
 import { createHash } from 'crypto';
@@ -110,10 +112,35 @@ void createScript(async () => {
 
 async function extractMeasurementDatabase() {
 	const result: Record<string, { aliases: string[]; unit?: string; range?: string }> = {};
+	const db = getDatabase();
+	const measurements = db
+		.select()
+		.from(bloodworkMeasurements)
+		.orderBy(bloodworkMeasurements.name, bloodworkMeasurements.id)
+		.all();
 
-	// todo
+	for (const measurement of measurements) {
+		const aliases = measurement.aliasesJson.filter(alias => alias && alias !== measurement.name);
+		const range =
+			measurement.canonicalRangeText ??
+			formatRange(measurement.canonicalRangeMin, measurement.canonicalRangeMax) ??
+			undefined;
+
+		result[measurement.name] = {
+			aliases,
+			...(measurement.canonicalUnit ? { unit: measurement.canonicalUnit } : {}),
+			...(range ? { range } : {}),
+		};
+	}
 
 	return result;
+}
+
+function formatRange(min: number | null, max: number | null) {
+	if (min != null && max != null) return `${min}-${max}`;
+	if (min != null) return `>= ${min}`;
+	if (max != null) return `<= ${max}`;
+	return null;
 }
 
 function extractMarkdown(file: string) {

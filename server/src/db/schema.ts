@@ -1,4 +1,4 @@
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 import {
 	blob,
 	index,
@@ -52,13 +52,22 @@ export const bloodworkMeasurements = sqliteTable(
 		key: text('key').notNull(),
 		name: text('name').notNull(),
 		category: text('category'),
-		aliasesJson: text('aliases_json').notNull().default('[]'),
+		aliasesJson: text('aliases_json', { mode: 'json' })
+			.$type<string[]>()
+			.notNull()
+			.default(sql`(json_array())`),
 		canonicalUnit: text('canonical_unit'),
-		knownUnitsJson: text('known_units_json').notNull().default('[]'),
+		knownUnitsJson: text('known_units_json', { mode: 'json' })
+			.$type<string[]>()
+			.notNull()
+			.default(sql`(json_array())`),
 		canonicalRangeMin: real('canonical_range_min'),
 		canonicalRangeMax: real('canonical_range_max'),
 		canonicalRangeText: text('canonical_range_text'),
-		rangeEvidenceJson: text('range_evidence_json').notNull().default('[]'),
+		rangeEvidenceJson: text('range_evidence_json', { mode: 'json' })
+			.$type<string[]>()
+			.notNull()
+			.default(sql`(json_array())`),
 		createdAt: text('created_at').notNull(),
 		updatedAt: text('updated_at').notNull(),
 	},
@@ -92,7 +101,10 @@ export const bloodworkResults = sqliteTable(
 		note: text('note'),
 		confidence: real('confidence'),
 		sourcePage: integer('source_page'),
-		evidenceJson: text('evidence_json').notNull().default('[]'),
+		evidenceJson: text('evidence_json', { mode: 'json' })
+			.$type<string[]>()
+			.notNull()
+			.default(sql`(json_array())`),
 	},
 	table => [
 		uniqueIndex('bloodwork_results_document_measurement_idx').on(

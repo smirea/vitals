@@ -295,7 +295,7 @@ function resolveCanonicalMeasurementRangeRepair(measurement: BloodworkMeasuremen
 	}
 
 	const rule = findMeasurementUnitStandardizationRule(measurement.name);
-	const evidence = parseJsonArray<string>(measurement.rangeEvidenceJson);
+	const evidence = normalizeTextArray(measurement.rangeEvidenceJson);
 	const candidates: Array<{
 		min: number | null;
 		max: number | null;
@@ -893,7 +893,7 @@ async function processBloodworkDocument(db: VitalsDatabase, documentId: number) 
 							note: draft.note,
 							confidence: draft.confidence,
 							sourcePage: draft.sourcePage,
-							evidenceJson: JSON.stringify(draft.evidence),
+							evidenceJson: draft.evidence,
 						})),
 					)
 					.run();
@@ -1086,7 +1086,7 @@ function buildNormalizationPrompt(args: {
 	const catalog = existingMeasurements
 		.map(measurement => ({
 			name: measurement.name,
-			aliases: parseJsonArray<string>(measurement.aliasesJson),
+			aliases: normalizeTextArray(measurement.aliasesJson),
 			canonicalUnit: measurement.canonicalUnit,
 			canonicalRangeMin: measurement.canonicalRangeMin,
 			canonicalRangeMax: measurement.canonicalRangeMax,
@@ -1553,13 +1553,13 @@ function upsertMeasurementDrafts(db: VitalsDatabase, drafts: MeasurementDraft[])
 					key: draft.key,
 					name: draft.name,
 					category: draft.category,
-					aliasesJson: JSON.stringify(draft.aliases.filter(alias => alias !== draft.name)),
+					aliasesJson: draft.aliases.filter(alias => alias !== draft.name),
 					canonicalUnit: draft.canonicalUnit,
-					knownUnitsJson: JSON.stringify(draft.knownUnits),
+					knownUnitsJson: draft.knownUnits,
 					canonicalRangeMin: draft.canonicalRangeMin,
 					canonicalRangeMax: draft.canonicalRangeMax,
 					canonicalRangeText: draft.canonicalRangeText,
-					rangeEvidenceJson: JSON.stringify(draft.rangeEvidence),
+					rangeEvidenceJson: draft.rangeEvidence,
 					createdAt: now,
 					updatedAt: now,
 				})
@@ -1576,12 +1576,12 @@ function upsertMeasurementDrafts(db: VitalsDatabase, drafts: MeasurementDraft[])
 			continue;
 		}
 
-		const aliases = unionText(parseJsonArray<string>(existing.aliasesJson), draft.aliases).filter(
+		const aliases = unionText(normalizeTextArray(existing.aliasesJson), draft.aliases).filter(
 			alias => alias !== draft.name,
 		);
-		const knownUnits = unionText(parseJsonArray<string>(existing.knownUnitsJson), draft.knownUnits);
+		const knownUnits = unionText(normalizeTextArray(existing.knownUnitsJson), draft.knownUnits);
 		const rangeEvidence = unionText(
-			parseJsonArray<string>(existing.rangeEvidenceJson),
+			normalizeTextArray(existing.rangeEvidenceJson),
 			draft.rangeEvidence,
 		);
 
@@ -1589,13 +1589,13 @@ function upsertMeasurementDrafts(db: VitalsDatabase, drafts: MeasurementDraft[])
 			.set({
 				name: draft.name,
 				category: draft.category,
-				aliasesJson: JSON.stringify(aliases),
+				aliasesJson: aliases,
 				canonicalUnit: draft.canonicalUnit ?? existing.canonicalUnit,
-				knownUnitsJson: JSON.stringify(knownUnits),
+				knownUnitsJson: knownUnits,
 				canonicalRangeMin: draft.canonicalRangeMin ?? existing.canonicalRangeMin,
 				canonicalRangeMax: draft.canonicalRangeMax ?? existing.canonicalRangeMax,
 				canonicalRangeText: draft.canonicalRangeText ?? existing.canonicalRangeText,
-				rangeEvidenceJson: JSON.stringify(rangeEvidence),
+				rangeEvidenceJson: rangeEvidence,
 				updatedAt: now,
 			})
 			.where(eq(bloodworkMeasurements.id, existing.id))
@@ -1800,19 +1800,6 @@ function normalizeTextArray(values: string[] | null | undefined) {
 
 function unionText(left: string[], right: string[]) {
 	return Array.from(new Set([...left, ...right].map(value => value.trim()).filter(Boolean)));
-}
-
-function parseJsonArray<T>(raw: string | null | undefined): T[] {
-	if (!raw) {
-		return [];
-	}
-
-	try {
-		const parsed = JSON.parse(raw);
-		return Array.isArray(parsed) ? (parsed as T[]) : [];
-	} catch {
-		return [];
-	}
 }
 
 function normalizeOptionalIsoDate(value: string | null | undefined) {
