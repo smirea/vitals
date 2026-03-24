@@ -8,6 +8,7 @@
 		"jsx": "react-jsx",
 		"allowJs": true,
 		"paths": {
+			"shared/*": ["./shared/*"],
 			"client/*": ["./client/src/*"],
 			"scripts/*": ["./scripts/*"],
 			"server/*": ["./server/src/*"]

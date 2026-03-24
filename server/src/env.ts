@@ -9,6 +9,7 @@ const env = z
 		OPENROUTER_API_KEY: z.string().regex(/^sk-or-v1-/),
 		OPENROUTER_MODEL: z.string(),
 		BLOODWORK_OPENROUTER_MODEL: z.string(),
+		MARKER_PDF_GEMINI_KEY: z.string(),
 		VITALS_DATA_DIR: z.string(),
 		VITALS_DB_PATH: z.string(),
 		CODEX_HOME: z.string(),
