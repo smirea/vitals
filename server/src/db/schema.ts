@@ -184,6 +184,24 @@ export const tags = sqliteTable(
 	],
 );
 
+export const pillTags = sqliteTable(
+	'pill_tags',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		pillId: integer('pill_id')
+			.notNull()
+			.references(() => pills.id, { onDelete: 'cascade' }),
+		tagId: integer('tag_id')
+			.notNull()
+			.references(() => tags.id, { onDelete: 'cascade' }),
+	},
+	table => [
+		uniqueIndex('pill_tags_pill_tag_idx').on(table.pillId, table.tagId),
+		index('pill_tags_pill_idx').on(table.pillId, table.id),
+		index('pill_tags_tag_idx').on(table.tagId, table.id),
+	],
+);
+
 export const pillPeriodTags = sqliteTable(
 	'pill_period_tags',
 	{
@@ -225,6 +243,7 @@ export const pillsRelations = relations(pills, ({ many }) => ({
 	components: many(pillComponents),
 	images: many(pillImages),
 	periods: many(pillPeriods),
+	tagLinks: many(pillTags),
 }));
 
 export const pillComponentsRelations = relations(pillComponents, ({ one }) => ({
@@ -249,7 +268,19 @@ export const pillPeriodsRelations = relations(pillPeriods, ({ one, many }) => ({
 	tagLinks: many(pillPeriodTags),
 }));
 
+export const pillTagsRelations = relations(pillTags, ({ one }) => ({
+	pill: one(pills, {
+		fields: [pillTags.pillId],
+		references: [pills.id],
+	}),
+	tag: one(tags, {
+		fields: [pillTags.tagId],
+		references: [tags.id],
+	}),
+}));
+
 export const tagsRelations = relations(tags, ({ many }) => ({
+	pillLinks: many(pillTags),
 	pillPeriodLinks: many(pillPeriodTags),
 }));
 
@@ -276,6 +307,7 @@ export const appTables = {
 	pillComponents,
 	pillImages,
 	pillPeriods,
+	pillTags,
 	tags,
 	pillPeriodTags,
 } as const;
@@ -289,6 +321,7 @@ export const schema = {
 	pillComponentsRelations,
 	pillImagesRelations,
 	pillPeriodsRelations,
+	pillTagsRelations,
 	tagsRelations,
 	pillPeriodTagsRelations,
 };
@@ -300,5 +333,6 @@ export type PillRow = typeof pills.$inferSelect;
 export type PillComponentRow = typeof pillComponents.$inferSelect;
 export type PillImageRow = typeof pillImages.$inferSelect;
 export type PillPeriodRow = typeof pillPeriods.$inferSelect;
+export type PillTagRow = typeof pillTags.$inferSelect;
 export type TagRow = typeof tags.$inferSelect;
 export type PillPeriodTagRow = typeof pillPeriodTags.$inferSelect;

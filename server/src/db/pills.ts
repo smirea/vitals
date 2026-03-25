@@ -12,11 +12,13 @@ import {
 	type PillPeriodRow,
 	type PillPeriodTagRow,
 	type PillRow,
+	type PillTagRow,
 	type TagRow,
 	pillComponents,
 	pillImages,
 	pillPeriods,
 	pillPeriodTags,
+	pillTags,
 	pills,
 	tags,
 } from 'server/db/schema.ts';
@@ -50,6 +52,7 @@ export const pillUpsertInputSchema = z.object({
 	unit: z.string().trim().min(1),
 	url: z.string().trim().optional().default(''),
 	note: z.string().trim().optional().default(''),
+	tagNames: z.array(z.string().trim().min(1)).max(50).optional().default([]),
 	images: z.array(pillImageInputSchema).max(16),
 	components: z.array(pillComponentInputSchema).max(200),
 	periods: z.array(pillPeriodInputSchema).max(200),
@@ -254,6 +257,7 @@ function buildPillsPayload(args: {
 	imageRows: PillImageRow[];
 	periodRows: PillPeriodRow[];
 	tagRows: TagRow[];
+	pillTagRows: PillTagRow[];
 	periodTagRows: PillPeriodTagRow[];
 }) {
 	const componentMap = new Map<
@@ -323,6 +327,17 @@ function buildPillsPayload(args: {
 		imageMap.set(row.pillId, list);
 	}
 
+	const tagsByPillId = new Map<number, typeof args.tagRows>();
+	for (const row of args.pillTagRows) {
+		const tag = tagsById.get(row.tagId);
+		if (!tag) {
+			continue;
+		}
+		const list = tagsByPillId.get(row.pillId) ?? [];
+		list.push(tag);
+		tagsByPillId.set(row.pillId, list);
+	}
+
 	for (const row of args.periodTagRows) {
 		const tag = tagsById.get(row.tagId);
 		if (!tag) {
@@ -361,6 +376,9 @@ function buildPillsPayload(args: {
 		unit: row.unit,
 		url: row.url,
 		note: row.note,
+		tags: (tagsByPillId.get(row.id) ?? []).sort((left, right) =>
+			left.name.localeCompare(right.name),
+		),
 		components: componentMap.get(row.id) ?? [],
 		images: imageMap.get(row.id) ?? [],
 		periods: periodMap.get(row.id) ?? [],
@@ -436,6 +454,13 @@ function getPillRecords(db: PillsReadDb, pillIds?: number[]) {
 		.orderBy(asc(pillImages.pillId), asc(pillImages.sortOrder), asc(pillImages.id))
 		.all();
 
+	const pillTagRows = db
+		.select()
+		.from(pillTags)
+		.where(inArray(pillTags.pillId, resolvedPillIds))
+		.orderBy(asc(pillTags.pillId), asc(pillTags.tagId), asc(pillTags.id))
+		.all();
+
 	const periodRows = db
 		.select()
 		.from(pillPeriods)
@@ -456,14 +481,20 @@ function getPillRecords(db: PillsReadDb, pillIds?: number[]) {
 						asc(pillPeriodTags.id),
 					)
 					.all();
-	const tagIds = [...new Set(periodTagRows.map(row => row.tagId))];
+
+	const allTagIds = [
+		...new Set([
+			...pillTagRows.map(row => row.tagId),
+			...periodTagRows.map(row => row.tagId),
+		]),
+	];
 	const tagRows =
-		tagIds.length === 0
+		allTagIds.length === 0
 			? []
 			: db
 					.select()
 					.from(tags)
-					.where(inArray(tags.id, tagIds))
+					.where(inArray(tags.id, allTagIds))
 					.orderBy(asc(tags.name), asc(tags.id))
 					.all();
 
@@ -473,6 +504,7 @@ function getPillRecords(db: PillsReadDb, pillIds?: number[]) {
 		imageRows,
 		periodRows,
 		tagRows,
+		pillTagRows,
 		periodTagRows,
 	});
 }
@@ -534,7 +566,7 @@ export function upsertPill(db: VitalsDatabase, input: z.infer<typeof pillUpsertI
 			let pillId = input.id ?? null;
 			const resolvedTags = ensureTagsByNames(
 				tx,
-				periods.flatMap(period => period.tagNames),
+				[...input.tagNames, ...periods.flatMap(period => period.tagNames)],
 			);
 			const tagsByName = new Map(resolvedTags.map(tag => [tag.name.toLocaleLowerCase(), tag]));
 
@@ -583,6 +615,17 @@ export function upsertPill(db: VitalsDatabase, input: z.infer<typeof pillUpsertI
 
 			tx.delete(pillComponents).where(eq(pillComponents.pillId, pillId)).run();
 			tx.delete(pillImages).where(eq(pillImages.pillId, pillId)).run();
+			tx.delete(pillTags).where(eq(pillTags.pillId, pillId)).run();
+
+			const resolvedPillTags = input.tagNames
+				.map(tagName => tagsByName.get(tagName.trim().toLocaleLowerCase()))
+				.filter((tag): tag is TagRow => Boolean(tag));
+
+			if (resolvedPillTags.length > 0) {
+				tx.insert(pillTags)
+					.values(resolvedPillTags.map(tag => ({ pillId, tagId: tag.id })))
+					.run();
+			}
 
 			if (components.length > 0) {
 				tx.insert(pillComponents)

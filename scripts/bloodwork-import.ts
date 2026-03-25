@@ -68,7 +68,7 @@ void createScript(async () => {
 			<database>${Object.entries(measurementsDb)
 				.map(
 					([name, { aliases }]) =>
-						`- '${name}'${aliases.length ? ' known known aliases: ' + aliases.join('; ') : 'no other known aliases'}`,
+						`- '${name}'${aliases.length ? ' known aliases: ' + aliases.join('; ') : 'no other known aliases'}`,
 				)
 				.join('\n')}</database>
 
@@ -101,7 +101,7 @@ void createScript(async () => {
 		let added = false;
 		const matchedDb = measurementsDb[item.name];
 		if (item.valueNumeric == null) {
-			if (/^\d+?$/.test(item.valueText)) item.valueNumeric = parseInt(item.valueText, 10);
+			if (/^\d+$/.test(item.valueText)) item.valueNumeric = parseInt(item.valueText, 10);
 			else if (/^\d+(\.\d+)?$/.test(item.valueText)) item.valueNumeric = parseFloat(item.valueText);
 		}
 		if (item.unit) {
