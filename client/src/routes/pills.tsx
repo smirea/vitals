@@ -552,10 +552,12 @@ function PillsRouteComponent() {
 	};
 
 	async function handleSubmit(values: PillFormValues) {
+		const isNewPill = values.id == null;
 		const submittedPeriods = (
 			(form.getFieldValue('periods') ?? values.periods) as PillPeriodFormValue[]
 		).map(period => ({
 			...period,
+			id: isNewPill ? undefined : period.id,
 			count: normalizePeriodCount(period.count),
 			tagNames: normalizeTagNames(period.tagNames ?? []),
 		}));
@@ -1131,10 +1133,12 @@ function PillsRouteComponent() {
 										form.setFieldValue('name', value);
 									}
 
-									const currentId = form.getFieldValue('id');
-									const selectedPill = searchResults.find(result => result.id === currentId);
-									if (selectedPill && selectedPill.name !== value) {
-										form.setFieldValue('id', undefined);
+									if (!isEditMode) {
+										const currentId = form.getFieldValue('id');
+										const selectedPill = searchResults.find(result => result.id === currentId);
+										if (selectedPill && selectedPill.name !== value) {
+											form.setFieldValue('id', undefined);
+										}
 									}
 								}}
 								placeholder='Start typing to reuse a canonical pill'
