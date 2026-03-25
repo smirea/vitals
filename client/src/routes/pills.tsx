@@ -22,6 +22,7 @@ import {
 	Image,
 	Input,
 	InputNumber,
+	Popconfirm,
 	Popover,
 	Select,
 	Space,
@@ -202,6 +203,20 @@ function PillsRouteComponent() {
 			setOpenPeriodTagEditorKey(null);
 			onEditPillChange(null);
 			message.success('Pill saved.');
+		},
+		onError: error => {
+			message.error(error.message);
+		},
+	});
+
+	const deletePillMutation = useMutation({
+		...trpc.table.pills.deleteMany.mutationOptions(),
+		onSuccess: () => {
+			void queryClient.invalidateQueries();
+			setIsCreateDrawerOpen(false);
+			setOpenPeriodTagEditorKey(null);
+			onEditPillChange(null);
+			message.success('Pill removed.');
 		},
 		onError: error => {
 			message.error(error.message);
@@ -1058,6 +1073,23 @@ function PillsRouteComponent() {
 				}}
 				extra={
 					<Space>
+						{isEditMode && editPillId !== null && (
+							<Popconfirm
+								title='Remove this pill?'
+								description='This removes the pill and all its date ranges, components, and images.'
+								okText='Remove'
+								okButtonProps={{ danger: true }}
+								onConfirm={() =>
+									deletePillMutation.mutate({
+										where: [{ column: 'id', operator: 'eq', value: editPillId }],
+									})
+								}
+							>
+								<Button danger loading={deletePillMutation.isPending}>
+									Remove
+								</Button>
+							</Popconfirm>
+						)}
 						<Button onClick={handleCloseDrawer}>Cancel</Button>
 						<Button
 							type='primary'
