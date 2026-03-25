@@ -97,6 +97,7 @@ type PillFormValues = {
 	unit: string;
 	url: string;
 	note: string;
+	tagNames: string[];
 	images: PillImageFormValue[];
 	components: PillComponentFormValue[];
 	periods: PillPeriodFormValue[];
@@ -569,6 +570,7 @@ function PillsRouteComponent() {
 			unit: values.unit,
 			url: values.url,
 			note: values.note,
+			tagNames: normalizeTagNames(values.tagNames ?? []),
 			images: getImagePayload(values.images),
 			components: values.components,
 			periods: submittedPeriods,
@@ -595,11 +597,6 @@ function PillsRouteComponent() {
 			});
 
 			remove(fieldIndex);
-
-			const remainingPeriods = (form.getFieldValue('periods') ?? []) as PillPeriodFormValue[];
-			if (remainingPeriods.length === 0 && !isEditMode) {
-				form.setFieldValue('periods', [createBlankPeriod()]);
-			}
 
 			message.success(
 				result.deletedCount === 1
@@ -675,9 +672,24 @@ function PillsRouteComponent() {
 		);
 	}
 
-	function renderPillNameCell(pill: PillRecord, tagNames: string[]) {
+	function getMergedTagNames(pill: PillRecord, periodTagNames: string[]) {
+		const pillTagNames = pill.tags.map(tag => tag.name);
+		const seen = new Set(pillTagNames.map(n => n.toLocaleLowerCase()));
+		const deduped = [...pillTagNames];
+		for (const name of periodTagNames) {
+			if (!seen.has(name.toLocaleLowerCase())) {
+				seen.add(name.toLocaleLowerCase());
+				deduped.push(name);
+			}
+		}
+		return deduped;
+	}
+
+	function renderPillNameCell(pill: PillRecord, periodTagNames: string[]) {
+		const tagNames = getMergedTagNames(pill, periodTagNames);
+
 		return (
-			<Space direction='vertical' size={4}>
+			<Space size={[4, 4]} wrap align='center'>
 				<Button
 					type='link'
 					size='small'
@@ -688,19 +700,19 @@ function PillsRouteComponent() {
 					{pill.name}
 				</Button>
 
-				{tagNames.length > 0 ? (
-					<Space size={[4, 4]} wrap>
-						{tagNames.map(tagName => {
-							const tagRecord = availableTags.find(tag => tag.name === tagName);
+				{tagNames.map(tagName => {
+					const tagRecord = availableTags.find(tag => tag.name === tagName);
 
-							return (
-								<Tag key={`${pill.id}-${tagName}`} color={tagRecord?.color}>
-									{tagName}
-								</Tag>
-							);
-						})}
-					</Space>
-				) : null}
+					return (
+						<Tag
+							key={`${pill.id}-${tagName}`}
+							color={tagRecord?.color}
+							style={{ marginInlineEnd: 0 }}
+						>
+							{tagName}
+						</Tag>
+					);
+				})}
 			</Space>
 		);
 	}
@@ -709,6 +721,7 @@ function PillsRouteComponent() {
 		{
 			title: 'Pill',
 			key: 'name',
+			width: 360,
 			render: (_: unknown, row: ActivePillRow) =>
 				renderPillNameCell(
 					row.pill,
@@ -767,6 +780,7 @@ function PillsRouteComponent() {
 		{
 			title: 'Pill',
 			key: 'name',
+			width: 360,
 			render: (_: unknown, row: FuturePillRow) =>
 				renderPillNameCell(
 					row.pill,
@@ -825,6 +839,7 @@ function PillsRouteComponent() {
 		{
 			title: 'Pill',
 			key: 'name',
+			width: 360,
 			render: (_: unknown, row: PastPillRow) =>
 				renderPillNameCell(
 					row.pill,
@@ -880,6 +895,7 @@ function PillsRouteComponent() {
 		{
 			title: 'Pill',
 			key: 'name',
+			width: 360,
 			render: (_: unknown, row: NotTrackedPillRow) => renderPillNameCell(row.pill, []),
 		},
 		{
@@ -1121,6 +1137,7 @@ function PillsRouteComponent() {
 							label='Pill name'
 							name='name'
 							rules={[{ required: true, message: 'Enter a pill name.' }]}
+							style={{ marginBottom: 8 }}
 						>
 							<AutoComplete
 								options={autocompleteOptions}
@@ -1150,6 +1167,7 @@ function PillsRouteComponent() {
 							label='Value'
 							name='value'
 							rules={[{ required: true, message: 'Enter the default pill value.' }]}
+							style={{ marginBottom: 8 }}
 						>
 							<Input placeholder='e.g. 2' />
 						</Form.Item>
@@ -1158,20 +1176,64 @@ function PillsRouteComponent() {
 							label='Unit'
 							name='unit'
 							rules={[{ required: true, message: 'Enter the default pill unit.' }]}
+							style={{ marginBottom: 8 }}
 						>
 							<Input placeholder='e.g. capsules' />
 						</Form.Item>
 					</div>
 
-					<Form.Item label='URL' name='url'>
+					<Form.Item
+						label='URL'
+						name='url'
+						layout='horizontal'
+						labelCol={{ flex: '50px' }}
+						wrapperCol={{ flex: 'auto' }}
+						labelAlign='left'
+						style={{ marginBottom: 8 }}
+					>
 						<Input placeholder='Optional product URL' />
 					</Form.Item>
 
-					<Form.Item label='Note' name='note'>
-						<Input.TextArea
-							rows={3}
-							placeholder='Optional note about the pill, brand, or reason for taking it'
+					<Form.Item
+						label='Tags'
+						name='tagNames'
+						layout='horizontal'
+						labelCol={{ flex: '50px' }}
+						wrapperCol={{ flex: 'auto' }}
+						labelAlign='left'
+						style={{ marginBottom: 8 }}
+					>
+						<Select
+							mode='tags'
+							options={tagAutocompleteOptions}
+							placeholder='Type to attach or create tags'
+							tokenSeparators={[',']}
+							tagRender={props => {
+								const tagRecord = availableTags.find(tag => tag.name === props.value);
+								return (
+									<Tag
+										color={tagRecord?.color}
+										closable={props.closable}
+										onClose={props.onClose}
+										style={{ marginInlineEnd: 4 }}
+									>
+										{props.label}
+									</Tag>
+								);
+							}}
 						/>
+					</Form.Item>
+
+					<Form.Item
+						label='Note'
+						name='note'
+						layout='horizontal'
+						labelCol={{ flex: '50px' }}
+						wrapperCol={{ flex: 'auto' }}
+						labelAlign='left'
+						style={{ marginBottom: 8 }}
+					>
+						<Input.TextArea autoSize={{ minRows: 1, maxRows: 6 }} placeholder='Optional note' />
 					</Form.Item>
 
 					<div className='pills-images-header'>
@@ -1264,134 +1326,141 @@ function PillsRouteComponent() {
 					<Form.List name='periods'>
 						{(fields, { add, remove }) => (
 							<Space direction='vertical' size={8} className='pills-list-space'>
-								<Table
-									size='small'
-									pagination={false}
-									rowKey='key'
-									dataSource={fields}
-									scroll={{ x: 860 }}
-									columns={[
-										{
-											title: 'Period',
-											width: 290,
-											render: (_: unknown, field) => (
-												<div style={{ width: '100%' }}>
-													<Form.Item name={[field.name, 'id']} hidden>
-														<Input />
-													</Form.Item>
-													<Form.Item
-														name={[field.name, 'startDate']}
-														rules={[{ required: true, message: 'Required' }]}
-														hidden
-														style={{ marginBottom: 0 }}
-													>
-														<Input />
-													</Form.Item>
-													<Form.Item
-														name={[field.name, 'endDate']}
-														hidden
-														style={{ marginBottom: 0 }}
-													>
-														<Input />
-													</Form.Item>
-													<RangePicker
-														style={{ width: '100%' }}
-														format={DATE_FORMAT}
-														allowEmpty={[false, true]}
-														value={getPeriodRangePickerValue(watchedPeriods[field.name])}
-														onChange={(_, dateStrings) => {
-															const [startDate, endDate] = dateStrings;
-															form.setFieldValue(
-																['periods', field.name, 'startDate'],
-																startDate ?? '',
-															);
-															form.setFieldValue(['periods', field.name, 'endDate'], endDate ?? '');
-														}}
-													/>
-												</div>
-											),
-										},
-										{
-											title: 'Count',
-											width: 120,
-											render: (_: unknown, field) => (
-												<Form.Item
-													name={[field.name, 'count']}
-													rules={[{ required: true, message: 'Required' }]}
-													style={{ marginBottom: 0 }}
-												>
-													<InputNumber
-														min={0.01}
-														step={0.5}
-														placeholder='Count'
-														style={{ width: '100%' }}
-													/>
-												</Form.Item>
-											),
-										},
-										{
-											title: 'Timing',
-											width: 140,
-											render: (_: unknown, field) => (
-												<Form.Item name={[field.name, 'timing']} style={{ marginBottom: 0 }}>
-													<Select
-														allowClear
-														placeholder='Optional'
-														options={timingOptions as unknown as { label: string; value: string }[]}
-													/>
-												</Form.Item>
-											),
-										},
-										{
-											width: 170,
-											render: (_: unknown, field) => {
-												const rowValue = watchedPeriods[field.name] as
-													| PillPeriodFormValue
-													| undefined;
-												const isSavedRow = Boolean(rowValue?.id);
-
-												return (
-													<Space size='small' align='center'>
+								{fields.length > 0 && (
+									<Table
+										size='small'
+										pagination={false}
+										rowKey='key'
+										dataSource={fields}
+										scroll={{ x: 860 }}
+										columns={[
+											{
+												title: 'Period',
+												width: 290,
+												render: (_: unknown, field) => (
+													<div style={{ width: '100%' }}>
+														<Form.Item name={[field.name, 'id']} hidden>
+															<Input />
+														</Form.Item>
 														<Form.Item
-															name={[field.name, 'tagNames']}
+															name={[field.name, 'startDate']}
+															rules={[{ required: true, message: 'Required' }]}
 															hidden
 															style={{ marginBottom: 0 }}
-															getValueProps={value => ({
-																value: value ?? [],
-															})}
 														>
-															<Select mode='multiple' />
+															<Input />
 														</Form.Item>
-
-														{renderPeriodTagEditor(field.name)}
-
-														<Button
-															danger
-															icon={<DeleteOutlined />}
-															loading={isSavedRow && deletingPeriodId === rowValue?.id}
-															onClick={() => {
-																if (isSavedRow && rowValue?.id) {
-																	void handleDeleteSavedPeriod(rowValue.id, field.name, remove);
-																	return;
-																}
-
-																remove(field.name);
-																setOpenPeriodTagEditorKey(null);
+														<Form.Item
+															name={[field.name, 'endDate']}
+															hidden
+															style={{ marginBottom: 0 }}
+														>
+															<Input />
+														</Form.Item>
+														<RangePicker
+															style={{ width: '100%' }}
+															format={DATE_FORMAT}
+															allowEmpty={[false, true]}
+															value={getPeriodRangePickerValue(watchedPeriods[field.name])}
+															onChange={(_, dateStrings) => {
+																const [startDate, endDate] = dateStrings;
+																form.setFieldValue(
+																	['periods', field.name, 'startDate'],
+																	startDate ?? '',
+																);
+																form.setFieldValue(
+																	['periods', field.name, 'endDate'],
+																	endDate ?? '',
+																);
 															}}
 														/>
-													</Space>
-												);
+													</div>
+												),
 											},
-										},
-									]}
-								/>
+											{
+												title: 'Count',
+												width: 120,
+												render: (_: unknown, field) => (
+													<Form.Item
+														name={[field.name, 'count']}
+														rules={[{ required: true, message: 'Required' }]}
+														style={{ marginBottom: 0 }}
+													>
+														<InputNumber
+															min={0.01}
+															step={0.5}
+															placeholder='Count'
+															style={{ width: '100%' }}
+														/>
+													</Form.Item>
+												),
+											},
+											{
+												title: 'Timing',
+												width: 140,
+												render: (_: unknown, field) => (
+													<Form.Item name={[field.name, 'timing']} style={{ marginBottom: 0 }}>
+														<Select
+															allowClear
+															placeholder='Optional'
+															options={
+																timingOptions as unknown as { label: string; value: string }[]
+															}
+														/>
+													</Form.Item>
+												),
+											},
+											{
+												width: 170,
+												render: (_: unknown, field) => {
+													const rowValue = watchedPeriods[field.name] as
+														| PillPeriodFormValue
+														| undefined;
+													const isSavedRow = Boolean(rowValue?.id);
+
+													return (
+														<Space size='small' align='center'>
+															<Form.Item
+																name={[field.name, 'tagNames']}
+																hidden
+																style={{ marginBottom: 0 }}
+																getValueProps={value => ({
+																	value: value ?? [],
+																})}
+															>
+																<Select mode='multiple' />
+															</Form.Item>
+
+															{renderPeriodTagEditor(field.name)}
+
+															<Button
+																danger
+																icon={<DeleteOutlined />}
+																loading={isSavedRow && deletingPeriodId === rowValue?.id}
+																onClick={() => {
+																	if (isSavedRow && rowValue?.id) {
+																		void handleDeleteSavedPeriod(rowValue.id, field.name, remove);
+																		return;
+																	}
+
+																	remove(field.name);
+																	setOpenPeriodTagEditorKey(null);
+																}}
+															/>
+														</Space>
+													);
+												},
+											},
+										]}
+									/>
+								)}
 
 								<Button
 									size='small'
 									icon={<PlusOutlined />}
 									onClick={() => add(createBlankPeriod())}
 								>
-									Add another range
+									Add {fields.length > 0 ? 'another' : 'a'} range
 								</Button>
 							</Space>
 						)}
@@ -1517,9 +1586,10 @@ function createEmptyFormValues(): PillFormValues {
 		unit: '',
 		url: '',
 		note: '',
+		tagNames: [],
 		images: [],
 		components: [{ name: '', value: '', unit: '' }],
-		periods: [createBlankPeriod()],
+		periods: [],
 	};
 }
 
@@ -1657,6 +1727,7 @@ function pillToFormValues(
 		unit: pill.unit ?? '',
 		url: pill.url ?? '',
 		note: pill.note ?? '',
+		tagNames: pill.tags.map(tag => tag.name),
 		images: pill.images.map((image, index) => ({
 			id: image.id,
 			uid: createImageUid(
