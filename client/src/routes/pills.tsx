@@ -480,7 +480,7 @@ function PillsRouteComponent() {
 	}
 
 	function handleAutocompleteSelect(_: string, option: { pill?: PillRecord }) {
-		if (!option.pill) {
+		if (!option.pill || isEditMode) {
 			return;
 		}
 
