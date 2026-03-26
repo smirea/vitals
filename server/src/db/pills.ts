@@ -1,4 +1,3 @@
-import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { generateText } from 'ai';
 import { and, asc, eq, inArray, like, or } from 'drizzle-orm';
 import { z } from 'zod';
@@ -22,6 +21,7 @@ import {
 	pills,
 	tags,
 } from 'server/db/schema.ts';
+import models from 'server/utils/models';
 
 const pillImageInputSchema = z.object({
 	fileName: z.string().trim().min(1),
@@ -483,10 +483,7 @@ function getPillRecords(db: PillsReadDb, pillIds?: number[]) {
 					.all();
 
 	const allTagIds = [
-		...new Set([
-			...pillTagRows.map(row => row.tagId),
-			...periodTagRows.map(row => row.tagId),
-		]),
+		...new Set([...pillTagRows.map(row => row.tagId), ...periodTagRows.map(row => row.tagId)]),
 	];
 	const tagRows =
 		allTagIds.length === 0
@@ -564,10 +561,10 @@ export function upsertPill(db: VitalsDatabase, input: z.infer<typeof pillUpsertI
 	try {
 		return db.transaction(tx => {
 			let pillId = input.id ?? null;
-			const resolvedTags = ensureTagsByNames(
-				tx,
-				[...input.tagNames, ...periods.flatMap(period => period.tagNames)],
-			);
+			const resolvedTags = ensureTagsByNames(tx, [
+				...input.tagNames,
+				...periods.flatMap(period => period.tagNames),
+			]);
 			const tagsByName = new Map(resolvedTags.map(tag => [tag.name.toLocaleLowerCase(), tag]));
 
 			if (pillId !== null) {
@@ -728,10 +725,6 @@ export function upsertPill(db: VitalsDatabase, input: z.infer<typeof pillUpsertI
 }
 
 export async function extractPillFromImages(input: z.infer<typeof pillImageExtractionInputSchema>) {
-	const apiKey = env.OPENROUTER_API_KEY;
-	const model = env.OPENROUTER_MODEL;
-
-	const provider = createOpenRouter({ apiKey });
 	const imageParts = input.images.map(image => {
 		const parsedImage = parseDataUrl(image.dataUrl);
 		return {
@@ -742,9 +735,7 @@ export async function extractPillFromImages(input: z.infer<typeof pillImageExtra
 	});
 
 	const result = await generateText({
-		model: provider(model, {
-			plugins: [{ id: 'response-healing' }],
-		}),
+		model: models.smart_and_expensive,
 		messages: [
 			{
 				role: 'user',
@@ -804,6 +795,6 @@ export async function extractPillFromImages(input: z.infer<typeof pillImageExtra
 			.filter(component => component.name.length > 0),
 		extractionNotes: normalizeOptionalText(parsedResponse.extractionNotes),
 		confidence: parsedResponse.confidence ?? null,
-		model,
+		model: models.smart_and_expensive.modelId,
 	};
 }

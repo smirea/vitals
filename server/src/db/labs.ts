@@ -1,7 +1,6 @@
 import path from 'path';
 import { createHash } from 'crypto';
 
-import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { generateText } from 'ai';
 import { eq } from 'drizzle-orm';
 import { PDFDocument } from 'pdf-lib';
@@ -15,8 +14,8 @@ import {
 	type LabDocumentRow,
 	type LabMeasurementRow,
 } from 'server/db/schema.ts';
-import env from 'server/env.ts';
-import { promiseParallel } from 'server/promise-parallel.ts';
+import { promiseParallel } from 'server/utils/promiseParallel';
+import models from 'server/utils/models';
 
 const labUploadFileInputSchema = z.object({
 	fileName: z.string().trim().min(1),
@@ -842,7 +841,6 @@ async function processLabDocument(db: VitalsDatabase, documentId: number) {
 	try {
 		updateLabDocumentStatus(db, document, 'Clearing previous imported data');
 		clearLabDocumentDerivedData(db, documentId);
-		const provider = createOpenRouter({ apiKey: env.OPENROUTER_API_KEY });
 		const existingMeasurements = db.select().from(labMeasurements).all();
 		updateLabDocumentStatus(db, document, 'Splitting document into pages');
 		const pages = await splitLabPdfIntoPages(document);
@@ -852,8 +850,6 @@ async function processLabDocument(db: VitalsDatabase, documentId: number) {
 			`Extracting measurements from ${pages.length} page${pages.length === 1 ? '' : 's'}`,
 		);
 		const extractionPass = await runExtractionPass({
-			provider,
-			modelId: env.BLOODWORK_OPENROUTER_MODEL,
 			document,
 			pages,
 		});
@@ -865,8 +861,6 @@ async function processLabDocument(db: VitalsDatabase, documentId: number) {
 		const normalizationOutput = await resolveNormalizationOutput({
 			db,
 			document,
-			provider,
-			modelId: env.BLOODWORK_OPENROUTER_MODEL,
 			existingMeasurements,
 			extractionPass,
 			pages,
@@ -947,19 +941,15 @@ async function processLabDocument(db: VitalsDatabase, documentId: number) {
 }
 
 async function runExtractionPass(args: {
-	provider: ReturnType<typeof createOpenRouter>;
-	modelId: string;
 	document: LabDocumentRow;
 	pages: LabPdfPage[];
 }): Promise<StructuredPassResult<ExtractionPassOutput>> {
-	const { provider, modelId, document, pages } = args;
+	const { document, pages } = args;
 
 	const pageOutputs = await promiseParallel(
 		pages,
 		async page => {
-			const model = provider(modelId);
 			const result = await generateStructuredOutput({
-				model,
 				schema: extractionPageSchema,
 				messages: [
 					{
@@ -1013,17 +1003,13 @@ async function runExtractionPass(args: {
 }
 
 async function runNormalizationPass(args: {
-	provider: ReturnType<typeof createOpenRouter>;
-	modelId: string;
 	fileName: string;
 	existingMeasurements: LabMeasurementRow[];
 	input: PageNormalizationInput;
 }): Promise<StructuredPassResult<LooseNormalizationPassOutput>> {
-	const { provider, modelId, fileName, existingMeasurements, input } = args;
-	const model = provider(modelId);
+	const { fileName, existingMeasurements, input } = args;
 
 	return generateStructuredOutput({
-		model,
 		schema: normalizationPassSchema,
 		messages: [
 			{
@@ -1298,13 +1284,11 @@ function buildDraftsFromNormalization(output: NormalizationPassOutput) {
 async function resolveNormalizationOutput(args: {
 	db: VitalsDatabase;
 	document: LabDocumentRow;
-	provider: ReturnType<typeof createOpenRouter>;
-	modelId: string;
 	existingMeasurements: LabMeasurementRow[];
 	extractionPass: StructuredPassResult<ExtractionPassOutput>;
 	pages: LabPdfPage[];
 }) {
-	const { db, document, provider, modelId, existingMeasurements, extractionPass, pages } = args;
+	const { db, document, existingMeasurements, extractionPass, pages } = args;
 	const measurementsByPage = new Map<number, ExtractionPassOutput['measurements']>();
 
 	for (const measurement of extractionPass.output.measurements) {
@@ -1338,8 +1322,6 @@ async function resolveNormalizationOutput(args: {
 		async input => {
 			try {
 				const normalizationPass = await runNormalizationPass({
-					provider,
-					modelId,
 					fileName: document.fileName,
 					existingMeasurements,
 					input,
@@ -1369,8 +1351,6 @@ async function resolveNormalizationOutput(args: {
 				);
 
 				const retryPass = await runNormalizationPass({
-					provider,
-					modelId,
 					fileName: document.fileName,
 					existingMeasurements,
 					input,
@@ -1627,7 +1607,6 @@ function upsertMeasurementDrafts(db: VitalsDatabase, drafts: MeasurementDraft[])
 }
 
 async function generateStructuredOutput<T>(args: {
-	model: any;
 	schema: z.ZodType<T>;
 	messages: any[];
 	maxOutputTokens?: number;
@@ -1638,7 +1617,7 @@ async function generateStructuredOutput<T>(args: {
 	for (let attempt = 0; attempt < 2; attempt += 1) {
 		try {
 			const result = await generateText({
-				model: args.model,
+				model: models.smart_and_expensive,
 				temperature: 0,
 				maxRetries: 1,
 				messages,
