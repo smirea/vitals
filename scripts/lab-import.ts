@@ -47,6 +47,7 @@ const extractedDataSchema = z.object({
 
 void createScript(async () => {
 	const filePath = process.argv[2];
+	const forceParse = process.argv[3] === '--force-parse';
 	if (!filePath) throw new Error('pass an absolute file path as an arg');
 	if (!path.isAbsolute(filePath)) throw new Error('path must be absolute');
 	if (!fs.existsSync(filePath)) throw new Error(`file not found: ${filePath}`);
@@ -90,15 +91,22 @@ void createScript(async () => {
 			startedAt: new Date().toISOString(),
 		});
 
-		const markdown = extractMarkdown(filePath);
+		const markdown = extractMarkdown(filePath, forceParse);
 		updateDocStatus(documentId, { rawMarkdown: markdown, statusText: 'Extracting measurements' });
 
-		const data = await extractData(markdown);
+		const data = await extractData(markdown, (done, total) => {
+			updateDocStatus(documentId, { statusText: `Extracting measurements (${done}/${total})` });
+		});
 
-		const resultCount = data.measurements.length;
+		const seen = new Map<string, number>();
+		for (let i = 0; i < data.measurements.length; i++) {
+			seen.set(data.measurements[i].name.toLowerCase().trim(), i);
+		}
+		const uniqueMeasurements = [...seen.values()].map(i => data.measurements[i]);
+		const resultCount = uniqueMeasurements.length;
 
 		console.table(
-			data.measurements.map((m, i) => ({
+			uniqueMeasurements.map((m, i) => ({
 				'#': i + 1,
 				name: m.name,
 				value: m.valueText,
@@ -111,7 +119,7 @@ void createScript(async () => {
 		console.log(style.label('total measurements', String(resultCount)));
 
 		const tmpJsonPath = path.join(tmpDir, `extracted_${documentId}.json`);
-		fs.writeFileSync(tmpJsonPath, JSON.stringify(data.measurements, null, 2));
+		fs.writeFileSync(tmpJsonPath, JSON.stringify(uniqueMeasurements, null, 2));
 		console.log(style.label('saved to', tmpJsonPath));
 
 		updateDocStatus(documentId, { statusText: `Saving ${resultCount} results` });
@@ -206,9 +214,12 @@ function saveResults(documentId: number, data: Awaited<ReturnType<typeof extract
 	});
 }
 
-const CHUNK_TARGET_LINES = 100;
+const CHUNK_TARGET_LINES = 150;
 
-async function extractData(rawMarkdown: string) {
+async function extractData(
+	rawMarkdown: string,
+	onChunkDone?: (done: number, total: number) => void,
+) {
 	const measurementsDb = compileMeasurementDatabase();
 	const model = models.smart_and_expensive;
 	const markdown = compactMarkdown(rawMarkdown);
@@ -244,18 +255,20 @@ async function extractData(rawMarkdown: string) {
 			? `\n\nIMPORTANT: The previous chunk ended with a table whose columns were: ${lastTableHeaders}\nIf this chunk starts with table rows that have no header, those rows belong to that table. Use those column headers to interpret the data.`
 			: '';
 
-		for (let attempt = 0; attempt < 2; attempt++) {
+		const MAX_ATTEMPTS = 3;
+		for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
 			try {
 				const result = await generateText({
 					model,
-					temperature: 0.1,
+					temperature: 0.2 + attempt * 0.2,
 					maxRetries: 1,
-					maxOutputTokens: 8e3,
+					maxOutputTokens: 16e3,
 					output: Output.object({ schema: extractedDataSchema }),
 					system: textBlock`
 					You are extracting structured lab results from parsed PDF markdown.
 					You must explicitly extract values visible in the <markdown /> and do not infer any data not provided.
 					You must translate all text to english if it's not already in english.
+					If the chunk contains no lab measurements, return an empty measurements array.
 					The <markdown /> is a chunk of a larger document extracted from a multi-page PDF of lab results. The parsing is pretty good but not 100% reliable so there might be areas to fix - a usual pitfall is tables that are missing headers because they spanned across multiple pages and the parser did not detect that.
 					You are provided a <database /> of the existing canonical names, it is not exhaustive as we are using this process to build it. If you find matches in the <database /> then use those as the canonical names, otherwise take your best guess given the context.
 
@@ -314,21 +327,21 @@ async function extractData(rawMarkdown: string) {
 				if (!labName && output.labName) labName = output.labName;
 				if (!location && output.location) location = output.location;
 				allMeasurements.push(...output.measurements);
+				if (chunks.length > 1) onChunkDone?.(i + 1, chunks.length);
 				break;
 			} catch (error: any) {
 				const retryable =
 					error?.name === 'AI_NoOutputGeneratedError' || error?.name === 'AI_JSONParseError';
-				if (retryable) {
-					if (attempt === 0) {
-						console.log(style.label(`chunk ${i + 1}/${chunks.length}`, `${error.name}, retrying`));
-						continue;
-					}
+				if (retryable && attempt < MAX_ATTEMPTS - 1) {
 					console.log(
-						style.label(`chunk ${i + 1}/${chunks.length}`, `${error.name} after retry, skipping`),
+						style.label(
+							`chunk ${i + 1}/${chunks.length}`,
+							`${error.name}, retrying (attempt ${attempt + 2}/${MAX_ATTEMPTS})`,
+						),
 					);
-				} else {
-					throw error;
+					continue;
 				}
+				throw error;
 			}
 		}
 
@@ -545,11 +558,16 @@ function compileMeasurementDatabase() {
 	return result;
 }
 
-function extractMarkdown(file: string) {
+function extractMarkdown(file: string, forceParse = false) {
 	console.log(style.header('convert to markdown via marker-pdf'));
 	const hash = createHash('sha256').update(fs.readFileSync(file).toString()).digest('hex');
 	const targetDir = path.join(tmpDir, 'bloodwork_' + hash);
 	let outDir: string | undefined = undefined;
+
+	if (forceParse && fs.existsSync(targetDir)) {
+		fs.rmSync(targetDir, { recursive: true });
+		console.log(style.label('force-parse', 'deleted cached markdown'));
+	}
 
 	if (fs.existsSync(targetDir)) {
 		outDir = fs

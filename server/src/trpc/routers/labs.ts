@@ -20,6 +20,8 @@ fs.mkdirSync(tmpDir, { recursive: true });
 // biome-ignore lint: simple ansi strip
 const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
 
+const forceParseDocumentIds = new Set<number>();
+
 const labDocumentIdInputSchema = z.object({
 	documentId: z.number().int().positive(),
 });
@@ -192,6 +194,7 @@ function requeueDocument(
 		.run();
 
 	console.log(`[labs] #${document.id} ${document.fileName}: queued for ${action}`);
+	forceParseDocumentIds.add(documentId);
 	processNextImport();
 	return { documentId };
 }
@@ -259,7 +262,9 @@ function processNextImport() {
 		'scripts',
 		'lab-import.ts',
 	);
-	const proc = Bun.spawn(['bun', 'run', scriptPath, tmpPath], {
+	const args = ['bun', 'run', scriptPath, tmpPath];
+	if (forceParseDocumentIds.delete(next.id)) args.push('--force-parse');
+	const proc = Bun.spawn(args, {
 		stdout: 'inherit',
 		stderr: 'pipe',
 	});
