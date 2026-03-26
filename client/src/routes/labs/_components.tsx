@@ -39,6 +39,8 @@ import type {
 	MeasurementCell,
 	MeasurementOverviewTally,
 	SourceColumn,
+	SourceFilter,
+	SourceFilterMode,
 	TrendChartDatum,
 	VitalsCategoryRow,
 	VitalsDisplayRow,
@@ -442,25 +444,51 @@ const VitalsScope = styled.div`
 		gap: 4px;
 	}
 
+	.vitals-source-filter-group {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+	}
+
 	.vitals-source-filter-toggle {
 		display: inline-flex;
 		align-items: center;
-		gap: 4px;
+		gap: 3px;
 		border: 1px solid var(--vitals-border);
 		border-radius: 999px;
 		padding: 1px 7px;
 		font-size: 11px;
 		line-height: 1.3;
+		cursor: pointer;
+	}
+
+	.vitals-source-filter-total {
+		color: var(--vitals-text-secondary);
+		background: var(--vitals-bg-subtle);
+	}
+
+	.vitals-source-filter-total:hover {
+		border-color: var(--vitals-text-secondary);
+		background: var(--vitals-header-bg-active);
+	}
+
+	.vitals-source-filter-total.vitals-source-filter-toggle-active {
+		border-color: var(--vitals-text);
+		color: var(--vitals-white);
+		background: var(--vitals-text);
+	}
+
+	.vitals-source-filter-flagged {
 		color: var(--vitals-error);
 		background: var(--vitals-error-bg);
 	}
 
-	.vitals-source-filter-toggle:hover {
+	.vitals-source-filter-flagged:hover {
 		border-color: var(--vitals-error-border);
 		background: var(--vitals-header-bg-active);
 	}
 
-	.vitals-source-filter-toggle-active {
+	.vitals-source-filter-flagged.vitals-source-filter-toggle-active {
 		border-color: var(--vitals-error);
 		color: var(--vitals-white);
 		background: var(--vitals-error);
@@ -522,12 +550,20 @@ const VitalsScope = styled.div`
 		background: var(--vitals-bg-subtle);
 	}
 
-	.vitals-head.vitals-source-filter-active {
+	.vitals-head.vitals-source-filter-active-flagged {
 		background: var(--vitals-error-bg-hover);
 	}
 
-	.vitals-cell.vitals-source-filter-active {
+	.vitals-cell.vitals-source-filter-active-flagged {
 		background: var(--vitals-error-bg);
+	}
+
+	.vitals-head.vitals-source-filter-active-total {
+		background: var(--vitals-header-bg-active);
+	}
+
+	.vitals-cell.vitals-source-filter-active-total {
+		background: var(--vitals-bg-subtle);
 	}
 
 	.vitals-category-row > .vitals-cell {
@@ -541,12 +577,20 @@ const VitalsScope = styled.div`
 		background: var(--vitals-primary-bg-hover);
 	}
 
-	.vitals-category-row > .vitals-cell.vitals-source-filter-active {
+	.vitals-category-row > .vitals-cell.vitals-source-filter-active-flagged {
 		background: var(--vitals-error-bg);
 	}
 
-	.vitals-category-row:hover > .vitals-cell.vitals-source-filter-active {
+	.vitals-category-row:hover > .vitals-cell.vitals-source-filter-active-flagged {
 		background: var(--vitals-error-bg-hover);
+	}
+
+	.vitals-category-row > .vitals-cell.vitals-source-filter-active-total {
+		background: var(--vitals-bg-subtle);
+	}
+
+	.vitals-category-row:hover > .vitals-cell.vitals-source-filter-active-total {
+		background: var(--vitals-header-bg-active);
 	}
 
 	.vitals-cell-value {
@@ -704,8 +748,8 @@ type VitalsControlsProps = {
 type VitalsTableProps = {
 	rows: VitalsDisplayRow[];
 	tableSources: SourceColumn[];
-	outOfRangeSourceFilterIdSet: Set<string>;
-	outOfRangeMeasurementCountBySourceId: Map<string, number>;
+	sourceFilters: SourceFilter[];
+	sourceCountsBySourceId: Map<string, { total: number; flagged: number }>;
 	selectedRowKeySet: Set<string>;
 	categorySelectionByName: Map<string, CategorySelectionState>;
 	starredMeasurementSet: Set<string>;
@@ -716,7 +760,7 @@ type VitalsTableProps = {
 	onToggleAllRows: (checked: boolean) => void;
 	onToggleCategory: (category: string, checked: boolean) => void;
 	onToggleStar: (measurementKey: string) => void;
-	onToggleOutOfRangeSourceFilter: (sourceId: string) => void;
+	onToggleSourceFilter: (sourceId: string, mode: SourceFilterMode) => void;
 	onOpenSourceDocument: (documentId: number) => void;
 };
 
@@ -1499,7 +1543,7 @@ const MeasurementValueCell = memo(
 type MeasurementRowProps = {
 	row: VitalsRowModel;
 	tableSources: SourceColumn[];
-	highlightedSourceIdSet: Set<string>;
+	highlightedSourceIdSet: Map<string, SourceFilterMode>;
 	selected: boolean;
 	starred: boolean;
 	overview: MeasurementOverviewTally;
@@ -1617,7 +1661,7 @@ const MeasurementRow = memo(
 				{tableSources.map(source => (
 					<td
 						key={`${row.key}-${source.id}`}
-						className={`vitals-cell ${highlightedSourceIdSet.has(source.id) ? 'vitals-source-filter-active' : ''} ${hasCellDisplayValue(row.valuesBySourceIndex[source.index]) ? 'vitals-cell-interactive' : ''}`}
+						className={`vitals-cell ${highlightedSourceIdSet.has(source.id) ? `vitals-source-filter-active vitals-source-filter-active-${highlightedSourceIdSet.get(source.id)}` : ''} ${hasCellDisplayValue(row.valuesBySourceIndex[source.index]) ? 'vitals-cell-interactive' : ''}`}
 						onClick={() => {
 							const documentId = row.valuesBySourceIndex[source.index]?.documentId;
 							if (documentId) {
@@ -1644,7 +1688,7 @@ const MeasurementRow = memo(
 type CategoryRowProps = {
 	row: VitalsCategoryRow;
 	tableSources: SourceColumn[];
-	highlightedSourceIdSet: Set<string>;
+	highlightedSourceIdSet: Map<string, SourceFilterMode>;
 	selection: CategorySelectionState;
 	onToggleCategory: (category: string, checked: boolean) => void;
 };
@@ -1684,7 +1728,7 @@ const CategoryRow = memo(
 				{tableSources.map(source => (
 					<td
 						key={`${row.key}-${source.id}`}
-						className={`vitals-cell ${highlightedSourceIdSet.has(source.id) ? 'vitals-source-filter-active' : ''}`}
+						className={`vitals-cell ${highlightedSourceIdSet.has(source.id) ? `vitals-source-filter-active vitals-source-filter-active-${highlightedSourceIdSet.get(source.id)}` : ''}`}
 					>
 						<div style={{ minHeight: 18 }} />
 					</td>
@@ -1704,8 +1748,8 @@ const CategoryRow = memo(
 export const VitalsTable = memo(function VitalsTable({
 	rows,
 	tableSources,
-	outOfRangeSourceFilterIdSet,
-	outOfRangeMeasurementCountBySourceId,
+	sourceFilters,
+	sourceCountsBySourceId,
 	selectedRowKeySet,
 	categorySelectionByName,
 	starredMeasurementSet,
@@ -1716,7 +1760,7 @@ export const VitalsTable = memo(function VitalsTable({
 	onToggleAllRows,
 	onToggleCategory,
 	onToggleStar,
-	onToggleOutOfRangeSourceFilter,
+	onToggleSourceFilter,
 	onOpenSourceDocument,
 }: VitalsTableProps) {
 	const tableShellRef = useRef<HTMLDivElement | null>(null);
@@ -1738,6 +1782,11 @@ export const VitalsTable = memo(function VitalsTable({
 
 	const allChecked = selectableRowKeys.length > 0 && selectedCount === selectableRowKeys.length;
 	const someChecked = selectedCount > 0 && selectedCount < selectableRowKeys.length;
+
+	const sourceFilterBySourceId = useMemo(
+		() => new Map(sourceFilters.map(f => [f.sourceId, f.mode])),
+		[sourceFilters],
+	);
 
 	const onToggleStarWithScrollLock = useCallback(
 		(measurementKey: string) => {
@@ -1783,26 +1832,40 @@ export const VitalsTable = memo(function VitalsTable({
 								<th className='vitals-head vitals-col-measurement'>Measurement</th>
 								<th className='vitals-head vitals-col-overview'>Overview</th>
 								{tableSources.map(source => {
-									const isFiltered = outOfRangeSourceFilterIdSet.has(source.id);
-									const outOfRangeCount = outOfRangeMeasurementCountBySourceId.get(source.id) ?? 0;
+									const activeMode = sourceFilterBySourceId.get(source.id);
+									const counts = sourceCountsBySourceId.get(source.id) ?? { total: 0, flagged: 0 };
 
 									return (
 										<th
 											key={source.id}
-											className={`vitals-head ${isFiltered ? 'vitals-source-filter-active' : ''}`}
+											className={`vitals-head ${activeMode ? `vitals-source-filter-active vitals-source-filter-active-${activeMode}` : ''}`}
 										>
 											<div className='vitals-source-head'>
 												<span>{source.prettyDate}</span>
-												<button
-													type='button'
-													aria-label={`Filter measurements out of range in ${source.prettyDate}`}
-													aria-pressed={isFiltered}
-													onClick={() => onToggleOutOfRangeSourceFilter(source.id)}
-													className={`vitals-source-filter-toggle ${isFiltered ? 'vitals-source-filter-toggle-active' : ''}`}
-												>
-													<Flag size={12} weight={isFiltered ? 'fill' : 'regular'} />
-													<span>{outOfRangeCount}</span>
-												</button>
+												<div className='vitals-source-filter-group'>
+													<button
+														type='button'
+														aria-label={`Filter all measurements in ${source.prettyDate}`}
+														aria-pressed={activeMode === 'total'}
+														onClick={() => onToggleSourceFilter(source.id, 'total')}
+														className={`vitals-source-filter-toggle vitals-source-filter-total ${activeMode === 'total' ? 'vitals-source-filter-toggle-active' : ''}`}
+													>
+														<span>{counts.total}</span>
+													</button>
+													<button
+														type='button'
+														aria-label={`Filter flagged measurements in ${source.prettyDate}`}
+														aria-pressed={activeMode === 'flagged'}
+														onClick={() => onToggleSourceFilter(source.id, 'flagged')}
+														className={`vitals-source-filter-toggle vitals-source-filter-flagged ${activeMode === 'flagged' ? 'vitals-source-filter-toggle-active' : ''}`}
+													>
+														<Flag
+															size={11}
+															weight={activeMode === 'flagged' ? 'fill' : 'regular'}
+														/>
+														<span>{counts.flagged}</span>
+													</button>
+												</div>
 											</div>
 										</th>
 									);
@@ -1817,7 +1880,7 @@ export const VitalsTable = memo(function VitalsTable({
 											key={row.key}
 											row={row}
 											tableSources={tableSources}
-											highlightedSourceIdSet={outOfRangeSourceFilterIdSet}
+											highlightedSourceIdSet={sourceFilterBySourceId}
 											selection={
 												categorySelectionByName.get(row.category) ?? {
 													checked: false,
@@ -1835,7 +1898,7 @@ export const VitalsTable = memo(function VitalsTable({
 										key={row.key}
 										row={row}
 										tableSources={tableSources}
-										highlightedSourceIdSet={outOfRangeSourceFilterIdSet}
+										highlightedSourceIdSet={sourceFilterBySourceId}
 										selected={selectedRowKeySet.has(row.key)}
 										starred={starredMeasurementSet.has(row.key)}
 										overview={

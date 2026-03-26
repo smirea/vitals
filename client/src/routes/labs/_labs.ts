@@ -1284,50 +1284,62 @@ export function getSixMonthMeaningfulChanges({
 	});
 }
 
-export function getOutOfRangeMeasurementCountBySourceId({
+export type SourceFilterMode = 'total' | 'flagged';
+
+export type SourceFilter = {
+	sourceId: string;
+	mode: SourceFilterMode;
+};
+
+export function getSourceCountsBySourceId({
 	filteredMeasurementRows,
 	tableSources,
 }: {
 	filteredMeasurementRows: VitalsRowModel[];
 	tableSources: SourceColumn[];
-}): Map<string, number> {
-	const countBySourceId = new Map<string, number>();
+}): Map<string, { total: number; flagged: number }> {
+	const countsBySourceId = new Map<string, { total: number; flagged: number }>();
 
 	tableSources.forEach(source => {
-		let count = 0;
+		let total = 0;
+		let flagged = 0;
 		filteredMeasurementRows.forEach(row => {
-			if (isCellOutsideReferenceRange(row.valuesBySourceIndex[source.index])) {
-				count += 1;
-			}
+			const cell = row.valuesBySourceIndex[source.index];
+			if (hasCellDisplayValue(cell)) total += 1;
+			if (isCellOutsideReferenceRange(cell)) flagged += 1;
 		});
-		countBySourceId.set(source.id, count);
+		countsBySourceId.set(source.id, { total, flagged });
 	});
 
-	return countBySourceId;
+	return countsBySourceId;
 }
 
-export function getRowsMatchingOutOfRangeSources({
+export function getRowsMatchingSourceFilters({
 	filteredMeasurementRows,
 	tableSources,
-	outOfRangeSourceIdSet,
+	sourceFilters,
 }: {
 	filteredMeasurementRows: VitalsRowModel[];
 	tableSources: SourceColumn[];
-	outOfRangeSourceIdSet: Set<string>;
+	sourceFilters: SourceFilter[];
 }): VitalsRowModel[] {
-	if (outOfRangeSourceIdSet.size === 0) {
+	if (sourceFilters.length === 0) {
 		return filteredMeasurementRows;
 	}
 
-	const selectedSources = tableSources.filter(source => outOfRangeSourceIdSet.has(source.id));
-	if (selectedSources.length === 0) {
+	const resolved = sourceFilters
+		.map(f => ({ source: tableSources.find(s => s.id === f.sourceId), mode: f.mode }))
+		.filter((f): f is { source: SourceColumn; mode: SourceFilterMode } => f.source !== undefined);
+
+	if (resolved.length === 0) {
 		return filteredMeasurementRows;
 	}
 
 	return filteredMeasurementRows.filter(row =>
-		selectedSources.some(source =>
-			isCellOutsideReferenceRange(row.valuesBySourceIndex[source.index]),
-		),
+		resolved.some(({ source, mode }) => {
+			const cell = row.valuesBySourceIndex[source.index];
+			return mode === 'flagged' ? isCellOutsideReferenceRange(cell) : hasCellDisplayValue(cell);
+		}),
 	);
 }
 

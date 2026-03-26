@@ -47,9 +47,9 @@ import {
 	getMeasurementKeysByCategory,
 	getMeasurementOverviewByKey,
 	getOrderedDocuments,
-	getOutOfRangeMeasurementCountBySourceId,
+	getSourceCountsBySourceId,
 	getPrunedSelectedRowKeys,
-	getRowsMatchingOutOfRangeSources,
+	getRowsMatchingSourceFilters,
 	getRowsWithVisibleData,
 	getSelectedRows,
 	getSixMonthMeaningfulChanges,
@@ -64,6 +64,8 @@ import {
 	SOURCE_COLUMN_WIDTH,
 	clamp,
 	type VitalsRowModel,
+	type SourceFilter,
+	type SourceFilterMode,
 } from './labs/_labs';
 import type { LabImportDocument } from '../utils/api';
 import createLocalStorage from '../utils/createLocalStorage';
@@ -75,7 +77,7 @@ const { useLocalStorage } = createLocalStorage({
 		starredMeasurements: [] as string[],
 		selectedRows: [] as string[],
 		groupByCategory: true,
-		outOfRangeSourceFilters: [] as string[],
+		sourceFilters: [] as SourceFilter[],
 	}),
 });
 
@@ -113,8 +115,7 @@ function LabsPage() {
 	const [dateRangeStart, setDateRangeStart] = useState('');
 	const [dateRangeEnd, setDateRangeEnd] = useState('');
 	const [groupByCategory, setGroupByCategory] = useLocalStorage('groupByCategory');
-	const [outOfRangeSourceFilterIds, setOutOfRangeSourceFilterIds] =
-		useLocalStorage('outOfRangeSourceFilters');
+	const [sourceFilters, setSourceFilters] = useLocalStorage('sourceFilters');
 	const activeTab = search.tab ?? 'overview';
 	const previewDocumentId = search.doc ?? null;
 
@@ -371,25 +372,20 @@ function LabsPage() {
 
 	useEffect(() => {
 		const availableSourceIds = new Set(baseTableSources.map(source => source.id));
-		setOutOfRangeSourceFilterIds(previous => {
-			const next = previous.filter(sourceId => availableSourceIds.has(sourceId));
+		setSourceFilters(previous => {
+			const next = previous.filter(f => availableSourceIds.has(f.sourceId));
 			return next.length === previous.length ? previous : next;
 		});
 	}, [baseTableSources]);
 
-	const outOfRangeSourceFilterIdSet = useMemo(
-		() => new Set(outOfRangeSourceFilterIds),
-		[outOfRangeSourceFilterIds],
-	);
-
 	const tableMeasurementRows = useMemo(
 		() =>
-			getRowsMatchingOutOfRangeSources({
+			getRowsMatchingSourceFilters({
 				filteredMeasurementRows: baseTableMeasurementRows,
 				tableSources: baseTableSources,
-				outOfRangeSourceIdSet: outOfRangeSourceFilterIdSet,
+				sourceFilters,
 			}),
-		[baseTableMeasurementRows, baseTableSources, outOfRangeSourceFilterIdSet],
+		[baseTableMeasurementRows, baseTableSources, sourceFilters],
 	);
 
 	useEffect(() => {
@@ -407,9 +403,9 @@ function LabsPage() {
 
 	const selectedRowKeySet = useMemo(() => new Set(selectedRowKeys), [selectedRowKeys]);
 
-	const outOfRangeMeasurementCountBySourceId = useMemo(
+	const sourceCountsBySourceId = useMemo(
 		() =>
-			getOutOfRangeMeasurementCountBySourceId({
+			getSourceCountsBySourceId({
 				filteredMeasurementRows: baseTableMeasurementRows,
 				tableSources: baseTableSources,
 			}),
@@ -610,12 +606,14 @@ function LabsPage() {
 		);
 	}, []);
 
-	const onToggleOutOfRangeSourceFilter = useCallback((sourceId: string) => {
-		setOutOfRangeSourceFilterIds(previous =>
-			previous.includes(sourceId)
-				? previous.filter(item => item !== sourceId)
-				: [...previous, sourceId],
-		);
+	const onToggleSourceFilter = useCallback((sourceId: string, mode: SourceFilterMode) => {
+		setSourceFilters(previous => {
+			const existing = previous.find(f => f.sourceId === sourceId);
+			if (existing?.mode === mode) {
+				return previous.filter(f => f.sourceId !== sourceId);
+			}
+			return [...previous.filter(f => f.sourceId !== sourceId), { sourceId, mode }];
+		});
 	}, []);
 
 	const hasAnyData = documents.length > 0;
@@ -1074,8 +1072,8 @@ function LabsPage() {
 			<VitalsTable
 				rows={tableRows}
 				tableSources={baseTableSources}
-				outOfRangeSourceFilterIdSet={outOfRangeSourceFilterIdSet}
-				outOfRangeMeasurementCountBySourceId={outOfRangeMeasurementCountBySourceId}
+				sourceFilters={sourceFilters}
+				sourceCountsBySourceId={sourceCountsBySourceId}
 				selectedRowKeySet={selectedRowKeySet}
 				categorySelectionByName={categorySelectionByName}
 				starredMeasurementSet={starredMeasurementSet}
@@ -1086,7 +1084,7 @@ function LabsPage() {
 				onToggleAllRows={onToggleAllRows}
 				onToggleCategory={onToggleCategory}
 				onToggleStar={onToggleStar}
-				onToggleOutOfRangeSourceFilter={onToggleOutOfRangeSourceFilter}
+				onToggleSourceFilter={onToggleSourceFilter}
 				onOpenSourceDocument={onOpenDocumentPreview}
 			/>
 		</div>
