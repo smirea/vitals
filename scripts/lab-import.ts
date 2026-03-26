@@ -38,8 +38,6 @@ const extractedDataSchema = z.object({
 	),
 });
 
-type ExtractedData = z.infer<typeof extractedDataSchema>;
-
 void createScript(async () => {
 	const filePath = process.argv[2];
 	if (!filePath) throw new Error('pass an absolute file path as an arg');
