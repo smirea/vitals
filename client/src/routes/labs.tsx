@@ -35,7 +35,7 @@ import {
 	TrendChart,
 	VitalsControls,
 	VitalsTable,
-} from './bloodwork/_components';
+} from './labs/_components';
 import {
 	getAllMeasurementRows,
 	getCategoryOverviewByLatestAcrossAllLabs,
@@ -72,25 +72,25 @@ import {
 	STARRED_MEASUREMENTS_STORAGE_KEY,
 	clamp,
 	type VitalsRowModel,
-} from './bloodwork/_bloodwork';
-import type { BloodworkImportDocument } from '../utils/api';
+} from './labs/_labs';
+import type { LabImportDocument } from '../utils/api';
 import { useTRPC } from '../utils/trpc';
 
-const bloodworkSearchSchema = z.object({
+const labsSearchSchema = z.object({
 	tab: z.enum(['overview', 'documents']).optional(),
 	doc: z.coerce.number().int().positive().optional(),
 });
 
-export const Route = createFileRoute('/bloodwork')({
-	validateSearch: search => bloodworkSearchSchema.parse(search),
-	component: BloodworkPage,
+export const Route = createFileRoute('/labs')({
+	validateSearch: search => labsSearchSchema.parse(search),
+	component: LabsPage,
 });
 
 const BLOODWORK_IMPORT_POLL_INTERVAL_MS = 3_000;
 const PREVIEW_DRAWER_CONTENT_HEIGHT = 'calc(100vh - 108px)';
 const PREVIEW_RESULTS_PANEL_WIDTH = 360;
 
-function BloodworkPage() {
+function LabsPage() {
 	const search = Route.useSearch();
 	const navigate = Route.useNavigate();
 	const viewport = useViewport();
@@ -126,20 +126,20 @@ function BloodworkPage() {
 	);
 
 	const documentsQuery = useQuery({
-		...trpc.bloodwork.listDocuments.queryOptions(),
+		...trpc.labs.listDocuments.queryOptions(),
 		refetchInterval: query =>
-			hasActiveBloodworkImports((query.state.data ?? []) as BloodworkImportDocument[])
+			hasActiveLabsImports((query.state.data ?? []) as LabImportDocument[])
 				? BLOODWORK_IMPORT_POLL_INTERVAL_MS
 				: false,
 	});
 	const importDocuments = documentsQuery.data ?? [];
-	const hasActiveImportDocuments = hasActiveBloodworkImports(importDocuments);
+	const hasActiveImportDocuments = hasActiveLabsImports(importDocuments);
 	const dashboardQuery = useQuery({
-		...trpc.bloodwork.getDashboard.queryOptions(),
+		...trpc.labs.getDashboard.queryOptions(),
 		refetchInterval: hasActiveImportDocuments ? BLOODWORK_IMPORT_POLL_INTERVAL_MS : false,
 	});
 	const uploadDocumentsMutation = useMutation({
-		...trpc.bloodwork.uploadDocuments.mutationOptions(),
+		...trpc.labs.uploadDocuments.mutationOptions(),
 		onSuccess: async data => {
 			await queryClient.invalidateQueries();
 			const queuedCount = data.documents.filter(document => !document.deduplicated).length;
@@ -155,7 +155,7 @@ function BloodworkPage() {
 		},
 	});
 	const deleteDocumentMutation = useMutation({
-		...trpc.table.bloodworkDocuments.deleteMany.mutationOptions(),
+		...trpc.table.labDocuments.deleteMany.mutationOptions(),
 		onSuccess: async data => {
 			await queryClient.invalidateQueries();
 			messageApi.success(
@@ -170,7 +170,7 @@ function BloodworkPage() {
 		},
 	});
 	const updateDocumentsMutation = useMutation({
-		...trpc.table.bloodworkDocuments.updateMany.mutationOptions(),
+		...trpc.table.labDocuments.updateMany.mutationOptions(),
 		onSuccess: async data => {
 			await queryClient.invalidateQueries();
 			messageApi.success(
@@ -183,7 +183,7 @@ function BloodworkPage() {
 		},
 	});
 	const retryDocumentMutation = useMutation({
-		...trpc.bloodwork.retryDocument.mutationOptions(),
+		...trpc.labs.retryDocument.mutationOptions(),
 		onSuccess: async () => {
 			await queryClient.invalidateQueries();
 			messageApi.success('Document queued for retry.');
@@ -193,7 +193,7 @@ function BloodworkPage() {
 		},
 	});
 	const reprocessDocumentMutation = useMutation({
-		...trpc.bloodwork.reprocessDocument.mutationOptions(),
+		...trpc.labs.reprocessDocument.mutationOptions(),
 		onSuccess: async () => {
 			await queryClient.invalidateQueries();
 			messageApi.success('Document queued for reprocess.');
@@ -316,7 +316,7 @@ function BloodworkPage() {
 
 	useEffect(() => {
 		const groupableDocumentIds = new Set(
-			importDocuments.filter(isGroupableBloodworkDocument).map(document => document.id),
+			importDocuments.filter(isGroupableLabsDocument).map(document => document.id),
 		);
 		setSelectedImportDocumentIds(previous => {
 			const next = previous.filter(documentId => groupableDocumentIds.has(documentId));
@@ -838,7 +838,7 @@ function BloodworkPage() {
 	const onGroupDocuments = useCallback(async () => {
 		const documentIds = importDocuments
 			.filter(document => selectedImportDocumentIds.includes(document.id))
-			.filter(isGroupableBloodworkDocument)
+			.filter(isGroupableLabsDocument)
 			.map(document => document.id);
 		if (documentIds.length < 2) {
 			return;
@@ -853,7 +853,7 @@ function BloodworkPage() {
 				},
 			],
 			values: {
-				group: buildBloodworkDocumentGroupId(),
+				group: buildLabsDocumentGroupId(),
 			},
 		});
 	}, [importDocuments, selectedImportDocumentIds, updateDocumentsMutation]);
@@ -861,7 +861,7 @@ function BloodworkPage() {
 	const onClearDocumentGroup = useCallback(async () => {
 		const documentIds = importDocuments
 			.filter(document => selectedImportDocumentIds.includes(document.id))
-			.filter(document => isGroupableBloodworkDocument(document) && Boolean(document.group))
+			.filter(document => isGroupableLabsDocument(document) && Boolean(document.group))
 			.map(document => document.id);
 		if (documentIds.length === 0) {
 			return;
@@ -885,7 +885,7 @@ function BloodworkPage() {
 		() =>
 			importDocuments
 				.filter(document => selectedImportDocumentIds.includes(document.id))
-				.filter(isGroupableBloodworkDocument),
+				.filter(isGroupableLabsDocument),
 		[importDocuments, selectedImportDocumentIds],
 	);
 	const hasSelectedDocumentGroup = selectedGroupableDocuments.some(document =>
@@ -959,7 +959,7 @@ function BloodworkPage() {
 						const hasGroup = Boolean(item.group);
 						const isGroupStart = hasGroup && previousItem?.group !== item.group;
 						const isGroupEnd = hasGroup && nextItem?.group !== item.group;
-						const isSelectable = isGroupableBloodworkDocument(item);
+						const isSelectable = isGroupableLabsDocument(item);
 
 						return (
 							<div
@@ -1131,7 +1131,7 @@ function BloodworkPage() {
 	const overviewPanel = !hasAnyData ? (
 		<Card styles={{ body: { padding: 24 } }}>
 			<Flex justify='center' align='center' style={{ minHeight: '40vh' }}>
-				<Empty description='No bloodwork data found yet.' />
+				<Empty description='No lab data found yet.' />
 			</Flex>
 		</Card>
 	) : showSplitLayout ? (
@@ -1179,7 +1179,7 @@ function BloodworkPage() {
 				<Alert
 					type='error'
 					showIcon
-					message='Unable to load bloodwork data'
+					message='Unable to load lab data'
 					description={dashboardQuery.error.message}
 				/>
 			) : (
@@ -1303,8 +1303,8 @@ function BloodworkPage() {
 						</div>
 						<div style={{ flex: 1, minWidth: 0 }}>
 							<iframe
-								src={buildBloodworkDocumentPreviewUrl(previewDocumentId)}
-								title={previewDocument?.fileName ?? `Bloodwork document ${previewDocumentId}`}
+								src={buildLabsDocumentPreviewUrl(previewDocumentId)}
+								title={previewDocument?.fileName ?? `Labs document ${previewDocumentId}`}
 								style={{ width: '100%', height: '100%', border: 0 }}
 							/>
 						</div>
@@ -1315,22 +1315,22 @@ function BloodworkPage() {
 	);
 }
 
-function hasActiveBloodworkImports(documents: BloodworkImportDocument[]) {
+function hasActiveLabsImports(documents: LabImportDocument[]) {
 	return documents.some(
 		document => document.status === 'pending' || document.status === 'processing',
 	);
 }
 
-function isGroupableBloodworkDocument(_document: BloodworkImportDocument) {
+function isGroupableLabsDocument(_document: LabImportDocument) {
 	return true;
 }
 
-function buildBloodworkDocumentGroupId() {
+function buildLabsDocumentGroupId() {
 	return `group_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
 }
 
-function buildBloodworkDocumentPreviewUrl(documentId: number) {
-	return `${import.meta.env.VITE_API_URL.trim()}/bloodwork/documents/${documentId}/pdf`;
+function buildLabsDocumentPreviewUrl(documentId: number) {
+	return `${import.meta.env.VITE_API_URL.trim()}/labs/documents/${documentId}/pdf`;
 }
 
 function useViewport() {

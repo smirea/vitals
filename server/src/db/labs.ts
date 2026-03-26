@@ -9,30 +9,30 @@ import { z } from 'zod';
 
 import { getDatabase, type VitalsDatabase } from 'server/db/client.ts';
 import {
-	bloodworkDocuments,
-	bloodworkMeasurements,
-	bloodworkResults,
-	type BloodworkDocumentRow,
-	type BloodworkMeasurementRow,
+	labDocuments,
+	labMeasurements,
+	labResults,
+	type LabDocumentRow,
+	type LabMeasurementRow,
 } from 'server/db/schema.ts';
 import env from 'server/env.ts';
 import { promiseParallel } from 'server/promise-parallel.ts';
 
-const bloodworkUploadFileInputSchema = z.object({
+const labUploadFileInputSchema = z.object({
 	fileName: z.string().trim().min(1),
 	mimeType: z.string().trim().min(1),
 	dataBase64: z.string().trim().min(1),
 });
 
-export const bloodworkUploadDocumentsInputSchema = z.object({
-	files: z.array(bloodworkUploadFileInputSchema).min(1).max(12),
+export const labUploadDocumentsInputSchema = z.object({
+	files: z.array(labUploadFileInputSchema).min(1).max(12),
 });
 
-export const bloodworkRetryDocumentInputSchema = z.object({
+export const labRetryDocumentInputSchema = z.object({
 	documentId: z.number().int().positive(),
 });
 
-export const bloodworkReprocessDocumentInputSchema = z.object({
+export const labReprocessDocumentInputSchema = z.object({
 	documentId: z.number().int().positive(),
 });
 
@@ -97,7 +97,7 @@ const normalizationPassSchema = z.object({
 	results: z.array(normalizationResultSchema),
 });
 
-type BloodworkUploadDocumentsInput = z.infer<typeof bloodworkUploadDocumentsInputSchema>;
+type LabUploadDocumentsInput = z.infer<typeof labUploadDocumentsInputSchema>;
 type ExtractionMeasurementOutput = {
 	name: string;
 	canonicalName: string;
@@ -164,7 +164,7 @@ type StructuredPassResult<T> = {
 	output: T;
 };
 
-type BloodworkPdfPage = {
+type LabPdfPage = {
 	pageNumber: number;
 	pageCount: number;
 	fileName: string;
@@ -172,7 +172,7 @@ type BloodworkPdfPage = {
 };
 
 type PageNormalizationInput = {
-	page: BloodworkPdfPage;
+	page: LabPdfPage;
 	measurements: ExtractionPassOutput['measurements'];
 };
 
@@ -185,61 +185,61 @@ const NORMALIZATION_BATCH_SIZE = 10;
 let processorPromise: Promise<void> | null = null;
 let processorStarted = false;
 
-export function getBloodworkDashboard(db: VitalsDatabase) {
-	syncBloodworkMeasurementCategories(db);
-	syncBloodworkMeasurementUnitConversions(db);
-	repairBloodworkMeasurementRanges(db);
+export function getLabDashboard(db: VitalsDatabase) {
+	syncLabMeasurementCategories(db);
+	syncLabMeasurementUnitConversions(db);
+	repairLabMeasurementRanges(db);
 
 	const documents = db
 		.select({
-			id: bloodworkDocuments.id,
-			date: bloodworkDocuments.date,
-			group: bloodworkDocuments.group,
-			queuedAt: bloodworkDocuments.queuedAt,
+			id: labDocuments.id,
+			date: labDocuments.date,
+			group: labDocuments.group,
+			queuedAt: labDocuments.queuedAt,
 		})
-		.from(bloodworkDocuments)
-		.where(eq(bloodworkDocuments.status, 'completed'))
-		.orderBy(bloodworkDocuments.date, bloodworkDocuments.id)
+		.from(labDocuments)
+		.where(eq(labDocuments.status, 'completed'))
+		.orderBy(labDocuments.date, labDocuments.id)
 		.all()
 		.reverse();
 
 	const measurements = db
 		.select()
-		.from(bloodworkMeasurements)
-		.orderBy(bloodworkMeasurements.name, bloodworkMeasurements.id)
+		.from(labMeasurements)
+		.orderBy(labMeasurements.name, labMeasurements.id)
 		.all();
 
 	const results = db
 		.select()
-		.from(bloodworkResults)
-		.orderBy(bloodworkResults.documentId, bloodworkResults.sortOrder, bloodworkResults.id)
+		.from(labResults)
+		.orderBy(labResults.documentId, labResults.sortOrder, labResults.id)
 		.all();
 
 	return { documents, measurements, results };
 }
 
-export function listBloodworkDocuments(db: VitalsDatabase) {
+export function listLabDocuments(db: VitalsDatabase) {
 	return db
 		.select({
-			id: bloodworkDocuments.id,
-			fileName: bloodworkDocuments.fileName,
-			status: bloodworkDocuments.status,
-			statusText: bloodworkDocuments.statusText,
-			group: bloodworkDocuments.group,
-			date: bloodworkDocuments.date,
-			labName: bloodworkDocuments.labName,
-			queuedAt: bloodworkDocuments.queuedAt,
-			lastError: bloodworkDocuments.lastError,
+			id: labDocuments.id,
+			fileName: labDocuments.fileName,
+			status: labDocuments.status,
+			statusText: labDocuments.statusText,
+			group: labDocuments.group,
+			date: labDocuments.date,
+			labName: labDocuments.labName,
+			queuedAt: labDocuments.queuedAt,
+			lastError: labDocuments.lastError,
 		})
-		.from(bloodworkDocuments)
-		.orderBy(bloodworkDocuments.id)
+		.from(labDocuments)
+		.orderBy(labDocuments.id)
 		.all()
 		.reverse();
 }
 
-export function syncBloodworkMeasurementCategories(db: VitalsDatabase) {
+export function syncLabMeasurementCategories(db: VitalsDatabase) {
 	const now = new Date().toISOString();
-	const measurements = db.select().from(bloodworkMeasurements).all();
+	const measurements = db.select().from(labMeasurements).all();
 
 	for (const measurement of measurements) {
 		const category = resolveCanonicalMeasurementCategory(measurement.name, measurement.category);
@@ -247,25 +247,25 @@ export function syncBloodworkMeasurementCategories(db: VitalsDatabase) {
 			continue;
 		}
 
-		db.update(bloodworkMeasurements)
+		db.update(labMeasurements)
 			.set({
 				category,
 				updatedAt: now,
 			})
-			.where(eq(bloodworkMeasurements.id, measurement.id))
+			.where(eq(labMeasurements.id, measurement.id))
 			.run();
 
 		if (category === OTHER_CATEGORY) {
 			console.log(
-				`[bloodwork] measurement ${measurement.name} (${measurement.key}) fell back to ${OTHER_CATEGORY}`,
+				`[labs] measurement ${measurement.name} (${measurement.key}) fell back to ${OTHER_CATEGORY}`,
 			);
 		}
 	}
 }
 
-export function syncBloodworkMeasurementUnitConversions(db: VitalsDatabase) {
+export function syncLabMeasurementUnitConversions(db: VitalsDatabase) {
 	const now = new Date().toISOString();
-	const measurements = db.select().from(bloodworkMeasurements).all();
+	const measurements = db.select().from(labMeasurements).all();
 
 	for (const measurement of measurements) {
 		const unitConversions = resolveMeasurementUnitConversions(measurement.name);
@@ -273,19 +273,19 @@ export function syncBloodworkMeasurementUnitConversions(db: VitalsDatabase) {
 			continue;
 		}
 
-		db.update(bloodworkMeasurements)
+		db.update(labMeasurements)
 			.set({
 				unitConversionsJson: unitConversions,
 				updatedAt: now,
 			})
-			.where(eq(bloodworkMeasurements.id, measurement.id))
+			.where(eq(labMeasurements.id, measurement.id))
 			.run();
 	}
 }
 
-function repairBloodworkMeasurementRanges(db: VitalsDatabase) {
+function repairLabMeasurementRanges(db: VitalsDatabase) {
 	const now = new Date().toISOString();
-	const measurements = db.select().from(bloodworkMeasurements).all();
+	const measurements = db.select().from(labMeasurements).all();
 
 	for (const measurement of measurements) {
 		const repairedRange = resolveCanonicalMeasurementRangeRepair(measurement);
@@ -293,19 +293,19 @@ function repairBloodworkMeasurementRanges(db: VitalsDatabase) {
 			continue;
 		}
 
-		db.update(bloodworkMeasurements)
+		db.update(labMeasurements)
 			.set({
 				canonicalRangeMin: repairedRange.min,
 				canonicalRangeMax: repairedRange.max,
 				canonicalRangeText: repairedRange.text,
 				updatedAt: now,
 			})
-			.where(eq(bloodworkMeasurements.id, measurement.id))
+			.where(eq(labMeasurements.id, measurement.id))
 			.run();
 	}
 }
 
-function resolveCanonicalMeasurementRangeRepair(measurement: BloodworkMeasurementRow) {
+function resolveCanonicalMeasurementRangeRepair(measurement: LabMeasurementRow) {
 	if (!hasClearlyBrokenCanonicalRange(measurement)) {
 		return null;
 	}
@@ -384,7 +384,7 @@ function resolveCanonicalMeasurementRangeRepair(measurement: BloodworkMeasuremen
 	return repaired;
 }
 
-function hasClearlyBrokenCanonicalRange(measurement: BloodworkMeasurementRow) {
+function hasClearlyBrokenCanonicalRange(measurement: LabMeasurementRow) {
 	const unit = canonicalizeUnitOrNull(measurement.canonicalUnit);
 	if (!unit) {
 		return false;
@@ -440,12 +440,9 @@ function getCanonicalRangeUpperBound(unit: string) {
 	return 10_000;
 }
 
-export async function uploadBloodworkDocuments(
-	db: VitalsDatabase,
-	input: BloodworkUploadDocumentsInput,
-) {
-	const parsed = bloodworkUploadDocumentsInputSchema.parse(input);
-	const queued = enqueueBloodworkDocuments(
+export async function uploadLabDocuments(db: VitalsDatabase, input: LabUploadDocumentsInput) {
+	const parsed = labUploadDocumentsInputSchema.parse(input);
+	const queued = enqueueLabDocuments(
 		db,
 		parsed.files.map(file => ({
 			fileName: file.fileName,
@@ -454,25 +451,25 @@ export async function uploadBloodworkDocuments(
 		})),
 	);
 
-	scheduleBloodworkProcessing();
+	scheduleLabProcessing();
 	return {
 		documents: queued,
 	};
 }
 
-export async function retryBloodworkDocument(
+export async function retryLabDocument(
 	db: VitalsDatabase,
-	input: z.infer<typeof bloodworkRetryDocumentInputSchema>,
+	input: z.infer<typeof labRetryDocumentInputSchema>,
 ) {
-	const parsed = bloodworkRetryDocumentInputSchema.parse(input);
+	const parsed = labRetryDocumentInputSchema.parse(input);
 	const document = db
 		.select({
-			id: bloodworkDocuments.id,
-			fileName: bloodworkDocuments.fileName,
-			status: bloodworkDocuments.status,
+			id: labDocuments.id,
+			fileName: labDocuments.fileName,
+			status: labDocuments.status,
 		})
-		.from(bloodworkDocuments)
-		.where(eq(bloodworkDocuments.id, parsed.documentId))
+		.from(labDocuments)
+		.where(eq(labDocuments.id, parsed.documentId))
 		.get();
 
 	if (!document) {
@@ -482,7 +479,7 @@ export async function retryBloodworkDocument(
 		throw new Error('Only failed documents can be retried.');
 	}
 
-	db.update(bloodworkDocuments)
+	db.update(labDocuments)
 		.set({
 			status: 'pending',
 			statusText: 'Queued for retry',
@@ -491,30 +488,30 @@ export async function retryBloodworkDocument(
 			failedAt: null,
 			lastError: null,
 		})
-		.where(eq(bloodworkDocuments.id, parsed.documentId))
+		.where(eq(labDocuments.id, parsed.documentId))
 		.run();
 
-	logBloodworkDocumentEvent(document, 'Queued for retry');
-	scheduleBloodworkProcessing();
+	logLabDocumentEvent(document, 'Queued for retry');
+	scheduleLabProcessing();
 
 	return {
 		documentId: parsed.documentId,
 	};
 }
 
-export async function reprocessBloodworkDocument(
+export async function reprocessLabDocument(
 	db: VitalsDatabase,
-	input: z.infer<typeof bloodworkReprocessDocumentInputSchema>,
+	input: z.infer<typeof labReprocessDocumentInputSchema>,
 ) {
-	const parsed = bloodworkReprocessDocumentInputSchema.parse(input);
+	const parsed = labReprocessDocumentInputSchema.parse(input);
 	const document = db
 		.select({
-			id: bloodworkDocuments.id,
-			fileName: bloodworkDocuments.fileName,
-			status: bloodworkDocuments.status,
+			id: labDocuments.id,
+			fileName: labDocuments.fileName,
+			status: labDocuments.status,
 		})
-		.from(bloodworkDocuments)
-		.where(eq(bloodworkDocuments.id, parsed.documentId))
+		.from(labDocuments)
+		.where(eq(labDocuments.id, parsed.documentId))
 		.get();
 
 	if (!document) {
@@ -524,7 +521,7 @@ export async function reprocessBloodworkDocument(
 		throw new Error('Only completed documents can be reprocessed.');
 	}
 
-	db.update(bloodworkDocuments)
+	db.update(labDocuments)
 		.set({
 			status: 'pending',
 			statusText: 'Queued for reprocess',
@@ -533,109 +530,109 @@ export async function reprocessBloodworkDocument(
 			failedAt: null,
 			lastError: null,
 		})
-		.where(eq(bloodworkDocuments.id, parsed.documentId))
+		.where(eq(labDocuments.id, parsed.documentId))
 		.run();
 
-	logBloodworkDocumentEvent(document, 'Queued for reprocess');
-	scheduleBloodworkProcessing();
+	logLabDocumentEvent(document, 'Queued for reprocess');
+	scheduleLabProcessing();
 
 	return {
 		documentId: parsed.documentId,
 	};
 }
 
-export function getBloodworkDocumentPdf(
+export function getLabDocumentPdf(
 	db: VitalsDatabase,
 	documentId: number,
-): Pick<BloodworkDocumentRow, 'id' | 'fileName' | 'mimeType' | 'pdfData'> | null {
+): Pick<LabDocumentRow, 'id' | 'fileName' | 'mimeType' | 'pdfData'> | null {
 	return (
 		db
 			.select({
-				id: bloodworkDocuments.id,
-				fileName: bloodworkDocuments.fileName,
-				mimeType: bloodworkDocuments.mimeType,
-				pdfData: bloodworkDocuments.pdfData,
+				id: labDocuments.id,
+				fileName: labDocuments.fileName,
+				mimeType: labDocuments.mimeType,
+				pdfData: labDocuments.pdfData,
 			})
-			.from(bloodworkDocuments)
-			.where(eq(bloodworkDocuments.id, documentId))
+			.from(labDocuments)
+			.where(eq(labDocuments.id, documentId))
 			.get() ?? null
 	);
 }
 
-export function startBloodworkProcessor() {
+export function startLabProcessor() {
 	if (processorStarted) {
 		return;
 	}
 	processorStarted = true;
-	resetStuckBloodworkDocuments(getDatabase());
-	scheduleBloodworkProcessing();
+	resetStuckLabDocuments(getDatabase());
+	scheduleLabProcessing();
 }
 
-function scheduleBloodworkProcessing() {
+function scheduleLabProcessing() {
 	if (processorPromise) {
 		return;
 	}
 
-	processorPromise = processTriggeredBloodworkDocument()
+	processorPromise = processTriggeredLabDocument()
 		.catch(error => {
-			console.error('[bloodwork] processing trigger failed', error);
+			console.error('[labs] processing trigger failed', error);
 		})
 		.finally(() => {
 			processorPromise = null;
 
 			const db = getDatabase();
-			if (hasNextPendingBloodworkDocument(db) && !hasActiveBloodworkDocument(db)) {
-				scheduleBloodworkProcessing();
+			if (hasNextPendingLabDocument(db) && !hasActiveLabDocument(db)) {
+				scheduleLabProcessing();
 			}
 		});
 }
 
-async function processTriggeredBloodworkDocument(db = getDatabase()) {
-	const outcome = await processNextPendingBloodworkDocument(db);
+async function processTriggeredLabDocument(db = getDatabase()) {
+	const outcome = await processNextPendingLabDocument(db);
 	if (outcome === 'busy') {
 		return;
 	}
 }
 
-export async function processNextPendingBloodworkDocument(db = getDatabase()) {
-	const nextDocumentId = claimNextPendingBloodworkDocument(db);
+export async function processNextPendingLabDocument(db = getDatabase()) {
+	const nextDocumentId = claimNextPendingLabDocument(db);
 	if (nextDocumentId === 'busy' || nextDocumentId === null) {
 		return nextDocumentId;
 	}
 
-	await processBloodworkDocument(db, nextDocumentId);
+	await processLabDocument(db, nextDocumentId);
 	return 'processed' as const;
 }
 
-function hasNextPendingBloodworkDocument(db: VitalsDatabase) {
+function hasNextPendingLabDocument(db: VitalsDatabase) {
 	return db
 		.select({
-			id: bloodworkDocuments.id,
+			id: labDocuments.id,
 		})
-		.from(bloodworkDocuments)
-		.where(eq(bloodworkDocuments.status, 'pending'))
-		.orderBy(bloodworkDocuments.id)
+		.from(labDocuments)
+		.where(eq(labDocuments.status, 'pending'))
+		.orderBy(labDocuments.id)
 		.get();
 }
 
-function hasActiveBloodworkDocument(db: VitalsDatabase) {
+function hasActiveLabDocument(db: VitalsDatabase) {
 	return db
 		.select({
-			id: bloodworkDocuments.id,
+			id: labDocuments.id,
 		})
-		.from(bloodworkDocuments)
-		.where(eq(bloodworkDocuments.status, 'processing'))
-		.orderBy(bloodworkDocuments.id)
+		.from(labDocuments)
+		.where(eq(labDocuments.status, 'processing'))
+		.orderBy(labDocuments.id)
 		.get();
 }
 
-function claimNextPendingBloodworkDocument(db: VitalsDatabase) {
+function claimNextPendingLabDocument(db: VitalsDatabase) {
 	const client = db.$client;
 	client.exec('BEGIN IMMEDIATE');
 
 	try {
 		const activeDocument = client
-			.prepare("SELECT id FROM bloodwork_documents WHERE status = 'processing' ORDER BY id LIMIT 1")
+			.prepare("SELECT id FROM lab_documents WHERE status = 'processing' ORDER BY id LIMIT 1")
 			.get() as { id: number } | null;
 		if (activeDocument) {
 			client.exec('COMMIT');
@@ -643,7 +640,7 @@ function claimNextPendingBloodworkDocument(db: VitalsDatabase) {
 		}
 
 		const pendingDocument = client
-			.prepare("SELECT id FROM bloodwork_documents WHERE status = 'pending' ORDER BY id LIMIT 1")
+			.prepare("SELECT id FROM lab_documents WHERE status = 'pending' ORDER BY id LIMIT 1")
 			.get() as { id: number } | null;
 		if (!pendingDocument) {
 			client.exec('COMMIT');
@@ -653,7 +650,7 @@ function claimNextPendingBloodworkDocument(db: VitalsDatabase) {
 		client
 			.prepare(
 				[
-					'UPDATE bloodwork_documents',
+					'UPDATE lab_documents',
 					"SET status = 'processing',",
 					'started_at = ?,',
 					'completed_at = NULL,',
@@ -672,36 +669,36 @@ function claimNextPendingBloodworkDocument(db: VitalsDatabase) {
 	}
 }
 
-export function resetStuckBloodworkDocuments(db = getDatabase()) {
+export function resetStuckLabDocuments(db = getDatabase()) {
 	const interruptedDocuments = db
 		.select({
-			id: bloodworkDocuments.id,
-			fileName: bloodworkDocuments.fileName,
+			id: labDocuments.id,
+			fileName: labDocuments.fileName,
 		})
-		.from(bloodworkDocuments)
-		.where(eq(bloodworkDocuments.status, 'processing'))
+		.from(labDocuments)
+		.where(eq(labDocuments.status, 'processing'))
 		.all();
 
 	if (interruptedDocuments.length === 0) {
 		return;
 	}
 
-	db.update(bloodworkDocuments)
+	db.update(labDocuments)
 		.set({
 			status: 'pending',
 			statusText: 'Queued after interrupted processing',
 			startedAt: null,
 			lastError: 'Processing was interrupted and has been retried.',
 		})
-		.where(eq(bloodworkDocuments.status, 'processing'))
+		.where(eq(labDocuments.status, 'processing'))
 		.run();
 
 	for (const document of interruptedDocuments) {
-		logBloodworkDocumentEvent(document, 'Queued after interrupted processing');
+		logLabDocumentEvent(document, 'Queued after interrupted processing');
 	}
 }
 
-export function enqueueBloodworkDocuments(
+export function enqueueLabDocuments(
 	db: VitalsDatabase,
 	files: Array<{
 		fileName: string;
@@ -713,7 +710,7 @@ export function enqueueBloodworkDocuments(
 	const queued: Array<{
 		id: number;
 		fileName: string;
-		status: BloodworkDocumentRow['status'];
+		status: LabDocumentRow['status'];
 		statusText: string;
 		queuedAt: string;
 		deduplicated: boolean;
@@ -723,18 +720,18 @@ export function enqueueBloodworkDocuments(
 		const sha256 = createHash('sha256').update(file.pdfData).digest('hex');
 		const existing = db
 			.select({
-				id: bloodworkDocuments.id,
-				fileName: bloodworkDocuments.fileName,
-				status: bloodworkDocuments.status,
-				statusText: bloodworkDocuments.statusText,
-				queuedAt: bloodworkDocuments.queuedAt,
+				id: labDocuments.id,
+				fileName: labDocuments.fileName,
+				status: labDocuments.status,
+				statusText: labDocuments.statusText,
+				queuedAt: labDocuments.queuedAt,
 			})
-			.from(bloodworkDocuments)
-			.where(eq(bloodworkDocuments.sha256, sha256))
+			.from(labDocuments)
+			.where(eq(labDocuments.sha256, sha256))
 			.get();
 
 		if (existing) {
-			logBloodworkDocumentEvent(existing, 'Duplicate upload skipped');
+			logLabDocumentEvent(existing, 'Duplicate upload skipped');
 			queued.push({
 				...existing,
 				deduplicated: true,
@@ -743,7 +740,7 @@ export function enqueueBloodworkDocuments(
 		}
 
 		const inserted = db
-			.insert(bloodworkDocuments)
+			.insert(labDocuments)
 			.values({
 				fileName: file.fileName,
 				mimeType: file.mimeType,
@@ -754,11 +751,11 @@ export function enqueueBloodworkDocuments(
 				queuedAt: now,
 			})
 			.returning({
-				id: bloodworkDocuments.id,
-				fileName: bloodworkDocuments.fileName,
-				status: bloodworkDocuments.status,
-				statusText: bloodworkDocuments.statusText,
-				queuedAt: bloodworkDocuments.queuedAt,
+				id: labDocuments.id,
+				fileName: labDocuments.fileName,
+				status: labDocuments.status,
+				statusText: labDocuments.statusText,
+				queuedAt: labDocuments.queuedAt,
 			})
 			.get();
 
@@ -766,38 +763,35 @@ export function enqueueBloodworkDocuments(
 			...inserted,
 			deduplicated: false,
 		});
-		logBloodworkDocumentEvent(inserted, inserted.statusText);
+		logLabDocumentEvent(inserted, inserted.statusText);
 	}
 
 	return queued;
 }
 
-function updateBloodworkDocumentStatus(
+function updateLabDocumentStatus(
 	db: VitalsDatabase,
-	document: Pick<BloodworkDocumentRow, 'id' | 'fileName'>,
+	document: Pick<LabDocumentRow, 'id' | 'fileName'>,
 	statusText: string,
 ) {
-	db.update(bloodworkDocuments)
+	db.update(labDocuments)
 		.set({
 			statusText,
 		})
-		.where(eq(bloodworkDocuments.id, document.id))
+		.where(eq(labDocuments.id, document.id))
 		.run();
 
-	logBloodworkDocumentEvent(document, statusText);
+	logLabDocumentEvent(document, statusText);
 }
 
-function logBloodworkDocumentEvent(
-	document: Pick<BloodworkDocumentRow, 'id' | 'fileName'>,
-	message: string,
-) {
-	console.log(`[bloodwork] #${document.id} ${document.fileName}: ${message}`);
+function logLabDocumentEvent(document: Pick<LabDocumentRow, 'id' | 'fileName'>, message: string) {
+	console.log(`[labs] #${document.id} ${document.fileName}: ${message}`);
 }
 
-function clearBloodworkDocumentDerivedData(db: VitalsDatabase, documentId: number) {
+function clearLabDocumentDerivedData(db: VitalsDatabase, documentId: number) {
 	db.transaction(tx => {
-		tx.delete(bloodworkResults).where(eq(bloodworkResults.documentId, documentId)).run();
-		tx.update(bloodworkDocuments)
+		tx.delete(labResults).where(eq(labResults.documentId, documentId)).run();
+		tx.update(labDocuments)
 			.set({
 				completedAt: null,
 				failedAt: null,
@@ -812,15 +806,15 @@ function clearBloodworkDocumentDerivedData(db: VitalsDatabase, documentId: numbe
 				country: null,
 				notes: null,
 			})
-			.where(eq(bloodworkDocuments.id, documentId))
+			.where(eq(labDocuments.id, documentId))
 			.run();
 	});
 }
 
-async function splitBloodworkPdfIntoPages(document: BloodworkDocumentRow) {
+async function splitLabPdfIntoPages(document: LabDocumentRow) {
 	const sourcePdf = await PDFDocument.load(document.pdfData);
 	const pageCount = sourcePdf.getPageCount();
-	const pages: BloodworkPdfPage[] = [];
+	const pages: LabPdfPage[] = [];
 	const baseName = path.basename(document.fileName, path.extname(document.fileName));
 
 	for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
@@ -839,24 +833,20 @@ async function splitBloodworkPdfIntoPages(document: BloodworkDocumentRow) {
 	return pages;
 }
 
-async function processBloodworkDocument(db: VitalsDatabase, documentId: number) {
-	const document = db
-		.select()
-		.from(bloodworkDocuments)
-		.where(eq(bloodworkDocuments.id, documentId))
-		.get();
+async function processLabDocument(db: VitalsDatabase, documentId: number) {
+	const document = db.select().from(labDocuments).where(eq(labDocuments.id, documentId)).get();
 	if (!document || document.status !== 'processing') {
 		return;
 	}
 
 	try {
-		updateBloodworkDocumentStatus(db, document, 'Clearing previous imported data');
-		clearBloodworkDocumentDerivedData(db, documentId);
+		updateLabDocumentStatus(db, document, 'Clearing previous imported data');
+		clearLabDocumentDerivedData(db, documentId);
 		const provider = createOpenRouter({ apiKey: env.OPENROUTER_API_KEY });
-		const existingMeasurements = db.select().from(bloodworkMeasurements).all();
-		updateBloodworkDocumentStatus(db, document, 'Splitting document into pages');
-		const pages = await splitBloodworkPdfIntoPages(document);
-		updateBloodworkDocumentStatus(
+		const existingMeasurements = db.select().from(labMeasurements).all();
+		updateLabDocumentStatus(db, document, 'Splitting document into pages');
+		const pages = await splitLabPdfIntoPages(document);
+		updateLabDocumentStatus(
 			db,
 			document,
 			`Extracting measurements from ${pages.length} page${pages.length === 1 ? '' : 's'}`,
@@ -867,7 +857,7 @@ async function processBloodworkDocument(db: VitalsDatabase, documentId: number) 
 			document,
 			pages,
 		});
-		updateBloodworkDocumentStatus(
+		updateLabDocumentStatus(
 			db,
 			document,
 			`Normalizing ${extractionPass.output.measurements.length} measurement${extractionPass.output.measurements.length === 1 ? '' : 's'}`,
@@ -886,7 +876,7 @@ async function processBloodworkDocument(db: VitalsDatabase, documentId: number) 
 		const savedStatusText = `Saving ${resultDrafts.length} normalized result${resultDrafts.length === 1 ? '' : 's'}`;
 		const completedStatusText = `Imported ${resultDrafts.length} result${resultDrafts.length === 1 ? '' : 's'}`;
 
-		updateBloodworkDocumentStatus(db, document, savedStatusText);
+		updateLabDocumentStatus(db, document, savedStatusText);
 
 		db.transaction(tx => {
 			const measurementIdByKey = upsertMeasurementDrafts(
@@ -895,7 +885,7 @@ async function processBloodworkDocument(db: VitalsDatabase, documentId: number) 
 			);
 
 			if (resultDrafts.length > 0) {
-				tx.insert(bloodworkResults)
+				tx.insert(labResults)
 					.values(
 						resultDrafts.map((draft, index) => ({
 							documentId,
@@ -920,7 +910,7 @@ async function processBloodworkDocument(db: VitalsDatabase, documentId: number) 
 					.run();
 			}
 
-			tx.update(bloodworkDocuments)
+			tx.update(labDocuments)
 				.set({
 					status: 'completed',
 					statusText: completedStatusText,
@@ -937,21 +927,21 @@ async function processBloodworkDocument(db: VitalsDatabase, documentId: number) 
 					country: metadata.country,
 					notes: metadata.notes,
 				})
-				.where(eq(bloodworkDocuments.id, documentId))
+				.where(eq(labDocuments.id, documentId))
 				.run();
 		});
-		logBloodworkDocumentEvent(document, completedStatusText);
+		logLabDocumentEvent(document, completedStatusText);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
-		logBloodworkDocumentEvent(document, `Import failed: ${message}`);
-		db.update(bloodworkDocuments)
+		logLabDocumentEvent(document, `Import failed: ${message}`);
+		db.update(labDocuments)
 			.set({
 				status: 'failed',
 				statusText: 'Import failed',
 				failedAt: new Date().toISOString(),
 				lastError: message,
 			})
-			.where(eq(bloodworkDocuments.id, documentId))
+			.where(eq(labDocuments.id, documentId))
 			.run();
 	}
 }
@@ -959,8 +949,8 @@ async function processBloodworkDocument(db: VitalsDatabase, documentId: number) 
 async function runExtractionPass(args: {
 	provider: ReturnType<typeof createOpenRouter>;
 	modelId: string;
-	document: BloodworkDocumentRow;
-	pages: BloodworkPdfPage[];
+	document: LabDocumentRow;
+	pages: LabPdfPage[];
 }): Promise<StructuredPassResult<ExtractionPassOutput>> {
 	const { provider, modelId, document, pages } = args;
 
@@ -1026,7 +1016,7 @@ async function runNormalizationPass(args: {
 	provider: ReturnType<typeof createOpenRouter>;
 	modelId: string;
 	fileName: string;
-	existingMeasurements: BloodworkMeasurementRow[];
+	existingMeasurements: LabMeasurementRow[];
 	input: PageNormalizationInput;
 }): Promise<StructuredPassResult<LooseNormalizationPassOutput>> {
 	const { provider, modelId, fileName, existingMeasurements, input } = args;
@@ -1063,7 +1053,7 @@ async function runNormalizationPass(args: {
 function buildExtractionPrompt(args: { fileName: string; pageNumber: number; pageCount: number }) {
 	const { fileName, pageNumber, pageCount } = args;
 	return [
-		'Analyze this bloodwork PDF page and return only structured JSON that matches the schema.',
+		'Analyze this lab PDF page and return only structured JSON that matches the schema.',
 		`This file contains original page ${pageNumber} of ${pageCount}.`,
 		'Read the attached raw PDF page directly.',
 		'Return only lab measurement rows that have a visible result value on this page.',
@@ -1100,7 +1090,7 @@ function buildExtractionPrompt(args: { fileName: string; pageNumber: number; pag
 
 function buildNormalizationPrompt(args: {
 	fileName: string;
-	existingMeasurements: BloodworkMeasurementRow[];
+	existingMeasurements: LabMeasurementRow[];
 	input: PageNormalizationInput;
 }) {
 	const { fileName, existingMeasurements, input } = args;
@@ -1116,7 +1106,7 @@ function buildNormalizationPrompt(args: {
 		.slice(0, 600);
 
 	return [
-		'Normalize the extracted bloodwork rows from this PDF page.',
+		'Normalize the extracted lab rows from this PDF page.',
 		`This file contains original page ${input.page.pageNumber} of ${input.page.pageCount}.`,
 		'Use the attached raw PDF page to verify values, units, and reference ranges for the listed rows.',
 		'Return one final result per logical measurement from the extracted rows on this page.',
@@ -1307,12 +1297,12 @@ function buildDraftsFromNormalization(output: NormalizationPassOutput) {
 
 async function resolveNormalizationOutput(args: {
 	db: VitalsDatabase;
-	document: BloodworkDocumentRow;
+	document: LabDocumentRow;
 	provider: ReturnType<typeof createOpenRouter>;
 	modelId: string;
-	existingMeasurements: BloodworkMeasurementRow[];
+	existingMeasurements: LabMeasurementRow[];
 	extractionPass: StructuredPassResult<ExtractionPassOutput>;
-	pages: BloodworkPdfPage[];
+	pages: LabPdfPage[];
 }) {
 	const { db, document, provider, modelId, existingMeasurements, extractionPass, pages } = args;
 	const measurementsByPage = new Map<number, ExtractionPassOutput['measurements']>();
@@ -1368,14 +1358,14 @@ async function resolveNormalizationOutput(args: {
 					throw error;
 				}
 
-				updateBloodworkDocumentStatus(
+				updateLabDocumentStatus(
 					db,
 					document,
 					`Retrying normalization for page ${formatNormalizationBatchLabel(input)}`,
 				);
-				logBloodworkDocumentEvent(
+				logLabDocumentEvent(
 					document,
-					`Normalization retry reason on page ${formatNormalizationBatchLabel(input)}: ${formatBloodworkError(error)}`,
+					`Normalization retry reason on page ${formatNormalizationBatchLabel(input)}: ${formatLabError(error)}`,
 				);
 
 				const retryPass = await runNormalizationPass({
@@ -1408,7 +1398,7 @@ async function resolveNormalizationOutput(args: {
 }
 
 function formatNormalizationBatchLabel(input: {
-	page: Pick<BloodworkPdfPage, 'pageNumber'>;
+	page: Pick<LabPdfPage, 'pageNumber'>;
 	batchIndex: number;
 	batchCount: number;
 }) {
@@ -1432,12 +1422,12 @@ function chunkItems<T>(items: T[], chunkSize: number) {
 	return chunks;
 }
 
-function formatBloodworkError(error: unknown) {
+function formatLabError(error: unknown) {
 	return error instanceof Error ? error.message : String(error);
 }
 
 function isRetryableNormalizationFormatError(error: unknown) {
-	const message = formatBloodworkError(error).toLowerCase();
+	const message = formatLabError(error).toLowerCase();
 
 	return (
 		message.includes('invalid input') ||
@@ -1563,13 +1553,13 @@ function upsertMeasurementDrafts(db: VitalsDatabase, drafts: MeasurementDraft[])
 	for (const draft of drafts) {
 		const existing = db
 			.select()
-			.from(bloodworkMeasurements)
-			.where(eq(bloodworkMeasurements.key, draft.key))
+			.from(labMeasurements)
+			.where(eq(labMeasurements.key, draft.key))
 			.get();
 
 		if (!existing) {
 			const inserted = db
-				.insert(bloodworkMeasurements)
+				.insert(labMeasurements)
 				.values({
 					key: draft.key,
 					name: draft.name,
@@ -1586,13 +1576,13 @@ function upsertMeasurementDrafts(db: VitalsDatabase, drafts: MeasurementDraft[])
 					updatedAt: now,
 				})
 				.returning({
-					id: bloodworkMeasurements.id,
+					id: labMeasurements.id,
 				})
 				.get();
 			idByKey.set(draft.key, inserted.id);
 			if (draft.category === OTHER_CATEGORY) {
 				console.log(
-					`[bloodwork] new measurement ${draft.name} (${draft.key}) assigned to ${OTHER_CATEGORY}`,
+					`[labs] new measurement ${draft.name} (${draft.key}) assigned to ${OTHER_CATEGORY}`,
 				);
 			}
 			continue;
@@ -1607,7 +1597,7 @@ function upsertMeasurementDrafts(db: VitalsDatabase, drafts: MeasurementDraft[])
 			draft.rangeEvidence,
 		);
 
-		db.update(bloodworkMeasurements)
+		db.update(labMeasurements)
 			.set({
 				name: draft.name,
 				category: draft.category,
@@ -1621,12 +1611,12 @@ function upsertMeasurementDrafts(db: VitalsDatabase, drafts: MeasurementDraft[])
 				rangeEvidenceJson: rangeEvidence,
 				updatedAt: now,
 			})
-			.where(eq(bloodworkMeasurements.id, existing.id))
+			.where(eq(labMeasurements.id, existing.id))
 			.run();
 
 		if (draft.category === OTHER_CATEGORY && existing.category !== OTHER_CATEGORY) {
 			console.log(
-				`[bloodwork] measurement ${draft.name} (${draft.key}) reassigned to ${OTHER_CATEGORY}`,
+				`[labs] measurement ${draft.name} (${draft.key}) reassigned to ${OTHER_CATEGORY}`,
 			);
 		}
 

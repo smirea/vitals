@@ -9,18 +9,18 @@ import {
 	uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
 
-const bloodworkDocumentStatusValues = ['pending', 'processing', 'completed', 'failed'] as const;
+const labDocumentStatusValues = ['pending', 'processing', 'completed', 'failed'] as const;
 const pillTimingValues = ['morning', 'afternoon', 'evening'] as const;
 
-export const bloodworkDocuments = sqliteTable(
-	'bloodwork_documents',
+export const labDocuments = sqliteTable(
+	'lab_documents',
 	{
 		id: integer('id').primaryKey({ autoIncrement: true }),
 		fileName: text('file_name').notNull(),
 		mimeType: text('mime_type').notNull(),
 		pdfData: blob('pdf_data', { mode: 'buffer' }).notNull(),
 		sha256: text('sha256').notNull(),
-		status: text('status', { enum: bloodworkDocumentStatusValues }).notNull().default('pending'),
+		status: text('status', { enum: labDocumentStatusValues }).notNull().default('pending'),
 		statusText: text('status_text').notNull().default('Queued for import'),
 		group: text('group'),
 		queuedAt: text('queued_at').notNull(),
@@ -40,14 +40,14 @@ export const bloodworkDocuments = sqliteTable(
 		rawMarkdown: text('raw_markdown'),
 	},
 	table => [
-		uniqueIndex('bloodwork_documents_sha256_idx').on(table.sha256),
-		index('bloodwork_documents_status_idx').on(table.status, table.id),
-		index('bloodwork_documents_date_idx').on(table.date, table.id),
+		uniqueIndex('lab_documents_sha256_idx').on(table.sha256),
+		index('lab_documents_status_idx').on(table.status, table.id),
+		index('lab_documents_date_idx').on(table.date, table.id),
 	],
 );
 
-export const bloodworkMeasurements = sqliteTable(
-	'bloodwork_measurements',
+export const labMeasurements = sqliteTable(
+	'lab_measurements',
 	{
 		id: integer('id').primaryKey({ autoIncrement: true }),
 		key: text('key').notNull(),
@@ -65,21 +65,21 @@ export const bloodworkMeasurements = sqliteTable(
 		updatedAt: text('updated_at').notNull(),
 	},
 	table => [
-		uniqueIndex('bloodwork_measurements_key_idx').on(table.key),
-		index('bloodwork_measurements_name_idx').on(table.name, table.id),
+		uniqueIndex('lab_measurements_key_idx').on(table.key),
+		index('lab_measurements_name_idx').on(table.name, table.id),
 	],
 );
 
-export const bloodworkResults = sqliteTable(
-	'bloodwork_results',
+export const labResults = sqliteTable(
+	'lab_results',
 	{
 		id: integer('id').primaryKey({ autoIncrement: true }),
 		documentId: integer('document_id')
 			.notNull()
-			.references(() => bloodworkDocuments.id, { onDelete: 'cascade' }),
+			.references(() => labDocuments.id, { onDelete: 'cascade' }),
 		measurementId: integer('measurement_id')
 			.notNull()
-			.references(() => bloodworkMeasurements.id, { onDelete: 'cascade' }),
+			.references(() => labMeasurements.id, { onDelete: 'cascade' }),
 		sortOrder: integer('sort_order').notNull(),
 		originalName: text('original_name'),
 		originalValueText: text('original_value_text'),
@@ -100,12 +100,9 @@ export const bloodworkResults = sqliteTable(
 			.default(sql`'[]'`),
 	},
 	table => [
-		uniqueIndex('bloodwork_results_document_measurement_idx').on(
-			table.documentId,
-			table.measurementId,
-		),
-		index('bloodwork_results_document_sort_idx').on(table.documentId, table.sortOrder, table.id),
-		index('bloodwork_results_measurement_idx').on(table.measurementId, table.id),
+		uniqueIndex('lab_results_document_measurement_idx').on(table.documentId, table.measurementId),
+		index('lab_results_document_sort_idx').on(table.documentId, table.sortOrder, table.id),
+		index('lab_results_measurement_idx').on(table.measurementId, table.id),
 	],
 );
 
@@ -220,22 +217,22 @@ export const pillPeriodTags = sqliteTable(
 	],
 );
 
-export const bloodworkDocumentsRelations = relations(bloodworkDocuments, ({ many }) => ({
-	results: many(bloodworkResults),
+export const labDocumentsRelations = relations(labDocuments, ({ many }) => ({
+	results: many(labResults),
 }));
 
-export const bloodworkMeasurementsRelations = relations(bloodworkMeasurements, ({ many }) => ({
-	results: many(bloodworkResults),
+export const labMeasurementsRelations = relations(labMeasurements, ({ many }) => ({
+	results: many(labResults),
 }));
 
-export const bloodworkResultsRelations = relations(bloodworkResults, ({ one }) => ({
-	document: one(bloodworkDocuments, {
-		fields: [bloodworkResults.documentId],
-		references: [bloodworkDocuments.id],
+export const labResultsRelations = relations(labResults, ({ one }) => ({
+	document: one(labDocuments, {
+		fields: [labResults.documentId],
+		references: [labDocuments.id],
 	}),
-	measurement: one(bloodworkMeasurements, {
-		fields: [bloodworkResults.measurementId],
-		references: [bloodworkMeasurements.id],
+	measurement: one(labMeasurements, {
+		fields: [labResults.measurementId],
+		references: [labMeasurements.id],
 	}),
 }));
 
@@ -295,14 +292,14 @@ export const pillPeriodTagsRelations = relations(pillPeriodTags, ({ one }) => ({
 	}),
 }));
 
-export const bloodworkTables = {
-	bloodworkDocuments,
-	bloodworkMeasurements,
-	bloodworkResults,
+export const labTables = {
+	labDocuments,
+	labMeasurements,
+	labResults,
 } as const;
 
 export const appTables = {
-	...bloodworkTables,
+	...labTables,
 	pills,
 	pillComponents,
 	pillImages,
@@ -314,9 +311,9 @@ export const appTables = {
 
 export const schema = {
 	...appTables,
-	bloodworkDocumentsRelations,
-	bloodworkMeasurementsRelations,
-	bloodworkResultsRelations,
+	labDocumentsRelations,
+	labMeasurementsRelations,
+	labResultsRelations,
 	pillsRelations,
 	pillComponentsRelations,
 	pillImagesRelations,
@@ -326,9 +323,9 @@ export const schema = {
 	pillPeriodTagsRelations,
 };
 
-export type BloodworkDocumentRow = typeof bloodworkDocuments.$inferSelect;
-export type BloodworkMeasurementRow = typeof bloodworkMeasurements.$inferSelect;
-export type BloodworkResultRow = typeof bloodworkResults.$inferSelect;
+export type LabDocumentRow = typeof labDocuments.$inferSelect;
+export type LabMeasurementRow = typeof labMeasurements.$inferSelect;
+export type LabResultRow = typeof labResults.$inferSelect;
 export type PillRow = typeof pills.$inferSelect;
 export type PillComponentRow = typeof pillComponents.$inferSelect;
 export type PillImageRow = typeof pillImages.$inferSelect;

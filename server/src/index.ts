@@ -2,7 +2,7 @@ import path from 'path';
 
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 
-import { getBloodworkDocumentPdf, startBloodworkProcessor } from 'server/db/bloodwork.ts';
+import { getLabDocumentPdf, startLabProcessor } from 'server/db/labs.ts';
 import { getDatabase } from 'server/db/client.ts';
 import env from 'server/env.ts';
 import { appRouter, createTrpcContext } from 'server/trpc/index.ts';
@@ -22,8 +22,8 @@ function getCorsHeaders(req: Request) {
 	};
 }
 
-function getBloodworkDocumentPdfResponse(req: Request) {
-	const match = new URL(req.url).pathname.match(/^\/bloodwork\/documents\/(\d+)\/pdf$/);
+function getLabDocumentPdfResponse(req: Request) {
+	const match = new URL(req.url).pathname.match(/^\/labs\/documents\/(\d+)\/pdf$/);
 	if (!match) {
 		return null;
 	}
@@ -33,7 +33,7 @@ function getBloodworkDocumentPdfResponse(req: Request) {
 		return Response.json({ ok: false, error: 'Invalid document id' }, { status: 400 });
 	}
 
-	const document = getBloodworkDocumentPdf(getDatabase(), documentId);
+	const document = getLabDocumentPdf(getDatabase(), documentId);
 	if (!document) {
 		return Response.json({ ok: false, error: 'Document not found' }, { status: 404 });
 	}
@@ -49,7 +49,7 @@ function getBloodworkDocumentPdfResponse(req: Request) {
 }
 
 await Bun.$`bunx drizzle-kit push --config drizzle.config.ts --force`.cwd(projectRoot);
-startBloodworkProcessor();
+startLabProcessor();
 
 const server = Bun.serve({
 	development: true,
@@ -82,8 +82,8 @@ const server = Bun.serve({
 				headers: nextHeaders,
 			});
 		},
-		'/bloodwork/documents/*': req =>
-			getBloodworkDocumentPdfResponse(req) ??
+		'/labs/documents/*': req =>
+			getLabDocumentPdfResponse(req) ??
 			Response.json({ ok: false, error: 'Not found' }, { status: 404 }),
 		'/*': Response.json({ ok: false, error: 'Not found' }, { status: 404 }),
 	},

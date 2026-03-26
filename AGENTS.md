@@ -8,7 +8,7 @@ All the environment variables are in `.env` and `.env.local` and are managed wit
 
 # Broad guidelines
 
-This is an information dense, concise but comprehensive tool to analyze all sorts of information about 1 person: medical information such as bloodwork, food tracking, supplement tracking,workouts and the like
+This is an information dense, concise but comprehensive tool to analyze all sorts of information about 1 person: medical information such as labs, food tracking, supplement tracking,workouts and the like
 
 # Stack
 

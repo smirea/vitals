@@ -43,7 +43,7 @@ import type {
 	VitalsCategoryRow,
 	VitalsDisplayRow,
 	VitalsRowModel,
-} from './_bloodwork';
+} from './_labs';
 import {
 	formatNormalizedYAxisTick,
 	formatPrettyDate,
@@ -52,7 +52,7 @@ import {
 	OVERVIEW_COLUMN_WIDTH,
 	SELECTION_COLUMN_WIDTH,
 	SOURCE_COLUMN_WIDTH,
-} from './_bloodwork';
+} from './_labs';
 
 type ThemeVarsStyle = CSSProperties & Record<string, string>;
 

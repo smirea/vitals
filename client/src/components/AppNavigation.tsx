@@ -19,9 +19,9 @@ const navigationItems = [
 		icon: <HomeOutlined />,
 	},
 	{
-		key: '/bloodwork',
-		to: '/bloodwork',
-		label: 'Bloodwork',
+		key: '/labs',
+		to: '/labs',
+		label: 'Labs',
 		icon: <MedicineBoxOutlined />,
 	},
 	{

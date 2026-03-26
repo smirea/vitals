@@ -31,8 +31,8 @@ function HomePage() {
 							className='home-copy-body'
 							style={{ color: token.colorTextSecondary, fontSize: 16 }}
 						>
-							This is a stub page for the routed app shell. Bloodwork now lives under the dedicated
-							`/bloodwork` page.
+							This is a stub page for the routed app shell. Labs now lives under the dedicated
+							`/labs` page.
 						</Typography.Paragraph>
 					</div>
 				</div>

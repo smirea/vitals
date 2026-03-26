@@ -18,6 +18,7 @@ const defaultDbPath = path.isAbsolute(env.VITALS_DB_PATH)
 
 function ensureRuntimeDatabaseObjects(client: Database) {
 	client.exec('DROP TRIGGER IF EXISTS bloodwork_results_cleanup_measurements_after_delete');
+	client.exec('DROP TRIGGER IF EXISTS lab_results_cleanup_measurements_after_delete');
 }
 
 function createSqliteClient(dbPath: string): Database {

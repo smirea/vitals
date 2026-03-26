@@ -6,7 +6,7 @@ import { generateText, Output } from 'ai';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import env from 'server/env';
 import { getDatabase } from 'server/db/client';
-import { bloodworkMeasurements } from 'server/db/schema';
+import { labMeasurements } from 'server/db/schema';
 import { textBlock } from 'shared/textBlock';
 import z from 'zod';
 import { createHash } from 'crypto';
@@ -15,7 +15,7 @@ import typedUnits from './units.json';
 
 const tmpDir = path.join('/tmp', 'vitals');
 fs.mkdirSync(tmpDir, { recursive: true });
-const units = typedUnits as Record<string, string | { count: number; unit: string }>;
+const unitsJson = typedUnits as Record<string, string | { count: number; unit: string }>;
 
 const openrouter = createOpenRouter({ apiKey: env.OPENROUTER_API_KEY });
 
@@ -51,9 +51,13 @@ void createScript(async () => {
 						valueText: z.string(),
 						unit: z.string(),
 						valueNumeric: z.number().optional(),
-						rangeText: z.string().optional(),
-						rangeMin: z.number().optional(),
-						rangeMax: z.number().optional(),
+						range: z
+							.object({
+								text: z.string(),
+								min: z.number().optional(),
+								max: z.number().optional(),
+							})
+							.optional(),
 						flag: z.string().optional(),
 					}),
 				),
@@ -68,61 +72,76 @@ void createScript(async () => {
 			<database>${Object.entries(measurementsDb)
 				.map(
 					([name, { aliases }]) =>
-						`- '${name}'${aliases.length ? ' known aliases: ' + aliases.join('; ') : 'no other known aliases'}`,
+						`- '${name}' (canonical name) ${aliases.length ? ', known aliases: ' + aliases.join('; ') : ': no other known aliases'}`,
 				)
 				.join('\n')}</database>
 
 			type output_json_schema = {
-				date?: string; // the date the lab was made, if provided
+				date?: string; // ISO date the lab was made, if provided
 				labName?: string; // the name of the company that processed this
 				location?: string; // full address including city, country, if available
 				measurements: Array<{
-					name: string; // canonical name according to the <database /> if possible, otherwise the translated source name
+					name: string; // canonical name according to the <database /> if possible. If there is no high certainty match in the <database /> then translate and sanitize the source name
 					sourceName: string; // the literal name from the source, unaltered
 					valueText: string; // the literal value from the source, unaltered and without the unit
 					valueNumeric?: number; // the number value if this is a numeric value
 					unit: 'n/a' | string; // the unit for this measurement
-					rangeText?: string; // the literal reference range if provided
-					rangeMin?: number; // parse min reference value if provided
-					rangeMax?: number; // parsed max reference value if provided
-					flag?: string; // if there is any flag for this specific measurement
+					range?: {
+						text: string; // the literal reference range if provided
+						min?: number; // parse min reference value if provided
+						max?: number; // parsed max reference value if provided
+					}
+					flag?: string; // if there is any flag for this specific measurement or notes
 				}>
 			}
 		`,
 		prompt: `<markdown>${markdown}</markdown>`,
 	});
 
-	const toFigureOut: { measurement: string; unit: string }[] = [];
+	// 🏁 assume LLM has correctly matched names to the ones in the database and proceed with unit mapping
+
 	const canonicalUnits = Object.fromEntries(
 		Object.entries(measurementsDb).map(x => [x[0].toLocaleLowerCase(), x[1].unit]),
 	);
 
+	const toFigureOut: { measurement: string; unit: string }[] = [];
+
 	for (const item of result.output.measurements) {
-		let added = false;
-		const matchedDb = measurementsDb[item.name];
+		const matchedDb = measurementsDb[item.name.toLocaleLowerCase().trim()];
 		if (item.valueNumeric == null) {
 			if (/^\d+$/.test(item.valueText)) item.valueNumeric = parseInt(item.valueText, 10);
 			else if (/^\d+(\.\d+)?$/.test(item.valueText)) item.valueNumeric = parseFloat(item.valueText);
 		}
-		if (item.unit) {
-			item.unit = item.unit.toLocaleLowerCase().trim();
-			if (item.unit === 'n/a') {
-				delete (item as any).unit;
-			} else if (!getMeasureKind(item.unit)) {
-				const mapped = units[item.unit];
-				if (mapped) {
-					if (typeof mapped === 'string') item.unit = mapped;
-					else {
-						item.unit = mapped.unit;
-						if (item.valueNumeric) item.valueNumeric *= mapped.count || 1;
-					}
-				} else {
-					toFigureOut.push({ unit: item.unit, measurement: item.name });
-					added = true;
-				}
+		if (!item.unit) continue;
+		item.unit = item.unit.toLocaleLowerCase().trim();
+		if (item.unit === 'n/a') {
+			delete (item as any).unit;
+			continue;
+		}
+
+		if (item.unit === matchedDb?.unit) continue;
+
+		let multiplier = 1;
+		if (unitsJson[item.unit]) {
+			const m = unitsJson[item.unit];
+			if (typeof m === 'string') item.unit = m;
+			else {
+				item.unit = m.unit;
+				multiplier = m.count;
 			}
-		} else if (canonicalUnits[item.name.toLocaleLowerCase().trim()]) {
-			item.unit = canonicalUnits[item.name.toLocaleLowerCase().trim()]!;
+		}
+		if (item.valueNumeric) item.valueNumeric *= multiplier;
+		if (item.range?.min) item.range.min *= multiplier;
+		if (item.range?.max) item.range.max *= multiplier;
+
+		if (matchedDb?.unit) {
+			const map = (unit: string, value: number) =>
+				convert(value, unit as any).to(matchedDb.unit as any).quantity;
+			// matched AND both have units AND units are different AND we know how to convert
+			if (getMeasureKind(item.unit)) {
+				if (item.valueNumeric) item.valueNumeric = map(item.valueText, item.valueNumeric);
+			} else {
+			}
 		}
 	}
 
@@ -172,8 +191,8 @@ async function compileMeasurementDatabase() {
 	const db = getDatabase();
 	const measurements = db
 		.select()
-		.from(bloodworkMeasurements)
-		.orderBy(bloodworkMeasurements.name, bloodworkMeasurements.id)
+		.from(labMeasurements)
+		.orderBy(labMeasurements.name, labMeasurements.id)
 		.all();
 
 	for (const measurement of measurements) {
@@ -191,7 +210,7 @@ async function compileMeasurementDatabase() {
 function extractMarkdown(file: string) {
 	console.log(style.header('convert to markdown via marker-pdf'));
 	const hash = createHash('sha256').update(fs.readFileSync(file).toString()).digest('hex');
-	const targetDir = path.join(tmpDir, 'bloodwork_' + hash);
+	const targetDir = path.join(tmpDir, 'lab_' + hash);
 	let outDir: string | undefined = undefined;
 
 	if (fs.existsSync(targetDir)) {

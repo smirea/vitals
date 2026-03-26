@@ -1,12 +1,12 @@
 import type {
-	BloodworkDashboardDocument,
-	BloodworkDashboardMeasurement,
-	BloodworkDashboardResult,
+	LabDashboardDocument,
+	LabDashboardMeasurement,
+	LabDashboardResult,
 } from '../../utils/api';
 
 export type MeasurementFlag = 'low' | 'high' | 'normal' | 'abnormal' | 'critical' | 'unknown';
 
-export type BloodworkMeasurementRecord = {
+export type LabMeasurementRecord = {
 	key: string;
 	name: string;
 	category: string | null;
@@ -336,7 +336,7 @@ export function normalizeCategoryLabel(value: string | null | undefined): string
 	return trimmed || UNCATEGORIZED_CATEGORY_LABEL;
 }
 
-export function formatCell(measurement: BloodworkMeasurementRecord): MeasurementCell {
+export function formatCell(measurement: LabMeasurementRecord): MeasurementCell {
 	const valueText = measurement.valueText?.trim() ?? '';
 	const unitText = measurement.unit?.trim() ?? '';
 	const rangeMin = measurement.referenceRangeMin;
@@ -520,9 +520,7 @@ export function formatNormalizedYAxisTick(value: number): string {
 const FAVORITES_CATEGORY_LABEL = 'Favorites';
 const SIX_MONTHS = 6;
 
-export function getOrderedDocuments(
-	documents: BloodworkDashboardDocument[],
-): BloodworkDashboardDocument[] {
+export function getOrderedDocuments(documents: LabDashboardDocument[]): LabDashboardDocument[] {
 	return [...documents].sort((left, right) => {
 		const leftDate = left.date ?? '';
 		const rightDate = right.date ?? '';
@@ -533,7 +531,7 @@ export function getOrderedDocuments(
 	});
 }
 
-export function getSources(orderedDocuments: BloodworkDashboardDocument[]): SourceColumn[] {
+export function getSources(orderedDocuments: LabDashboardDocument[]): SourceColumn[] {
 	const groupedSources: Array<Omit<SourceColumn, 'index'>> = [];
 	const sourceIndexByGroup = new Map<string, number>();
 
@@ -650,12 +648,12 @@ export function getAllMeasurementRows({
 	results,
 }: {
 	sources: SourceColumn[];
-	measurements: BloodworkDashboardMeasurement[];
-	results: BloodworkDashboardResult[];
+	measurements: LabDashboardMeasurement[];
+	results: LabDashboardResult[];
 }): VitalsRowModel[] {
 	const grouped = new Map<string, VitalsRowModel>();
 	const measurementById = new Map(measurements.map(measurement => [measurement.id, measurement]));
-	const resultsByDocumentId = new Map<number, BloodworkDashboardResult[]>();
+	const resultsByDocumentId = new Map<number, LabDashboardResult[]>();
 
 	results.forEach(result => {
 		const existing = resultsByDocumentId.get(result.documentId);
@@ -667,7 +665,7 @@ export function getAllMeasurementRows({
 	});
 
 	sources.forEach(source => {
-		const resultsByMeasurementId = new Map<number, BloodworkDashboardResult>();
+		const resultsByMeasurementId = new Map<number, LabDashboardResult>();
 
 		source.documentIds.forEach(documentId => {
 			const documentResults = resultsByDocumentId.get(documentId) ?? [];

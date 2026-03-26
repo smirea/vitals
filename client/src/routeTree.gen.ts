@@ -11,7 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as TagsRouteImport } from './routes/tags'
 import { Route as PillsRouteImport } from './routes/pills'
-import { Route as BloodworkRouteImport } from './routes/bloodwork'
+import { Route as LabsRouteImport } from './routes/labs'
 import { Route as IndexRouteImport } from './routes/index'
 
 const TagsRoute = TagsRouteImport.update({
@@ -24,9 +24,9 @@ const PillsRoute = PillsRouteImport.update({
   path: '/pills',
   getParentRoute: () => rootRouteImport,
 } as any)
-const BloodworkRoute = BloodworkRouteImport.update({
-  id: '/bloodwork',
-  path: '/bloodwork',
+const LabsRoute = LabsRouteImport.update({
+  id: '/labs',
+  path: '/labs',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -37,34 +37,34 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/bloodwork': typeof BloodworkRoute
+  '/labs': typeof LabsRoute
   '/pills': typeof PillsRoute
   '/tags': typeof TagsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/bloodwork': typeof BloodworkRoute
+  '/labs': typeof LabsRoute
   '/pills': typeof PillsRoute
   '/tags': typeof TagsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/bloodwork': typeof BloodworkRoute
+  '/labs': typeof LabsRoute
   '/pills': typeof PillsRoute
   '/tags': typeof TagsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/bloodwork' | '/pills' | '/tags'
+  fullPaths: '/' | '/labs' | '/pills' | '/tags'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/bloodwork' | '/pills' | '/tags'
-  id: '__root__' | '/' | '/bloodwork' | '/pills' | '/tags'
+  to: '/' | '/labs' | '/pills' | '/tags'
+  id: '__root__' | '/' | '/labs' | '/pills' | '/tags'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  BloodworkRoute: typeof BloodworkRoute
+  LabsRoute: typeof LabsRoute
   PillsRoute: typeof PillsRoute
   TagsRoute: typeof TagsRoute
 }
@@ -85,11 +85,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PillsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/bloodwork': {
-      id: '/bloodwork'
-      path: '/bloodwork'
-      fullPath: '/bloodwork'
-      preLoaderRoute: typeof BloodworkRouteImport
+    '/labs': {
+      id: '/labs'
+      path: '/labs'
+      fullPath: '/labs'
+      preLoaderRoute: typeof LabsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -104,7 +104,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  BloodworkRoute: BloodworkRoute,
+  LabsRoute: LabsRoute,
   PillsRoute: PillsRoute,
   TagsRoute: TagsRoute,
 }
