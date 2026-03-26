@@ -84,6 +84,7 @@ const { useLocalStorage } = createLocalStorage({
 const labsSearchSchema = z.object({
 	tab: z.enum(['overview', 'documents']).optional(),
 	doc: z.coerce.number().int().positive().optional(),
+	m: z.string().optional(),
 });
 
 export const Route = createFileRoute('/labs')({
@@ -118,6 +119,7 @@ function LabsPage() {
 	const [sourceFilters, setSourceFilters] = useLocalStorage('sourceFilters');
 	const activeTab = search.tab ?? 'overview';
 	const previewDocumentId = search.doc ?? null;
+	const previewMeasurementKey = search.m ?? null;
 
 	const deferredMeasurementFilter = useDeferredValue(measurementFilter);
 	const starredMeasurementSet = useMemo(
@@ -231,6 +233,7 @@ function LabsPage() {
 
 				return {
 					id: result.id,
+					key: measurement?.key ?? '',
 					name: measurement?.name ?? result.originalName ?? 'Unknown measurement',
 					category: measurement?.category?.trim() || null,
 					valueText: valueText || '—',
@@ -737,12 +740,17 @@ function LabsPage() {
 		[deleteDocumentMutation],
 	);
 
+	const scrollToPreviewRow = useCallback((el: HTMLDivElement | null) => {
+		if (el) el.scrollIntoView({ block: 'center' });
+	}, []);
+
 	const onOpenDocumentPreview = useCallback(
-		(documentId: number) => {
+		(documentId: number, measurementKey?: string) => {
 			void navigate({
 				search: previous => ({
 					...previous,
 					doc: documentId,
+					m: measurementKey,
 				}),
 			});
 		},
@@ -754,6 +762,7 @@ function LabsPage() {
 			search: previous => {
 				const next = { ...previous };
 				delete next.doc;
+				delete next.m;
 				return next;
 			},
 		});
@@ -1204,60 +1213,65 @@ function LabsPage() {
 									/>
 								) : (
 									<div>
-										{previewRows.map(row => (
-											<div
-												key={row.id}
-												style={{
-													padding: '10px 14px',
-													borderBottom: `1px solid ${token.colorBorderSecondary}`,
-												}}
-											>
-												<Flex justify='space-between' align='flex-start' gap={12}>
-													<div style={{ minWidth: 0 }}>
+										{previewRows.map(row => {
+											const isHighlighted = previewMeasurementKey === row.key;
+											return (
+												<div
+													key={row.id}
+													ref={isHighlighted ? scrollToPreviewRow : undefined}
+													style={{
+														padding: '10px 14px',
+														borderBottom: `1px solid ${token.colorBorderSecondary}`,
+														background: isHighlighted ? token.colorPrimaryBg : undefined,
+													}}
+												>
+													<Flex justify='space-between' align='flex-start' gap={12}>
+														<div style={{ minWidth: 0 }}>
+															<Typography.Text
+																strong
+																style={{
+																	display: 'block',
+																	lineHeight: 1.35,
+																	overflowWrap: 'break-word',
+																}}
+															>
+																{row.name}
+															</Typography.Text>
+															{row.category ? (
+																<Typography.Text type='secondary' style={{ fontSize: 12 }}>
+																	{row.category}
+																</Typography.Text>
+															) : null}
+														</div>
 														<Typography.Text
-															strong
 															style={{
-																display: 'block',
-																lineHeight: 1.35,
-																overflowWrap: 'break-word',
+																textAlign: 'right',
+																whiteSpace: 'nowrap',
+																flexShrink: 0,
 															}}
 														>
-															{row.name}
+															{row.valueText}
 														</Typography.Text>
-														{row.category ? (
-															<Typography.Text type='secondary' style={{ fontSize: 12 }}>
-																{row.category}
-															</Typography.Text>
-														) : null}
-													</div>
-													<Typography.Text
-														style={{
-															textAlign: 'right',
-															whiteSpace: 'nowrap',
-															flexShrink: 0,
-														}}
-													>
-														{row.valueText}
-													</Typography.Text>
-												</Flex>
-												{row.rangeText ? (
-													<Typography.Text
-														type='secondary'
-														style={{ display: 'block', marginTop: 4, fontSize: 12 }}
-													>
-														ref {row.rangeText}
-													</Typography.Text>
-												) : null}
-												{row.note ? (
-													<Typography.Text
-														type='secondary'
-														style={{ display: 'block', marginTop: 4, fontSize: 12 }}
-													>
-														{row.note}
-													</Typography.Text>
-												) : null}
-											</div>
-										))}
+													</Flex>
+													{row.rangeText ? (
+														<Typography.Text
+															type='secondary'
+															style={{ display: 'block', marginTop: 4, fontSize: 12 }}
+														>
+															ref {row.rangeText}
+														</Typography.Text>
+													) : null}
+													{row.note ? (
+														<Typography.Text
+															type='secondary'
+															style={{ display: 'block', marginTop: 4, fontSize: 12 }}
+														>
+															{row.note}
+														</Typography.Text>
+													) : null}
+												</div>
+											);
+										})}
 									</div>
 								)}
 							</div>

@@ -432,6 +432,7 @@ const VitalsScope = styled.div`
 		background: var(--vitals-bg-subtle);
 		padding: 8px;
 		text-align: left;
+		vertical-align: top;
 		font-size: 14px;
 		font-weight: 500;
 		color: var(--vitals-text);
@@ -441,7 +442,9 @@ const VitalsScope = styled.div`
 		display: flex;
 		flex-direction: column;
 		align-items: flex-start;
-		gap: 4px;
+		justify-content: space-between;
+		gap: 6px;
+		height: 100%;
 	}
 
 	.vitals-source-filter-group {
@@ -761,7 +764,7 @@ type VitalsTableProps = {
 	onToggleCategory: (category: string, checked: boolean) => void;
 	onToggleStar: (measurementKey: string) => void;
 	onToggleSourceFilter: (sourceId: string, mode: SourceFilterMode) => void;
-	onOpenSourceDocument: (documentId: number) => void;
+	onOpenSourceDocument: (documentId: number, measurementKey?: string) => void;
 };
 
 type SelectionCheckboxProps = {
@@ -1549,7 +1552,7 @@ type MeasurementRowProps = {
 	overview: MeasurementOverviewTally;
 	onToggleRow: (key: string, checked: boolean) => void;
 	onToggleStar: (measurementKey: string) => void;
-	onOpenSourceDocument: (documentId: number) => void;
+	onOpenSourceDocument: (documentId: number, measurementKey?: string) => void;
 };
 
 const MeasurementRow = memo(
@@ -1665,7 +1668,7 @@ const MeasurementRow = memo(
 						onClick={() => {
 							const documentId = row.valuesBySourceIndex[source.index]?.documentId;
 							if (documentId) {
-								onOpenSourceDocument(documentId);
+								onOpenSourceDocument(documentId, row.key);
 							}
 						}}
 					>
