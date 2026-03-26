@@ -1,5 +1,3 @@
-import path from 'path';
-
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 
 import { getLabDocumentPdf, startLabProcessor } from 'server/trpc/routers/labs.ts';
@@ -8,7 +6,6 @@ import env from 'server/env.ts';
 import { appRouter, createTrpcContext } from 'server/trpc/index.ts';
 
 const port = env.API_PORT;
-const projectRoot = path.resolve(import.meta.dir, '..', '..');
 
 function getCorsHeaders(req: Request) {
 	const origin = req.headers.get('origin');

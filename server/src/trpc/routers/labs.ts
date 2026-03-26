@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { createHash } from 'crypto';
 
-import { and, eq, lt, asc, desc } from 'drizzle-orm';
+import { and, eq, lt, asc } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { getDatabase } from 'server/db/client.ts';
