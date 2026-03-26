@@ -140,7 +140,7 @@ export const labsRouter = createRouter({
 
 				queued.push({ ...inserted, deduplicated: false });
 				console.log(`[labs] #${inserted.id} ${inserted.fileName}: queued for import`);
-				spawnLabImport(inserted.id);
+				processNextImport();
 			}
 
 			return { documents: queued };
@@ -186,7 +186,7 @@ function requeueDocument(
 		.run();
 
 	console.log(`[labs] #${document.id} ${document.fileName}: queued for ${action}`);
-	spawnLabImport(documentId);
+	processNextImport();
 	return { documentId };
 }
 
@@ -211,55 +211,67 @@ export function getLabDocumentPdf(
 export function startLabProcessor() {
 	const db = getDatabase();
 
-	const stuck = db
-		.select({ id: labDocuments.id, fileName: labDocuments.fileName })
-		.from(labDocuments)
+	db.update(labDocuments)
+		.set({
+			status: 'pending',
+			statusText: 'Queued after interrupted processing',
+			startedAt: null,
+			lastError: null,
+		})
 		.where(eq(labDocuments.status, 'processing'))
-		.all();
+		.run();
 
-	if (stuck.length > 0) {
-		db.update(labDocuments)
-			.set({
-				status: 'pending',
-				statusText: 'Queued after interrupted processing',
-				startedAt: null,
-				lastError: 'Processing was interrupted and has been retried.',
-			})
-			.where(eq(labDocuments.status, 'processing'))
-			.run();
-
-		for (const doc of stuck) {
-			console.log(`[labs] #${doc.id} ${doc.fileName}: reset after interrupted processing`);
-		}
-	}
-
-	const pending = db
-		.select({ id: labDocuments.id, fileName: labDocuments.fileName })
-		.from(labDocuments)
-		.where(eq(labDocuments.status, 'pending'))
-		.all();
-
-	for (const doc of pending) {
-		console.log(`[labs] #${doc.id} ${doc.fileName}: resuming pending import`);
-		spawnLabImport(doc.id);
-	}
+	processNextImport();
 }
 
-function spawnLabImport(documentId: number) {
+function processNextImport() {
 	const db = getDatabase();
-	const doc = db
-		.select({ fileName: labDocuments.fileName, pdfData: labDocuments.pdfData })
+	const busy = db
+		.select({ id: labDocuments.id })
 		.from(labDocuments)
-		.where(eq(labDocuments.id, documentId))
+		.where(eq(labDocuments.status, 'processing'))
 		.get();
-	if (!doc) return;
+	if (busy) return;
 
-	const tmpPath = path.join(tmpDir, `doc_${documentId}_${doc.fileName}`);
-	fs.writeFileSync(tmpPath, new Uint8Array(doc.pdfData));
+	const next = db
+		.select({ id: labDocuments.id, fileName: labDocuments.fileName, pdfData: labDocuments.pdfData })
+		.from(labDocuments)
+		.where(eq(labDocuments.status, 'pending'))
+		.get();
+	if (!next) return;
 
-	const scriptPath = path.resolve(import.meta.dir, '..', '..', '..', 'scripts', 'lab-import.ts');
-	Bun.spawn(['bun', 'run', scriptPath, tmpPath], {
+	const tmpPath = path.join(tmpDir, `doc_${next.id}_${next.fileName}`);
+	fs.writeFileSync(tmpPath, new Uint8Array(next.pdfData));
+
+	const scriptPath = path.resolve(
+		import.meta.dir,
+		'..',
+		'..',
+		'..',
+		'..',
+		'scripts',
+		'lab-import.ts',
+	);
+	const proc = Bun.spawn(['bun', 'run', scriptPath, tmpPath], {
 		stdout: 'inherit',
-		stderr: 'inherit',
+		stderr: 'pipe',
+	});
+
+	proc.exited.then(async code => {
+		if (code !== 0) {
+			const stderr = await new Response(proc.stderr).text();
+			const message = stderr.trim().split('\n').pop() || `Process exited with code ${code}`;
+			console.error(`[labs] #${next.id}: import failed — ${message}`);
+			db.update(labDocuments)
+				.set({
+					status: 'failed',
+					statusText: 'Import failed',
+					failedAt: new Date().toISOString(),
+					lastError: message,
+				})
+				.where(eq(labDocuments.id, next.id))
+				.run();
+		}
+		processNextImport();
 	});
 }

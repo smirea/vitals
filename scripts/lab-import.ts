@@ -107,6 +107,7 @@ void createScript(async () => {
 				status: 'completed',
 				statusText: `Imported ${resultCount} results`,
 				completedAt: new Date().toISOString(),
+				lastError: null,
 				date: data.date ?? null,
 				labName: data.labName ?? null,
 				location: data.location ?? null,
