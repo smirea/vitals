@@ -22,6 +22,7 @@ export const labDocuments = sqliteTable(
 		sha256: text('sha256').notNull(),
 		status: text('status', { enum: labDocumentStatusValues }).notNull().default('pending'),
 		statusText: text('status_text').notNull().default('Queued for import'),
+		statusUpdatedAt: text('status_updated_at'),
 		group: text('group'),
 		queuedAt: text('queued_at').notNull(),
 		startedAt: text('started_at'),

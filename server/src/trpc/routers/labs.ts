@@ -78,6 +78,7 @@ export const labsRouter = createRouter({
 				date: labDocuments.date,
 				labName: labDocuments.labName,
 				queuedAt: labDocuments.queuedAt,
+				statusUpdatedAt: labDocuments.statusUpdatedAt,
 				lastError: labDocuments.lastError,
 			})
 			.from(labDocuments)
@@ -130,6 +131,7 @@ export const labsRouter = createRouter({
 						sha256,
 						status: 'pending',
 						statusText: 'Queued for import',
+						statusUpdatedAt: now,
 						queuedAt: now,
 					})
 					.returning({
@@ -180,6 +182,7 @@ function requeueDocument(
 		.set({
 			status: 'pending',
 			statusText: `Queued for ${action}`,
+			statusUpdatedAt: new Date().toISOString(),
 			startedAt: null,
 			completedAt: null,
 			failedAt: null,
@@ -218,6 +221,7 @@ export function startLabProcessor() {
 		.set({
 			status: 'pending',
 			statusText: 'Queued after interrupted processing',
+			statusUpdatedAt: new Date().toISOString(),
 			startedAt: null,
 			lastError: null,
 		})
@@ -269,6 +273,7 @@ function processNextImport() {
 				.set({
 					status: 'failed',
 					statusText: 'Import failed',
+					statusUpdatedAt: new Date().toISOString(),
 					failedAt: new Date().toISOString(),
 					lastError: message,
 				})

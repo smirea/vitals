@@ -19,6 +19,13 @@ fs.mkdirSync(tmpDir, { recursive: true });
 const unitsJson = typedUnits as Record<string, string | { count: number; unit: string }>;
 const db = getDatabase();
 
+function updateDocStatus(documentId: number, fields: Record<string, unknown>) {
+	db.update(labDocuments)
+		.set({ ...fields, statusUpdatedAt: new Date().toISOString() })
+		.where(eq(labDocuments.id, documentId))
+		.run();
+}
+
 const extractedDataSchema = z.object({
 	date: z.string().optional(),
 	labName: z.string().optional(),
@@ -77,56 +84,59 @@ void createScript(async () => {
 	}
 
 	try {
-		db.update(labDocuments)
-			.set({
-				status: 'processing',
-				statusText: 'Converting PDF to markdown',
-				startedAt: new Date().toISOString(),
-			})
-			.where(eq(labDocuments.id, documentId))
-			.run();
+		updateDocStatus(documentId, {
+			status: 'processing',
+			statusText: 'Converting PDF to markdown',
+			startedAt: new Date().toISOString(),
+		});
 
 		const markdown = extractMarkdown(filePath);
-		db.update(labDocuments)
-			.set({ rawMarkdown: markdown, statusText: 'Extracting measurements' })
-			.where(eq(labDocuments.id, documentId))
-			.run();
+		updateDocStatus(documentId, { rawMarkdown: markdown, statusText: 'Extracting measurements' });
 
 		const data = await extractData(markdown);
 
 		const resultCount = data.measurements.length;
-		db.update(labDocuments)
-			.set({ statusText: `Saving ${resultCount} results` })
-			.where(eq(labDocuments.id, documentId))
-			.run();
+
+		console.table(
+			data.measurements.map((m, i) => ({
+				'#': i + 1,
+				name: m.name,
+				value: m.valueText,
+				unit: m.unit ?? '',
+				original_unit: m.originalUnit ?? '',
+				ref: m.referenceText ?? '',
+				flag: m.flag ?? '',
+			})),
+		);
+		console.log(style.label('total measurements', String(resultCount)));
+
+		const tmpJsonPath = path.join(tmpDir, `extracted_${documentId}.json`);
+		fs.writeFileSync(tmpJsonPath, JSON.stringify(data.measurements, null, 2));
+		console.log(style.label('saved to', tmpJsonPath));
+
+		updateDocStatus(documentId, { statusText: `Saving ${resultCount} results` });
 
 		saveResults(documentId, data);
 
-		db.update(labDocuments)
-			.set({
-				status: 'completed',
-				statusText: `Imported ${resultCount} results`,
-				completedAt: new Date().toISOString(),
-				lastError: null,
-				date: data.date ?? null,
-				labName: data.labName ?? null,
-				location: data.location ?? null,
-			})
-			.where(eq(labDocuments.id, documentId))
-			.run();
+		updateDocStatus(documentId, {
+			status: 'completed',
+			statusText: `Imported ${resultCount} results`,
+			completedAt: new Date().toISOString(),
+			lastError: null,
+			date: data.date ?? null,
+			labName: data.labName ?? null,
+			location: data.location ?? null,
+		});
 
 		console.log(style.label('done', `imported ${resultCount} results for document #${documentId}`));
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
-		db.update(labDocuments)
-			.set({
-				status: 'failed',
-				statusText: 'Import failed',
-				failedAt: new Date().toISOString(),
-				lastError: message,
-			})
-			.where(eq(labDocuments.id, documentId))
-			.run();
+		updateDocStatus(documentId, {
+			status: 'failed',
+			statusText: 'Import failed',
+			failedAt: new Date().toISOString(),
+			lastError: message,
+		});
 		throw error;
 	}
 });
@@ -196,100 +206,153 @@ function saveResults(documentId: number, data: Awaited<ReturnType<typeof extract
 	});
 }
 
-async function extractData(markdown: string) {
+const CHUNK_TARGET_LINES = 100;
+
+async function extractData(rawMarkdown: string) {
 	const measurementsDb = compileMeasurementDatabase();
-
 	const model = models.smart_and_expensive;
-	console.log(style.header('parsing markdown with ' + model.modelId));
-	const result = await generateText({
-		model,
-		temperature: 0.1,
-		maxRetries: 1,
-		maxOutputTokens: 20e3,
-		output: Output.object({ schema: extractedDataSchema }),
-		system: textBlock`
-			You are extracting structured lab results from parsed PDF markdown
-			You must explicitly extract values visible in the <markdown /> and do not infer any data not provided.
-			You must translate all text to english if it's not already in english.
-			The <markdown /> was extracted by parsing a multi-page PDF of lab results. The parsing is pretty good but not 100% reliable so there might be areas to fix - a usual pitfall is tables that are missing headers because they spanned across multiple pages and the parser did not detect that.
-			You are provided a <database /> of the existing canonical names, it is not exhaustive as we are using this process to build it. If you find matches in the <database /> then use those as the canonical names, otherwise take your best guess given the context.
+	const markdown = compactMarkdown(rawMarkdown);
+	const chunks = chunkMarkdown(markdown, CHUNK_TARGET_LINES);
+	const savedChars = rawMarkdown.length - markdown.length;
 
-			<database>${Object.entries(measurementsDb)
-				.map(
-					([name, { aliases }]) =>
-						`- '${name}' (canonical name) ${aliases.length ? ', known aliases: ' + aliases.join('; ') : ': no other known aliases'}`,
-				)
-				.join('\n')}</database>
+	console.log(style.header(`parsing ${chunks.length} chunk(s) with ${model.modelId}`));
+	if (savedChars > 0)
+		console.log(
+			style.label('compacted', `${rawMarkdown.length} → ${markdown.length} chars (-${savedChars})`),
+		);
 
-			type output_json_schema = {
-				date?: string; // ISO date the lab was made, if provided
-				labName?: string; // the name of the company that processed this
-				location?: string; // full address including city, country, if available
-				measurements: Array<{
-					name: string; // canonical name according to the <database /> if possible. If there is no high certainty match in the <database /> then translate and sanitize the source name
-					sourceName: string; // the literal name from the source, unaltered
-					valueText: string; // the literal value from the source, unaltered and without the unit
-					valueNumeric?: number; // the number value if this is a numeric value
-					unit: 'n/a' | string; // the unit for this measurement
-					referenceText?: string; // it's very common that every measurement has its own reference range indicated next to it
-					referenceMin?: number; // parse min reference value if provided
-					referenceMax?: number; // parsed max reference value if provided
-					flag?: string; // if there is any flag for this specific measurement or notes
-				}>
+	const databaseBlock = Object.entries(measurementsDb)
+		.map(([name, { aliases }]) =>
+			aliases.length ? `- '${name}', known aliases: ${aliases.join('; ')}` : `- '${name}'`,
+		)
+		.join('\n');
+
+	type Measurement = z.infer<typeof extractedDataSchema>['measurements'][number];
+	const allMeasurements: Measurement[] = [];
+	let date: string | undefined;
+	let labName: string | undefined;
+	let location: string | undefined;
+	let lastTableHeaders: string | null = null;
+
+	for (let i = 0; i < chunks.length; i++) {
+		const chunk = chunks[i];
+		console.log(
+			style.label(`chunk ${i + 1}/${chunks.length}`, `${chunk.split('\n').length} lines`),
+		);
+
+		const continuationHint = lastTableHeaders
+			? `\n\nIMPORTANT: The previous chunk ended with a table whose columns were: ${lastTableHeaders}\nIf this chunk starts with table rows that have no header, those rows belong to that table. Use those column headers to interpret the data.`
+			: '';
+
+		for (let attempt = 0; attempt < 2; attempt++) {
+			try {
+				const result = await generateText({
+					model,
+					temperature: 0.1,
+					maxRetries: 1,
+					maxOutputTokens: 8e3,
+					output: Output.object({ schema: extractedDataSchema }),
+					system: textBlock`
+					You are extracting structured lab results from parsed PDF markdown.
+					You must explicitly extract values visible in the <markdown /> and do not infer any data not provided.
+					You must translate all text to english if it's not already in english.
+					The <markdown /> is a chunk of a larger document extracted from a multi-page PDF of lab results. The parsing is pretty good but not 100% reliable so there might be areas to fix - a usual pitfall is tables that are missing headers because they spanned across multiple pages and the parser did not detect that.
+					You are provided a <database /> of the existing canonical names, it is not exhaustive as we are using this process to build it. If you find matches in the <database /> then use those as the canonical names, otherwise take your best guess given the context.
+
+					<database>${databaseBlock}</database>
+
+					type output_json_schema = {
+						date?: string; // ISO date the lab was made, if provided
+						labName?: string; // the name of the company that processed this
+						location?: string; // full address including city, country, if available
+						measurements: Array<{
+							name: string; // canonical name according to the <database /> if possible. If there is no high certainty match in the <database /> then translate and sanitize the source name
+							sourceName: string; // the literal name from the source, unaltered
+							valueText: string; // the literal value from the source, unaltered and without the unit
+							valueNumeric?: number; // the number value if this is a numeric value
+							unit: 'n/a' | string; // the unit for this measurement
+							referenceText?: string; // it's very common that every measurement has its own reference range indicated next to it
+							referenceMin?: number; // parse min reference value if provided
+							referenceMax?: number; // parsed max reference value if provided
+							flag?: string; // if there is any flag for this specific measurement or notes
+						}>
+					}
+
+					<example_response>${JSON.stringify({
+						date: '2017-11-02',
+						labName: 'Quest Diagnostics',
+						location: 'One Malcolm Avenue, Teterboro, NJ 07608, USA',
+						measurements: [
+							{
+								name: 'MPV',
+								sourceName: 'MPV',
+								valueText: '8.7',
+								unit: 'fl',
+								valueNumeric: 8.7,
+								referenceText: '7.5-12.5',
+								referenceMin: 7.5,
+								referenceMax: 12.5,
+							},
+							{
+								name: 'Hemoglobin A1c',
+								sourceName: 'HEMOGLOBIN A1C (calc)',
+								valueText: '5.0',
+								unit: '% of total hgb',
+								valueNumeric: 5,
+								referenceText: '<5.7',
+								referenceMax: 5.7,
+							},
+						],
+					})}</example_response>
+					${continuationHint}
+				`,
+					prompt: `<markdown>${chunk}</markdown>`,
+				});
+				const output = result.output;
+
+				if (!date && output.date) date = output.date;
+				if (!labName && output.labName) labName = output.labName;
+				if (!location && output.location) location = output.location;
+				allMeasurements.push(...output.measurements);
+				break;
+			} catch (error: any) {
+				const retryable =
+					error?.name === 'AI_NoOutputGeneratedError' || error?.name === 'AI_JSONParseError';
+				if (retryable) {
+					if (attempt === 0) {
+						console.log(style.label(`chunk ${i + 1}/${chunks.length}`, `${error.name}, retrying`));
+						continue;
+					}
+					console.log(
+						style.label(`chunk ${i + 1}/${chunks.length}`, `${error.name} after retry, skipping`),
+					);
+				} else {
+					throw error;
+				}
 			}
+		}
 
-			<example_response>${JSON.stringify({
-				date: '2017-11-02',
-				labName: 'Quest Diagnostics',
-				location: 'One Malcolm Avenue, Teterboro, NJ 07608, USA',
-				measurements: [
-					{
-						name: 'MPV',
-						sourceName: 'MPV',
-						valueText: '8.7',
-						unit: 'fl',
-						valueNumeric: 8.7,
-						referenceText: '7.5-12.5',
-						referenceMin: 7.5,
-						referenceMax: 12.5,
-					},
-					{
-						name: 'Hemoglobin A1c',
-						sourceName: 'HEMOGLOBIN A1C (calc)',
-						valueText: '5.0',
-						unit: '% of total hgb',
-						valueNumeric: 5,
-						referenceText: '<5.7',
-						referenceMax: 5.7,
-					},
-				],
-			})}</example_response>
-		`,
-		prompt: `<markdown>${markdown}</markdown>`,
-	});
+		lastTableHeaders = getLastTableHeaders(chunk);
+	}
 
-	// 🏁 assume LLM has correctly matched names to the ones in the database and proceed with unit mapping
+	// 🏁 unit normalization across all accumulated measurements
 
 	const unitsToFigureOut: { measurement: string; unit: string }[] = [];
 
-	const updateMeasurement = (
-		item: (typeof result.output.measurements)[number],
-		count: number | ((v: number) => number),
-	) => {
+	const updateMeasurement = (item: Measurement, count: number | ((v: number) => number)) => {
 		const fn = typeof count === 'number' ? (x: number) => x * count : count;
 		if (item.valueNumeric) item.valueNumeric = fn(item.valueNumeric);
 		if (item.referenceMin) item.referenceMin = fn(item.referenceMin);
 		if (item.referenceMax) item.referenceMax = fn(item.referenceMax);
 	};
 
-	// snapshot originals before normalization mutates them
-	const originals = result.output.measurements.map(m => ({
+	const originals = allMeasurements.map(m => ({
 		valueText: m.valueText,
 		valueNumeric: m.valueNumeric,
 		unit: m.unit,
 	}));
 
-	for (const item of result.output.measurements) {
+	for (const item of allMeasurements) {
 		const matchedDb = measurementsDb[item.name.toLocaleLowerCase().trim()];
 		if (item.valueNumeric == null) {
 			if (/^\d+(\.\d+)?$/.test(item.valueText)) item.valueNumeric = parseFloat(item.valueText);
@@ -373,7 +436,7 @@ async function extractData(markdown: string) {
 
 		for (const { measurement } of unitsToFigureOut) {
 			const m = mapping[measurement];
-			const item = result.output.measurements.find(x => x.name === measurement);
+			const item = allMeasurements.find(x => x.name === measurement);
 			if (!m || !item) continue;
 			unitsJson[`${item.unit}→${m.canonicalUnit}`] = { unit: m.canonicalUnit, count: m.multiplier };
 			jsonUpdated = true;
@@ -385,16 +448,85 @@ async function extractData(markdown: string) {
 	if (jsonUpdated)
 		fs.writeFileSync(path.join(__dirname, 'units.json'), JSON.stringify(unitsJson, null, 4));
 
-	// merge originals back onto measurements so saveResults can store both
 	return {
-		...result.output,
-		measurements: result.output.measurements.map((m, i) => ({
+		date,
+		labName,
+		location,
+		measurements: allMeasurements.map((m, i) => ({
 			...m,
 			originalValueText: originals[i].valueText,
 			originalValueNumeric: originals[i].valueNumeric,
 			originalUnit: originals[i].unit,
 		})),
 	};
+}
+
+function compactMarkdown(markdown: string): string {
+	return markdown
+		.replace(/\|[-:\s|]+\|/g, match => match.replace(/-{2,}/g, '-'))
+		.replace(/\| +/g, '|')
+		.replace(/ +\|/g, '|');
+}
+
+function chunkMarkdown(markdown: string, targetLines: number): string[] {
+	const lines = markdown.split('\n');
+	if (lines.length <= targetLines) return [markdown];
+
+	const isTableLine = (line: string) => line.trimStart().startsWith('|');
+
+	const chunks: string[] = [];
+	let start = 0;
+
+	while (start < lines.length) {
+		let end = Math.min(start + targetLines, lines.length);
+
+		if (end < lines.length) {
+			// don't split inside a table — scan for the nearest non-table boundary
+			if (isTableLine(lines[end])) {
+				let before = end - 1;
+				while (before > start && isTableLine(lines[before])) before--;
+
+				let after = end;
+				while (after < lines.length && isTableLine(lines[after])) after++;
+
+				// pick whichever boundary is closer to the target
+				end = end - before <= after - end ? before + 1 : after;
+			}
+		}
+
+		chunks.push(lines.slice(start, end).join('\n'));
+		start = end;
+	}
+
+	return chunks;
+}
+
+function getLastTableHeaders(markdown: string): string | null {
+	const lines = markdown.split('\n');
+
+	for (let i = lines.length - 1; i >= 0; i--) {
+		if (!lines[i].trimStart().startsWith('|')) continue;
+
+		// found a table line, walk back to find the header row
+		let tableStart = i;
+		while (tableStart > 0 && lines[tableStart - 1].trimStart().startsWith('|')) {
+			tableStart--;
+		}
+
+		const headerLine = lines[tableStart];
+		const separator = lines[tableStart + 1];
+		if (headerLine && separator && /^\s*\|[\s\-:|]+\|/.test(separator)) {
+			return headerLine
+				.split('|')
+				.map(c => c.trim())
+				.filter(Boolean)
+				.join(' | ');
+		}
+
+		return null;
+	}
+
+	return null;
 }
 
 function compileMeasurementDatabase() {

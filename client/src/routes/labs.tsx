@@ -959,7 +959,16 @@ function LabsPage() {
 												onChange={event => onToggleImportDocument(item.id, event.target.checked)}
 												disabled={updateDocumentsMutation.isPending}
 											/>
-											<Tag color={statusColor}>{item.status}</Tag>
+											<Tag color={statusColor}>
+												{item.status}
+												{(item.status === 'pending' || item.status === 'processing') &&
+												item.statusUpdatedAt ? (
+													<>
+														{' '}
+														<ElapsedTime since={item.statusUpdatedAt} />
+													</>
+												) : null}
+											</Tag>
 											<Button
 												type='link'
 												style={{ padding: 0, height: 'auto', fontWeight: 600 }}
@@ -1033,7 +1042,7 @@ function LabsPage() {
 											</Popconfirm>
 										</Flex>
 									</Flex>
-									{item.lastError ? (
+									{item.status === 'failed' && item.lastError ? (
 										<Typography.Text type='danger' style={{ whiteSpace: 'pre-wrap' }}>
 											{item.lastError}
 										</Typography.Text>
@@ -1357,4 +1366,28 @@ function readFileAsBase64(file: File): Promise<string> {
 
 		reader.readAsDataURL(file);
 	});
+}
+
+function ElapsedTime({ since }: { since: string }) {
+	const [elapsed, setElapsed] = useState(() => formatElapsed(since));
+
+	useEffect(() => {
+		setElapsed(formatElapsed(since));
+		const interval = setInterval(() => setElapsed(formatElapsed(since)), 1000);
+		return () => clearInterval(interval);
+	}, [since]);
+
+	return <span>{elapsed}</span>;
+}
+
+function formatElapsed(since: string): string {
+	const ms = Date.now() - Date.parse(since);
+	if (!Number.isFinite(ms) || ms < 0) return '0s';
+	const totalSeconds = Math.floor(ms / 1000);
+	if (totalSeconds < 60) return `${totalSeconds}s`;
+	const minutes = Math.floor(totalSeconds / 60);
+	const seconds = totalSeconds % 60;
+	if (minutes < 60) return `${minutes}m ${seconds}s`;
+	const hours = Math.floor(minutes / 60);
+	return `${hours}h ${minutes % 60}m`;
 }
