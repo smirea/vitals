@@ -429,7 +429,7 @@ const VitalsScope = styled.div`
 		min-width: var(--source-col-width);
 		width: var(--source-col-width);
 		border: 1px solid var(--vitals-border);
-		background: var(--vitals-bg-subtle);
+		background: var(--vitals-bg-layout);
 		padding: 8px;
 		text-align: left;
 		vertical-align: top;
@@ -438,13 +438,9 @@ const VitalsScope = styled.div`
 		color: var(--vitals-text);
 	}
 
-	.vitals-source-head {
-		display: flex;
-		flex-direction: column;
-		align-items: flex-start;
-		justify-content: space-between;
-		gap: 6px;
-		height: 100%;
+	.vitals-head-actions {
+		top: var(--vitals-head-row-height, 0px);
+		padding: 4px 8px;
 	}
 
 	.vitals-source-filter-group {
@@ -1766,8 +1762,14 @@ export const VitalsTable = memo(function VitalsTable({
 	onToggleSourceFilter,
 	onOpenSourceDocument,
 }: VitalsTableProps) {
+	const tableRef = useRef<HTMLTableElement | null>(null);
 	const tableShellRef = useRef<HTMLDivElement | null>(null);
 	const pendingScrollTopRef = useRef<number | null>(null);
+	const headerRowRef = useCallback((el: HTMLTableRowElement | null) => {
+		if (!el || !tableRef.current) return;
+		const height = el.getBoundingClientRect().height;
+		tableRef.current.style.setProperty('--vitals-head-row-height', `${height}px`);
+	}, []);
 
 	const selectableRowKeys = useMemo(
 		() =>
@@ -1812,6 +1814,7 @@ export const VitalsTable = memo(function VitalsTable({
 			<div style={{ display: 'flex', minHeight: 0, flex: 1 }}>
 				<div ref={tableShellRef} className='vitals-table-shell' style={{ maxHeight: tableScrollY }}>
 					<table
+						ref={tableRef}
 						className='vitals-table'
 						style={{
 							minWidth: tableScrollX,
@@ -1822,8 +1825,8 @@ export const VitalsTable = memo(function VitalsTable({
 						}}
 					>
 						<thead>
-							<tr>
-								<th className='vitals-head vitals-col-select'>
+							<tr ref={headerRowRef}>
+								<th className='vitals-head vitals-col-select' rowSpan={2}>
 									<SelectionCheckbox
 										checked={allChecked}
 										indeterminate={someChecked}
@@ -1832,8 +1835,25 @@ export const VitalsTable = memo(function VitalsTable({
 										ariaLabel='Select all'
 									/>
 								</th>
-								<th className='vitals-head vitals-col-measurement'>Measurement</th>
-								<th className='vitals-head vitals-col-overview'>Overview</th>
+								<th className='vitals-head vitals-col-measurement' rowSpan={2}>
+									Measurement
+								</th>
+								<th className='vitals-head vitals-col-overview' rowSpan={2}>
+									Overview
+								</th>
+								{tableSources.map(source => {
+									const activeMode = sourceFilterBySourceId.get(source.id);
+									return (
+										<th
+											key={source.id}
+											className={`vitals-head ${activeMode ? `vitals-source-filter-active vitals-source-filter-active-${activeMode}` : ''}`}
+										>
+											{source.prettyDate}
+										</th>
+									);
+								})}
+							</tr>
+							<tr>
 								{tableSources.map(source => {
 									const activeMode = sourceFilterBySourceId.get(source.id);
 									const counts = sourceCountsBySourceId.get(source.id) ?? { total: 0, flagged: 0 };
@@ -1841,34 +1861,28 @@ export const VitalsTable = memo(function VitalsTable({
 									return (
 										<th
 											key={source.id}
-											className={`vitals-head ${activeMode ? `vitals-source-filter-active vitals-source-filter-active-${activeMode}` : ''}`}
+											className={`vitals-head vitals-head-actions ${activeMode ? `vitals-source-filter-active vitals-source-filter-active-${activeMode}` : ''}`}
 										>
-											<div className='vitals-source-head'>
-												<span>{source.prettyDate}</span>
-												<div className='vitals-source-filter-group'>
-													<button
-														type='button'
-														aria-label={`Filter all measurements in ${source.prettyDate}`}
-														aria-pressed={activeMode === 'total'}
-														onClick={() => onToggleSourceFilter(source.id, 'total')}
-														className={`vitals-source-filter-toggle vitals-source-filter-total ${activeMode === 'total' ? 'vitals-source-filter-toggle-active' : ''}`}
-													>
-														<span>{counts.total}</span>
-													</button>
-													<button
-														type='button'
-														aria-label={`Filter flagged measurements in ${source.prettyDate}`}
-														aria-pressed={activeMode === 'flagged'}
-														onClick={() => onToggleSourceFilter(source.id, 'flagged')}
-														className={`vitals-source-filter-toggle vitals-source-filter-flagged ${activeMode === 'flagged' ? 'vitals-source-filter-toggle-active' : ''}`}
-													>
-														<Flag
-															size={11}
-															weight={activeMode === 'flagged' ? 'fill' : 'regular'}
-														/>
-														<span>{counts.flagged}</span>
-													</button>
-												</div>
+											<div className='vitals-source-filter-group'>
+												<button
+													type='button'
+													aria-label={`Filter all measurements in ${source.prettyDate}`}
+													aria-pressed={activeMode === 'total'}
+													onClick={() => onToggleSourceFilter(source.id, 'total')}
+													className={`vitals-source-filter-toggle vitals-source-filter-total ${activeMode === 'total' ? 'vitals-source-filter-toggle-active' : ''}`}
+												>
+													<span>{counts.total}</span>
+												</button>
+												<button
+													type='button'
+													aria-label={`Filter flagged measurements in ${source.prettyDate}`}
+													aria-pressed={activeMode === 'flagged'}
+													onClick={() => onToggleSourceFilter(source.id, 'flagged')}
+													className={`vitals-source-filter-toggle vitals-source-filter-flagged ${activeMode === 'flagged' ? 'vitals-source-filter-toggle-active' : ''}`}
+												>
+													<Flag size={11} weight={activeMode === 'flagged' ? 'fill' : 'regular'} />
+													<span>{counts.flagged}</span>
+												</button>
 											</div>
 										</th>
 									);

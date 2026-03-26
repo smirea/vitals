@@ -741,7 +741,12 @@ function LabsPage() {
 	);
 
 	const scrollToPreviewRow = useCallback((el: HTMLDivElement | null) => {
-		if (el) el.scrollIntoView({ block: 'center' });
+		if (!el) return;
+		if ('scrollIntoViewIfNeeded' in el) {
+			(el as any).scrollIntoViewIfNeeded(true);
+		} else {
+			el.scrollIntoView({ block: 'center' });
+		}
 	}, []);
 
 	const onOpenDocumentPreview = useCallback(
