@@ -996,6 +996,19 @@ function LabsPage() {
 													</Button>
 												</Popconfirm>
 											) : null}
+											{item.status === 'failed' ? (
+												<Button
+													size='small'
+													type='text'
+													onClick={() => {
+														void onRetryDocument(item.id);
+													}}
+													loading={retryDocumentMutation.isPending}
+													disabled={retryDocumentMutation.isPending}
+												>
+													Retry
+												</Button>
+											) : null}
 											<Popconfirm
 												title='Delete imported file?'
 												description='This removes the document and every result derived from it.'
@@ -1018,23 +1031,12 @@ function LabsPage() {
 													Delete
 												</Button>
 											</Popconfirm>
-											{item.status === 'failed' ? (
-												<Button
-													size='small'
-													type='text'
-													onClick={() => {
-														void onRetryDocument(item.id);
-													}}
-													loading={retryDocumentMutation.isPending}
-													disabled={retryDocumentMutation.isPending}
-												>
-													Retry
-												</Button>
-											) : null}
 										</Flex>
 									</Flex>
 									{item.lastError ? (
-										<Typography.Text type='danger'>{item.lastError}</Typography.Text>
+										<Typography.Text type='danger' style={{ whiteSpace: 'pre-wrap' }}>
+											{item.lastError}
+										</Typography.Text>
 									) : null}
 								</Flex>
 							</div>

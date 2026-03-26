@@ -17,6 +17,9 @@ import { createRouter, publicProcedure } from 'server/trpc/shared.ts';
 const tmpDir = path.join('/tmp', 'vitals');
 fs.mkdirSync(tmpDir, { recursive: true });
 
+// biome-ignore lint: simple ansi strip
+const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
+
 const labDocumentIdInputSchema = z.object({
 	documentId: z.number().int().positive(),
 });
@@ -259,8 +262,8 @@ function processNextImport() {
 
 	proc.exited.then(async code => {
 		if (code !== 0) {
-			const stderr = await new Response(proc.stderr).text();
-			const message = stderr.trim().split('\n').pop() || `Process exited with code ${code}`;
+			const raw = await new Response(proc.stderr).text();
+			const message = stripAnsi(raw).trim() || `Process exited with code ${code}`;
 			console.error(`[labs] #${next.id}: import failed — ${message}`);
 			db.update(labDocuments)
 				.set({
