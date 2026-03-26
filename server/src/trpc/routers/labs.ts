@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { createHash } from 'crypto';
 
-import { eq } from 'drizzle-orm';
+import { and, eq, lt, asc } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { getDatabase } from 'server/db/client.ts';
@@ -189,6 +189,7 @@ function requeueDocument(
 			completedAt: null,
 			failedAt: null,
 			lastError: null,
+			retryCount: 0,
 		})
 		.where(eq(labDocuments.id, documentId))
 		.run();
@@ -219,16 +220,28 @@ export function getLabDocumentPdf(
 
 export function startLabProcessor() {
 	const db = getDatabase();
+	const now = new Date().toISOString();
 
 	db.update(labDocuments)
 		.set({
 			status: 'pending',
 			statusText: 'Queued after interrupted processing',
-			statusUpdatedAt: new Date().toISOString(),
+			statusUpdatedAt: now,
 			startedAt: null,
 			lastError: null,
 		})
 		.where(eq(labDocuments.status, 'processing'))
+		.run();
+
+	db.update(labDocuments)
+		.set({
+			status: 'pending',
+			statusText: 'Queued for automatic retry',
+			statusUpdatedAt: now,
+			startedAt: null,
+			failedAt: null,
+		})
+		.where(and(eq(labDocuments.status, 'failed'), lt(labDocuments.retryCount, 3)))
 		.run();
 
 	processNextImport();
@@ -244,9 +257,15 @@ function processNextImport() {
 	if (busy) return;
 
 	const next = db
-		.select({ id: labDocuments.id, fileName: labDocuments.fileName, pdfData: labDocuments.pdfData })
+		.select({
+			id: labDocuments.id,
+			fileName: labDocuments.fileName,
+			pdfData: labDocuments.pdfData,
+			retryCount: labDocuments.retryCount,
+		})
 		.from(labDocuments)
 		.where(eq(labDocuments.status, 'pending'))
+		.orderBy(asc(labDocuments.retryCount), asc(labDocuments.id))
 		.get();
 	if (!next) return;
 
@@ -273,14 +292,17 @@ function processNextImport() {
 		if (code !== 0) {
 			const raw = await new Response(proc.stderr).text();
 			const message = stripAnsi(raw).trim() || `Process exited with code ${code}`;
-			console.error(`[labs] #${next.id}: import failed — ${message}`);
+			const newRetryCount = next.retryCount + 1;
+			const fatal = newRetryCount >= 3;
+			console.error(`[labs] #${next.id}: import failed (retry ${newRetryCount}/3) — ${message}`);
 			db.update(labDocuments)
 				.set({
 					status: 'failed',
-					statusText: 'Import failed',
+					statusText: fatal ? 'Fatal: max retries exceeded' : 'Import failed',
 					statusUpdatedAt: new Date().toISOString(),
 					failedAt: new Date().toISOString(),
 					lastError: message,
+					retryCount: newRetryCount,
 				})
 				.where(eq(labDocuments.id, next.id))
 				.run();

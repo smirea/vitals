@@ -39,6 +39,7 @@ export const labDocuments = sqliteTable(
 		country: text('country'),
 		notes: text('notes'),
 		rawMarkdown: text('raw_markdown'),
+		retryCount: integer('retry_count').notNull().default(0),
 	},
 	table => [
 		uniqueIndex('lab_documents_sha256_idx').on(table.sha256),
