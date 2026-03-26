@@ -48,7 +48,6 @@ function getLabDocumentPdfResponse(req: Request) {
 	});
 }
 
-await Bun.$`bunx drizzle-kit push --config drizzle.config.ts --force`.cwd(projectRoot);
 startLabProcessor();
 
 const server = Bun.serve({

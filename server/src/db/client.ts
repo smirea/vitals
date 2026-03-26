@@ -32,6 +32,7 @@ function createSqliteClient(dbPath: string): Database {
 
 	client.exec('PRAGMA foreign_keys = ON');
 	client.exec('PRAGMA journal_mode = WAL');
+	client.exec('PRAGMA busy_timeout = 5000');
 	ensureRuntimeDatabaseObjects(client);
 
 	return client;

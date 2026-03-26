@@ -597,6 +597,7 @@ function extractMarkdown(file: string, forceParse = false) {
 				...process.env,
 				GOOGLE_API_KEY: env.MARKER_PDF_GEMINI_KEY,
 				PYTORCH_ENABLE_MPS_FALLBACK: '1',
+				TORCH_DEVICE: 'cpu',
 			},
 		});
 		const markerOutput = stdout.toString() + stderr.toString();

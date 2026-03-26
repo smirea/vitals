@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { createHash } from 'crypto';
 
-import { and, eq, lt, asc } from 'drizzle-orm';
+import { and, eq, lt, asc, desc } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { getDatabase } from 'server/db/client.ts';
@@ -35,8 +35,7 @@ const labUploadDocumentsInputSchema = z.object({
 				dataBase64: z.string().trim().min(1),
 			}),
 		)
-		.min(1)
-		.max(12),
+		.min(1),
 });
 
 export const labsRouter = createRouter({
@@ -70,6 +69,15 @@ export const labsRouter = createRouter({
 	}),
 
 	listDocuments: publicProcedure.query(({ ctx }) => {
+		const statusOrder: Record<string, number> = {
+			processing: 0,
+			failed: 1,
+			pending: 2,
+			completed: 3,
+		};
+		const parseDate = (doc: { date: string | null; fileName: string }) =>
+			doc.date ?? doc.fileName.match(/\d{4}-\d{2}-\d{2}/)?.[0] ?? '';
+
 		return ctx.db
 			.select({
 				id: labDocuments.id,
@@ -84,9 +92,13 @@ export const labsRouter = createRouter({
 				lastError: labDocuments.lastError,
 			})
 			.from(labDocuments)
-			.orderBy(labDocuments.id)
 			.all()
-			.reverse();
+			.sort((a, b) => {
+				const sa = statusOrder[a.status] ?? 99;
+				const sb = statusOrder[b.status] ?? 99;
+				if (sa !== sb) return sa - sb;
+				return parseDate(b).localeCompare(parseDate(a)) || b.id - a.id;
+			});
 	}),
 
 	uploadDocuments: publicProcedure

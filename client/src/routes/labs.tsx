@@ -1043,9 +1043,14 @@ function LabsPage() {
 										</Flex>
 									</Flex>
 									{item.status === 'failed' && item.lastError ? (
-										<Typography.Text type='danger' style={{ whiteSpace: 'pre-wrap' }}>
-											{item.lastError}
-										</Typography.Text>
+										<div style={{ maxHeight: '10rem', overflow: 'auto' }}>
+											<Typography.Text
+												type='danger'
+												style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: 12 }}
+											>
+												{item.lastError}
+											</Typography.Text>
+										</div>
 									) : null}
 								</Flex>
 							</div>
