@@ -3,7 +3,6 @@ import { createScript, style } from './createScript';
 import fs from 'fs';
 import path from 'path';
 import { generateText, Output } from 'ai';
-import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import env from 'server/env';
 import { getDatabase } from 'server/db/client';
 import { labMeasurements } from 'server/db/schema';
@@ -12,12 +11,11 @@ import z from 'zod';
 import { createHash } from 'crypto';
 import convert, { getMeasureKind } from 'convert';
 import typedUnits from './units.json';
+import models from 'server/utils/models';
 
 const tmpDir = path.join('/tmp', 'vitals');
 fs.mkdirSync(tmpDir, { recursive: true });
 const unitsJson = typedUnits as Record<string, string | { count: number; unit: string }>;
-
-const openrouter = createOpenRouter({ apiKey: env.OPENROUTER_API_KEY });
 
 void createScript(async () => {
 	const [, , fileMaybeRelative] = process.argv;
@@ -31,11 +29,18 @@ void createScript(async () => {
 	// );
 
 	const markdown = extractMarkdown(file);
+	const data = await extractData(markdown);
 
+	console.log('>>>', data);
+});
+
+async function extractData(markdown: string) {
 	const measurementsDb = await compileMeasurementDatabase();
 
+	const model = models.smart_and_expensive;
+	console.log(style.header('parsing markdown with ' + model.modelId));
 	const result = await generateText({
-		model: openrouter('google/gemini-2.5-flash'),
+		model,
 		temperature: 0.1,
 		maxRetries: 1,
 		maxOutputTokens: 20e3,
@@ -51,19 +56,16 @@ void createScript(async () => {
 						valueText: z.string(),
 						unit: z.string(),
 						valueNumeric: z.number().optional(),
-						range: z
-							.object({
-								text: z.string(),
-								min: z.number().optional(),
-								max: z.number().optional(),
-							})
-							.optional(),
+						referenceText: z.string().optional(),
+						referenceMin: z.number().optional(),
+						referenceMax: z.number().optional(),
 						flag: z.string().optional(),
 					}),
 				),
 			}),
 		}),
 		system: textBlock`
+			You are extracting structured lab results from parsed PDF markdown
 			You must explicitly extract values visible in the <markdown /> and do not infer any data not provided.
 			You must translate all text to english if it's not already in english.
 			The <markdown /> was extracted by parsing a multi-page PDF of lab results. The parsing is pretty good but not 100% reliable so there might be areas to fix - a usual pitfall is tables that are missing headers because they spanned across multiple pages and the parser did not detect that.
@@ -86,25 +88,56 @@ void createScript(async () => {
 					valueText: string; // the literal value from the source, unaltered and without the unit
 					valueNumeric?: number; // the number value if this is a numeric value
 					unit: 'n/a' | string; // the unit for this measurement
-					range?: {
-						text: string; // the literal reference range if provided
-						min?: number; // parse min reference value if provided
-						max?: number; // parsed max reference value if provided
-					}
+					referenceText?: string; // it's very common that every measurement has its own reference range indicated next to it
+					referenceMin?: number; // parse min reference value if provided
+					referenceMax?: number; // parsed max reference value if provided
 					flag?: string; // if there is any flag for this specific measurement or notes
 				}>
 			}
+
+			<example_response>${JSON.stringify({
+				date: '2017-11-02',
+				labName: 'Quest Diagnostics',
+				location: 'One Malcolm Avenue, Teterboro, NJ 07608, USA',
+				measurements: [
+					{
+						name: 'MPV',
+						sourceName: 'MPV',
+						valueText: '8.7',
+						unit: 'fl',
+						valueNumeric: 8.7,
+						referenceText: '7.5-12.5',
+						referenceMin: 7.5,
+						referenceMax: 12.5,
+					},
+					{
+						name: 'Hemoglobin A1c',
+						sourceName: 'HEMOGLOBIN A1C (calc)',
+						valueText: '5.0',
+						unit: '% of total hgb',
+						valueNumeric: 5,
+						referenceText: '<5.7',
+						referenceMax: 5.7,
+					},
+				],
+			})}</example_response>
 		`,
 		prompt: `<markdown>${markdown}</markdown>`,
 	});
 
 	// 🏁 assume LLM has correctly matched names to the ones in the database and proceed with unit mapping
 
-	const canonicalUnits = Object.fromEntries(
-		Object.entries(measurementsDb).map(x => [x[0].toLocaleLowerCase(), x[1].unit]),
-	);
+	const unitsToFigureOut: { measurement: string; unit: string }[] = [];
 
-	const toFigureOut: { measurement: string; unit: string }[] = [];
+	const updateMeasurement = (
+		item: (typeof result.output.measurements)[number],
+		count: number | ((v: number) => number),
+	) => {
+		const fn = typeof count === 'number' ? (x: number) => x * count : count;
+		if (item.valueNumeric) item.valueNumeric = fn(item.valueNumeric);
+		if (item.referenceMin) item.referenceMin = fn(item.referenceMin);
+		if (item.referenceMax) item.referenceMax = fn(item.referenceMax);
+	};
 
 	for (const item of result.output.measurements) {
 		const matchedDb = measurementsDb[item.name.toLocaleLowerCase().trim()];
@@ -119,98 +152,119 @@ void createScript(async () => {
 			continue;
 		}
 
-		if (item.unit === matchedDb?.unit) continue;
+		if (!matchedDb) continue;
 
-		let multiplier = 1;
+		// one time mapping for units that never need to stay there (might not never be used in practice). also handles pretty formatting that's used
 		if (unitsJson[item.unit]) {
 			const m = unitsJson[item.unit];
 			if (typeof m === 'string') item.unit = m;
 			else {
 				item.unit = m.unit;
-				multiplier = m.count;
+				updateMeasurement(item, m.count);
 			}
 		}
-		if (item.valueNumeric) item.valueNumeric *= multiplier;
-		if (item.range?.min) item.range.min *= multiplier;
-		if (item.range?.max) item.range.max *= multiplier;
 
-		if (matchedDb?.unit) {
-			const map = (unit: string, value: number) =>
-				convert(value, unit as any).to(matchedDb.unit as any).quantity;
-			// matched AND both have units AND units are different AND we know how to convert
+		if (item.unit === matchedDb.unit) continue;
+
+		// matched AND both have units AND units are different AND we know how to convert
+		if (matchedDb.unit) {
+			const conversionKey = `${item.unit}→${matchedDb.unit}` as const;
 			if (getMeasureKind(item.unit)) {
-				if (item.valueNumeric) item.valueNumeric = map(item.valueText, item.valueNumeric);
+				updateMeasurement(
+					item,
+					value => convert(value, item.unit as any).to(matchedDb.unit as any).quantity,
+				);
+			} else if (unitsJson[conversionKey]) {
+				const m = unitsJson[conversionKey];
+				if (typeof m !== 'string') updateMeasurement(item, m.count);
 			} else {
+				// all else fail, fuck it let's send it to another LLM to fix
+				unitsToFigureOut.push({ measurement: item.name, unit: item.unit });
 			}
 		}
 	}
 
-	console.dir(result.output, { depth: null });
-	console.log({ unitsToFigureOut: toFigureOut });
-
-	const unitsMapped = await generateText({
-		model: openrouter('google/gemini-3.1-pro'),
-		temperature: 0.5,
-		maxOutputTokens: 5e3,
-		output: Output.array({
-			element: z.object({
-				measurement: z.string(),
-				canonicalUnit: z.string(),
-				canonicalName: z.string(),
-				multiplier: z.number(),
+	let jsonUpdated = false;
+	if (unitsToFigureOut.length) {
+		console.log('- asking an LLM to figure out unit mappings');
+		const { output } = await generateText({
+			model: models.smart_and_expensive,
+			temperature: 0.5,
+			maxOutputTokens: 5e3,
+			output: Output.array({
+				element: z.object({
+					measurement: z.string(),
+					canonicalUnit: z.string(),
+					multiplier: z.number(),
+				}),
 			}),
-		}),
-		system: textBlock`
-			Sanitize and find the canonical units of measurement for the given list of <measurements />.
-			These values were extracted from various lab bloodwork via a combination of OCR and LLM parsing, so they were created from potentially different standards and also have some parsing errors. Map the units and provide the conversion multiplier to go from 1 of the source unit to 1 of the target unit.
-			It could also be that the unit is actually correct for the measurement, in which case just clean it up if needed and return it back as { multiplier: 1 }
-			Reply with 1 object for each with the appropriate mapping:
-			type output_object = {
-				measurement: string; // the EXACT name given to you in the input <measurements />
-				canonicalName: string; // the canonical sanitized name for this measurement
-				canonicalUnit: string; // the canonical unit for this measurement
-				multiplier: number; // the conversion multiplier to convert 1 count of the original unit to the new canonicalUnit (e.g. if original is "grams" and the correct is "mg", then the multiplier is 1000)
-			}
+			system: textBlock`
+				Sanitize and find the canonical units of measurement for the given list of <measurements />.
+				These values were extracted from various lab bloodwork via a combination of OCR and LLM parsing, so they were created from potentially different standards and also have some parsing errors. Map the units and provide the conversion multiplier to go from 1 of the source unit to 1 of the target unit.
+				It could also be that the unit is actually correct for the measurement, in which case just clean it up if needed and return it back as { multiplier: 1 }
+				Reply with 1 object for each with the appropriate mapping:
+				type output_object = {
+					measurement: string; // the EXACT name given to you in the input <measurements /> (it will be used on my end to map your work)
+					canonicalUnit: string; // the canonical unit for this measurement
+					multiplier: number; // the multiplier to apply to the numeric value when converting from source to target (e.g. if original is "grams" and the correct is "mg", then the multiplier is 1000)
+				}
 
-			Example, for input:
-			- measurement "GLUCOSE" with unit "g/dL"
-			- measurement "NON HDL CHOLESTEROL" with unit "mg/dL (calc)"
+				Example, for input:
+				- measurement "glucose" with unit "g/dL"
+				- measurement "non hdl cholesterol" with unit "mg/dL (calc)"
+				- measurement "some random name that is probably a parsing error" with unit "grams"
 
-			Example output
-			[
-				{"measurement":"GLUCOSE","canonicalName":"glucose","canonicalUnit":"mg/dL","multiplier":1000},
-				{"measurement":"NON HDL CHOLESTEROL (calculated)","canonical name": "Non HDL Cholesterol","canonicalUnit":"mg/dL","multiplier":1}
-			]
-		`,
-		prompt: `<measurements>${toFigureOut.map(x => `measurement "${x.measurement}" with unit "${x.unit}"`).join('\n')}</measurements>`,
-	});
-});
+				Example output:
+				[
+					{"measurement":"glucose","canonicalUnit":"mg/dL","multiplier":1000},
+					{"measurement":"non hdl cholesterol","canonicalUnit":"mg/dL","multiplier":1}
+				]
+			`,
+			prompt: `<measurements>${unitsToFigureOut.map(x => `measurement "${x.measurement}" with unit "${x.unit}"`).join('\n')}</measurements>`,
+		});
 
-async function compileMeasurementDatabase() {
-	const result: Record<string, { aliases: string[]; unit: string | null }> = {};
-	const db = getDatabase();
-	const measurements = db
-		.select()
-		.from(labMeasurements)
-		.orderBy(labMeasurements.name, labMeasurements.id)
-		.all();
+		const mapping = Object.fromEntries(output.map(x => [x.measurement, x]));
 
-	for (const measurement of measurements) {
-		const aliases = measurement.aliasesJson.filter(alias => alias && alias !== measurement.name);
-
-		result[measurement.name] = {
-			aliases,
-			unit: measurement.unit,
-		};
+		for (const { measurement } of unitsToFigureOut) {
+			const m = mapping[measurement];
+			const item = result.output.measurements.find(x => x.name === measurement);
+			if (!m || !item) continue;
+			unitsJson[`${item.unit}→${m.canonicalUnit}`] = { unit: m.canonicalUnit, count: m.multiplier };
+			jsonUpdated = true;
+			item.unit = m.canonicalUnit;
+			updateMeasurement(item, m.multiplier);
+		}
 	}
 
-	return result;
+	if (jsonUpdated)
+		fs.writeFileSync(path.join(__dirname, 'units.json'), JSON.stringify(unitsJson, null, 4));
+
+	async function compileMeasurementDatabase() {
+		const result: Record<string, { aliases: string[]; unit: string | null }> = {};
+		const db = getDatabase();
+		const measurements = db
+			.select()
+			.from(labMeasurements)
+			.orderBy(labMeasurements.name, labMeasurements.id)
+			.all();
+
+		for (const measurement of measurements) {
+			const aliases = measurement.aliasesJson.filter(alias => alias && alias !== measurement.name);
+
+			result[measurement.name] = {
+				aliases,
+				unit: measurement.unit,
+			};
+		}
+
+		return result;
+	}
 }
 
 function extractMarkdown(file: string) {
 	console.log(style.header('convert to markdown via marker-pdf'));
 	const hash = createHash('sha256').update(fs.readFileSync(file).toString()).digest('hex');
-	const targetDir = path.join(tmpDir, 'lab_' + hash);
+	const targetDir = path.join(tmpDir, 'bloodwork_' + hash);
 	let outDir: string | undefined = undefined;
 
 	if (fs.existsSync(targetDir)) {
