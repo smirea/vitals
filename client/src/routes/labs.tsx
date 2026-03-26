@@ -57,24 +57,27 @@ import {
 	getTableRows,
 	getTableSources,
 	getVisibleSources,
-	GROUP_BY_CATEGORY_STORAGE_KEY,
 	MEASUREMENT_COLUMN_WIDTH,
 	MIN_CHART_PANE_WIDTH,
-	OUT_OF_RANGE_SOURCE_FILTERS_STORAGE_KEY,
 	OVERVIEW_COLUMN_WIDTH,
-	readStoredGroupByCategory,
-	readStoredOutOfRangeSourceFilterIds,
-	readStoredSelectedRowKeys,
-	readStoredStarredMeasurementKeys,
-	SELECTED_ROWS_STORAGE_KEY,
 	SELECTION_COLUMN_WIDTH,
 	SOURCE_COLUMN_WIDTH,
-	STARRED_MEASUREMENTS_STORAGE_KEY,
 	clamp,
 	type VitalsRowModel,
 } from './labs/_labs';
 import type { LabImportDocument } from '../utils/api';
+import createLocalStorage from '../utils/createLocalStorage';
 import { useTRPC } from '../utils/trpc';
+
+const { useLocalStorage } = createLocalStorage({
+	namespace: 'vitals.labs',
+	getDefaults: () => ({
+		starredMeasurements: [] as string[],
+		selectedRows: [] as string[],
+		groupByCategory: true,
+		outOfRangeSourceFilters: [] as string[],
+	}),
+});
 
 const labsSearchSchema = z.object({
 	tab: z.enum(['overview', 'documents']).optional(),
@@ -104,18 +107,14 @@ function LabsPage() {
 	const [measurementFilter, setMeasurementFilter] = useState('');
 	const [deletingDocumentId, setDeletingDocumentId] = useState<number | null>(null);
 	const [selectedImportDocumentIds, setSelectedImportDocumentIds] = useState<number[]>([]);
-	const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>(() =>
-		readStoredSelectedRowKeys(),
-	);
-	const [starredMeasurementKeys, setStarredMeasurementKeys] = useState<string[]>(() =>
-		readStoredStarredMeasurementKeys(),
-	);
+	const [selectedRowKeys, setSelectedRowKeys] = useLocalStorage('selectedRows');
+	const [starredMeasurementKeys, setStarredMeasurementKeys] =
+		useLocalStorage('starredMeasurements');
 	const [dateRangeStart, setDateRangeStart] = useState('');
 	const [dateRangeEnd, setDateRangeEnd] = useState('');
-	const [groupByCategory, setGroupByCategory] = useState(() => readStoredGroupByCategory());
-	const [outOfRangeSourceFilterIds, setOutOfRangeSourceFilterIds] = useState<string[]>(() =>
-		readStoredOutOfRangeSourceFilterIds(),
-	);
+	const [groupByCategory, setGroupByCategory] = useLocalStorage('groupByCategory');
+	const [outOfRangeSourceFilterIds, setOutOfRangeSourceFilterIds] =
+		useLocalStorage('outOfRangeSourceFilters');
 	const activeTab = search.tab ?? 'overview';
 	const previewDocumentId = search.doc ?? null;
 
@@ -234,7 +233,7 @@ function LabsPage() {
 					name: measurement?.name ?? result.originalName ?? 'Unknown measurement',
 					category: measurement?.category?.trim() || null,
 					valueText: valueText || '—',
-					rangeText: measurement?.canonicalRangeText?.trim() || null,
+					rangeText: measurement?.range?.trim() || null,
 					note: result.note?.trim() || null,
 				};
 			});
@@ -315,40 +314,12 @@ function LabsPage() {
 	);
 
 	useEffect(() => {
-		const groupableDocumentIds = new Set(
-			importDocuments.filter(isGroupableLabsDocument).map(document => document.id),
-		);
+		const documentIds = new Set(importDocuments.map(document => document.id));
 		setSelectedImportDocumentIds(previous => {
-			const next = previous.filter(documentId => groupableDocumentIds.has(documentId));
+			const next = previous.filter(documentId => documentIds.has(documentId));
 			return next.length === previous.length ? previous : next;
 		});
 	}, [importDocuments]);
-
-	useEffect(() => {
-		if (typeof window === 'undefined') return;
-		window.localStorage.setItem(
-			STARRED_MEASUREMENTS_STORAGE_KEY,
-			JSON.stringify(starredMeasurementKeys),
-		);
-	}, [starredMeasurementKeys]);
-
-	useEffect(() => {
-		if (typeof window === 'undefined') return;
-		window.localStorage.setItem(GROUP_BY_CATEGORY_STORAGE_KEY, String(groupByCategory));
-	}, [groupByCategory]);
-
-	useEffect(() => {
-		if (typeof window === 'undefined') return;
-		window.localStorage.setItem(SELECTED_ROWS_STORAGE_KEY, JSON.stringify(selectedRowKeys));
-	}, [selectedRowKeys]);
-
-	useEffect(() => {
-		if (typeof window === 'undefined') return;
-		window.localStorage.setItem(
-			OUT_OF_RANGE_SOURCE_FILTERS_STORAGE_KEY,
-			JSON.stringify(outOfRangeSourceFilterIds),
-		);
-	}, [outOfRangeSourceFilterIds]);
 
 	useEffect(() => {
 		if (allMeasurementRows.length === 0) {
@@ -436,8 +407,6 @@ function LabsPage() {
 
 	const selectedRowKeySet = useMemo(() => new Set(selectedRowKeys), [selectedRowKeys]);
 
-	const tableSources = baseTableSources;
-
 	const outOfRangeMeasurementCountBySourceId = useMemo(
 		() =>
 			getOutOfRangeMeasurementCountBySourceId({
@@ -498,9 +467,9 @@ function LabsPage() {
 		() =>
 			getMeasurementOverviewByKey({
 				filteredMeasurementRows: tableMeasurementRows,
-				tableSources,
+				tableSources: baseTableSources,
 			}),
-		[tableMeasurementRows, tableSources],
+		[tableMeasurementRows, baseTableSources],
 	);
 
 	const chartSeries = useMemo(
@@ -658,8 +627,8 @@ function LabsPage() {
 			SELECTION_COLUMN_WIDTH +
 			MEASUREMENT_COLUMN_WIDTH +
 			OVERVIEW_COLUMN_WIDTH +
-			tableSources.length * SOURCE_COLUMN_WIDTH,
-		[tableSources.length],
+			baseTableSources.length * SOURCE_COLUMN_WIDTH,
+		[baseTableSources.length],
 	);
 
 	const tableScrollY = useMemo(
@@ -672,7 +641,7 @@ function LabsPage() {
 		[tableRows],
 	);
 
-	const isDownloadCsvDisabled = csvMeasurementRows.length === 0 || tableSources.length === 0;
+	const isDownloadCsvDisabled = csvMeasurementRows.length === 0 || baseTableSources.length === 0;
 
 	const onDownloadCsv = useCallback(() => {
 		if (isDownloadCsvDisabled || typeof document === 'undefined') {
@@ -692,7 +661,7 @@ function LabsPage() {
 			'Category',
 			'In range',
 			'Out of range',
-			...tableSources.map(source => source.prettyDate),
+			...baseTableSources.map(source => source.prettyDate),
 		];
 
 		const rows = csvMeasurementRows.map(row => {
@@ -702,7 +671,7 @@ function LabsPage() {
 				row.category,
 				overview.inRange,
 				overview.outOfRange,
-				...tableSources.map(source => {
+				...baseTableSources.map(source => {
 					const cell = row.valuesBySourceIndex[source.index];
 					if (!cell || cell.display === '—' || cell.display === '--') {
 						return '';
@@ -722,7 +691,7 @@ function LabsPage() {
 		link.click();
 		link.remove();
 		window.setTimeout(() => URL.revokeObjectURL(href), 0);
-	}, [csvMeasurementRows, isDownloadCsvDisabled, measurementOverviewByKey, tableSources]);
+	}, [csvMeasurementRows, isDownloadCsvDisabled, measurementOverviewByKey, baseTableSources]);
 
 	const onOpenImportPicker = useCallback(() => {
 		importInputRef.current?.click();
@@ -838,7 +807,6 @@ function LabsPage() {
 	const onGroupDocuments = useCallback(async () => {
 		const documentIds = importDocuments
 			.filter(document => selectedImportDocumentIds.includes(document.id))
-			.filter(isGroupableLabsDocument)
 			.map(document => document.id);
 		if (documentIds.length < 2) {
 			return;
@@ -861,7 +829,7 @@ function LabsPage() {
 	const onClearDocumentGroup = useCallback(async () => {
 		const documentIds = importDocuments
 			.filter(document => selectedImportDocumentIds.includes(document.id))
-			.filter(document => isGroupableLabsDocument(document) && Boolean(document.group))
+			.filter(document => Boolean(document.group))
 			.map(document => document.id);
 		if (documentIds.length === 0) {
 			return;
@@ -882,10 +850,7 @@ function LabsPage() {
 	}, [importDocuments, selectedImportDocumentIds, updateDocumentsMutation]);
 
 	const selectedGroupableDocuments = useMemo(
-		() =>
-			importDocuments
-				.filter(document => selectedImportDocumentIds.includes(document.id))
-				.filter(isGroupableLabsDocument),
+		() => importDocuments.filter(document => selectedImportDocumentIds.includes(document.id)),
 		[importDocuments, selectedImportDocumentIds],
 	);
 	const hasSelectedDocumentGroup = selectedGroupableDocuments.some(document =>
@@ -959,8 +924,6 @@ function LabsPage() {
 						const hasGroup = Boolean(item.group);
 						const isGroupStart = hasGroup && previousItem?.group !== item.group;
 						const isGroupEnd = hasGroup && nextItem?.group !== item.group;
-						const isSelectable = isGroupableLabsDocument(item);
-
 						return (
 							<div
 								key={item.id}
@@ -982,7 +945,7 @@ function LabsPage() {
 											<Checkbox
 												checked={selectedImportDocumentIds.includes(item.id)}
 												onChange={event => onToggleImportDocument(item.id, event.target.checked)}
-												disabled={!isSelectable || updateDocumentsMutation.isPending}
+												disabled={updateDocumentsMutation.isPending}
 											/>
 											<Tag color={statusColor}>{item.status}</Tag>
 											<Button
@@ -1110,7 +1073,7 @@ function LabsPage() {
 			/>
 			<VitalsTable
 				rows={tableRows}
-				tableSources={tableSources}
+				tableSources={baseTableSources}
 				outOfRangeSourceFilterIdSet={outOfRangeSourceFilterIdSet}
 				outOfRangeMeasurementCountBySourceId={outOfRangeMeasurementCountBySourceId}
 				selectedRowKeySet={selectedRowKeySet}
@@ -1319,10 +1282,6 @@ function hasActiveLabsImports(documents: LabImportDocument[]) {
 	return documents.some(
 		document => document.status === 'pending' || document.status === 'processing',
 	);
-}
-
-function isGroupableLabsDocument(_document: LabImportDocument) {
-	return true;
 }
 
 function buildLabsDocumentGroupId() {

@@ -2,7 +2,7 @@ import path from 'path';
 
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 
-import { getLabDocumentPdf, startLabProcessor } from 'server/db/labs.ts';
+import { getLabDocumentPdf, startLabProcessor } from 'server/trpc/routers/labs.ts';
 import { getDatabase } from 'server/db/client.ts';
 import env from 'server/env.ts';
 import { appRouter, createTrpcContext } from 'server/trpc/index.ts';

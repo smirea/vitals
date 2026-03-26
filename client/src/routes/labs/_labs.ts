@@ -143,101 +143,11 @@ export const SELECTION_COLUMN_WIDTH = 52;
 export const MEASUREMENT_COLUMN_WIDTH = 250;
 export const OVERVIEW_COLUMN_WIDTH = 94;
 export const SOURCE_COLUMN_WIDTH = 164;
-export const STARRED_MEASUREMENTS_STORAGE_KEY = 'vitals.starred.measurements';
-export const SELECTED_ROWS_STORAGE_KEY = 'vitals.selected.rows';
-export const GROUP_BY_CATEGORY_STORAGE_KEY = 'vitals.group-by-category';
-export const OUT_OF_RANGE_SOURCE_FILTERS_STORAGE_KEY = 'vitals.out-of-range.source-filters';
 export const UNCATEGORIZED_CATEGORY_LABEL = 'Other';
 export const CHART_PALETTE = ['#0f172a', '#2563eb', '#0f766e', '#15803d', '#7c3aed', '#ca8a04'];
 
 export function clamp(value: number, min: number, max: number): number {
 	return Math.min(max, Math.max(min, value));
-}
-
-export function normalizeStarredMeasurementKeys(value: unknown): string[] {
-	if (!Array.isArray(value)) return [];
-	const unique = new Set<string>();
-
-	value.forEach(item => {
-		if (typeof item !== 'string') return;
-		const normalized = item.trim().toLowerCase();
-		if (!normalized) return;
-		unique.add(normalized);
-	});
-
-	return Array.from(unique);
-}
-
-export function readStoredStarredMeasurementKeys(): string[] {
-	if (typeof window === 'undefined') return [];
-	try {
-		const raw = window.localStorage.getItem(STARRED_MEASUREMENTS_STORAGE_KEY);
-		if (!raw) return [];
-		return normalizeStarredMeasurementKeys(JSON.parse(raw));
-	} catch {
-		return [];
-	}
-}
-
-export function normalizeSelectedRowKeys(value: unknown): string[] {
-	if (!Array.isArray(value)) return [];
-	const unique = new Set<string>();
-
-	value.forEach(item => {
-		if (typeof item !== 'string') return;
-		const normalized = item.trim().toLowerCase();
-		if (!normalized) return;
-		unique.add(normalized);
-	});
-
-	return Array.from(unique);
-}
-
-export function readStoredSelectedRowKeys(): string[] {
-	if (typeof window === 'undefined') return [];
-	try {
-		const raw = window.localStorage.getItem(SELECTED_ROWS_STORAGE_KEY);
-		if (!raw) return [];
-		return normalizeSelectedRowKeys(JSON.parse(raw));
-	} catch {
-		return [];
-	}
-}
-
-export function readStoredGroupByCategory(): boolean {
-	if (typeof window === 'undefined') return true;
-	try {
-		const raw = window.localStorage.getItem(GROUP_BY_CATEGORY_STORAGE_KEY);
-		if (raw === null) return true;
-		return raw === 'true';
-	} catch {
-		return true;
-	}
-}
-
-export function normalizeOutOfRangeSourceFilterIds(value: unknown): string[] {
-	if (!Array.isArray(value)) return [];
-	const unique = new Set<string>();
-
-	value.forEach(item => {
-		if (typeof item !== 'string') return;
-		const normalized = item.trim();
-		if (!normalized) return;
-		unique.add(normalized);
-	});
-
-	return Array.from(unique);
-}
-
-export function readStoredOutOfRangeSourceFilterIds(): string[] {
-	if (typeof window === 'undefined') return [];
-	try {
-		const raw = window.localStorage.getItem(OUT_OF_RANGE_SOURCE_FILTERS_STORAGE_KEY);
-		if (!raw) return [];
-		return normalizeOutOfRangeSourceFilterIds(JSON.parse(raw));
-	} catch {
-		return [];
-	}
 }
 
 export function parseNumericValue(value: number | string | null | undefined): number | null {
@@ -697,8 +607,8 @@ export function getAllMeasurementRows({
 				valueText: result.valueText,
 				valueNumeric: result.valueNumeric,
 				unit: result.unit,
-				referenceRangeMin: measurementDefinition.canonicalRangeMin,
-				referenceRangeMax: measurementDefinition.canonicalRangeMax,
+				referenceRangeMin: measurementDefinition.rangeMin,
+				referenceRangeMax: measurementDefinition.rangeMax,
 				flag: null,
 				note: result.note,
 			};

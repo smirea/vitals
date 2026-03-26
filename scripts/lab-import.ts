@@ -5,10 +5,11 @@ import path from 'path';
 import { generateText, Output } from 'ai';
 import env from 'server/env';
 import { getDatabase } from 'server/db/client';
-import { labMeasurements } from 'server/db/schema';
+import { labDocuments, labMeasurements, labResults } from 'server/db/schema';
 import { textBlock } from 'shared/textBlock';
 import z from 'zod';
 import { createHash } from 'crypto';
+import { eq } from 'drizzle-orm';
 import convert, { getMeasureKind } from 'convert';
 import typedUnits from './units.json';
 import models from 'server/utils/models';
@@ -16,26 +17,188 @@ import models from 'server/utils/models';
 const tmpDir = path.join('/tmp', 'vitals');
 fs.mkdirSync(tmpDir, { recursive: true });
 const unitsJson = typedUnits as Record<string, string | { count: number; unit: string }>;
+const db = getDatabase();
 
-void createScript(async () => {
-	const [, , fileMaybeRelative] = process.argv;
-	if (!fs.existsSync(fileMaybeRelative)) throw new Error('pass a file as an arg');
-	const file = path.resolve(fileMaybeRelative);
-
-	// console.log(style.header('convert to images'));
-	// execSync(
-	// 	`magick -density 150 '${path.resolve(file)}' -quality 95 -background white -alpha remove -alpha off '${path.join(tmpDir, `parse__${path.basename(file)}__%03d.png`)}'`,
-	// 	{ stdio: 'inherit' },
-	// );
-
-	const markdown = extractMarkdown(file);
-	const data = await extractData(markdown);
-
-	console.log('>>>', data);
+const extractedDataSchema = z.object({
+	date: z.string().optional(),
+	labName: z.string().optional(),
+	location: z.string().optional(),
+	measurements: z.array(
+		z.object({
+			name: z.string(),
+			sourceName: z.string(),
+			valueText: z.string(),
+			unit: z.string(),
+			valueNumeric: z.number().optional(),
+			referenceText: z.string().optional(),
+			referenceMin: z.number().optional(),
+			referenceMax: z.number().optional(),
+			flag: z.string().optional(),
+		}),
+	),
 });
 
+type ExtractedData = z.infer<typeof extractedDataSchema>;
+
+void createScript(async () => {
+	const filePath = process.argv[2];
+	if (!filePath) throw new Error('pass an absolute file path as an arg');
+	if (!path.isAbsolute(filePath)) throw new Error('path must be absolute');
+	if (!fs.existsSync(filePath)) throw new Error(`file not found: ${filePath}`);
+
+	const pdfData = fs.readFileSync(filePath);
+	const sha256 = createHash('sha256').update(pdfData).digest('hex');
+	const fileName = path.basename(filePath);
+
+	let documentId: number;
+	const existing = db
+		.select({ id: labDocuments.id })
+		.from(labDocuments)
+		.where(eq(labDocuments.sha256, sha256))
+		.get();
+
+	if (existing) {
+		console.log(style.label('existing document', `#${existing.id}, will overwrite results`));
+		documentId = existing.id;
+	} else {
+		const inserted = db
+			.insert(labDocuments)
+			.values({
+				fileName,
+				mimeType: 'application/pdf',
+				pdfData,
+				sha256,
+				status: 'pending',
+				statusText: 'Queued for import',
+				queuedAt: new Date().toISOString(),
+			})
+			.returning({ id: labDocuments.id })
+			.get();
+		documentId = inserted.id;
+		console.log(style.label('created document', `#${documentId}`));
+	}
+
+	try {
+		db.update(labDocuments)
+			.set({
+				status: 'processing',
+				statusText: 'Converting PDF to markdown',
+				startedAt: new Date().toISOString(),
+			})
+			.where(eq(labDocuments.id, documentId))
+			.run();
+
+		const markdown = extractMarkdown(filePath);
+		db.update(labDocuments)
+			.set({ rawMarkdown: markdown, statusText: 'Extracting measurements' })
+			.where(eq(labDocuments.id, documentId))
+			.run();
+
+		const data = await extractData(markdown);
+
+		const resultCount = data.measurements.length;
+		db.update(labDocuments)
+			.set({ statusText: `Saving ${resultCount} results` })
+			.where(eq(labDocuments.id, documentId))
+			.run();
+
+		saveResults(documentId, data);
+
+		db.update(labDocuments)
+			.set({
+				status: 'completed',
+				statusText: `Imported ${resultCount} results`,
+				completedAt: new Date().toISOString(),
+				date: data.date ?? null,
+				labName: data.labName ?? null,
+				location: data.location ?? null,
+			})
+			.where(eq(labDocuments.id, documentId))
+			.run();
+
+		console.log(style.label('done', `imported ${resultCount} results for document #${documentId}`));
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		db.update(labDocuments)
+			.set({
+				status: 'failed',
+				statusText: 'Import failed',
+				failedAt: new Date().toISOString(),
+				lastError: message,
+			})
+			.where(eq(labDocuments.id, documentId))
+			.run();
+		throw error;
+	}
+});
+
+function saveResults(documentId: number, data: Awaited<ReturnType<typeof extractData>>) {
+	db.transaction(tx => {
+		tx.delete(labResults).where(eq(labResults.documentId, documentId)).run();
+
+		const now = new Date().toISOString();
+		const seen = new Map<string, number>();
+
+		for (let i = 0; i < data.measurements.length; i++) {
+			const key = data.measurements[i].name.toLowerCase().trim();
+			seen.set(key, i);
+		}
+
+		for (const [key, index] of seen) {
+			const m = data.measurements[index];
+
+			let measurement = tx.select().from(labMeasurements).where(eq(labMeasurements.key, key)).get();
+
+			if (!measurement) {
+				measurement = tx
+					.insert(labMeasurements)
+					.values({
+						key,
+						name: m.name,
+						aliasesJson: m.sourceName !== m.name ? [m.sourceName] : [],
+						unit: m.unit ?? null,
+						range: m.referenceText ?? null,
+						rangeMin: m.referenceMin ?? null,
+						rangeMax: m.referenceMax ?? null,
+						createdAt: now,
+						updatedAt: now,
+					})
+					.returning()
+					.get();
+			} else {
+				const aliases = measurement.aliasesJson ?? [];
+				if (m.sourceName && m.sourceName !== m.name && !aliases.includes(m.sourceName)) {
+					tx.update(labMeasurements)
+						.set({ aliasesJson: [...aliases, m.sourceName], updatedAt: now })
+						.where(eq(labMeasurements.id, measurement.id))
+						.run();
+				}
+			}
+
+			tx.insert(labResults)
+				.values({
+					documentId,
+					measurementId: measurement.id,
+					sortOrder: index,
+					originalName: m.sourceName,
+					originalValueText: m.originalValueText,
+					originalValueNumeric: m.originalValueNumeric ?? null,
+					originalUnit: m.originalUnit ?? null,
+					originalRangeText: m.referenceText ?? null,
+					originalRangeMin: m.referenceMin ?? null,
+					originalRangeMax: m.referenceMax ?? null,
+					valueText: m.valueText,
+					valueNumeric: m.valueNumeric ?? null,
+					unit: m.unit ?? null,
+					note: m.flag ?? null,
+				})
+				.run();
+		}
+	});
+}
+
 async function extractData(markdown: string) {
-	const measurementsDb = await compileMeasurementDatabase();
+	const measurementsDb = compileMeasurementDatabase();
 
 	const model = models.smart_and_expensive;
 	console.log(style.header('parsing markdown with ' + model.modelId));
@@ -44,26 +207,7 @@ async function extractData(markdown: string) {
 		temperature: 0.1,
 		maxRetries: 1,
 		maxOutputTokens: 20e3,
-		output: Output.object({
-			schema: z.object({
-				date: z.string().optional(),
-				labName: z.string().optional(),
-				location: z.string().optional(),
-				measurements: z.array(
-					z.object({
-						name: z.string(),
-						sourceName: z.string(),
-						valueText: z.string(),
-						unit: z.string(),
-						valueNumeric: z.number().optional(),
-						referenceText: z.string().optional(),
-						referenceMin: z.number().optional(),
-						referenceMax: z.number().optional(),
-						flag: z.string().optional(),
-					}),
-				),
-			}),
-		}),
+		output: Output.object({ schema: extractedDataSchema }),
 		system: textBlock`
 			You are extracting structured lab results from parsed PDF markdown
 			You must explicitly extract values visible in the <markdown /> and do not infer any data not provided.
@@ -139,11 +283,17 @@ async function extractData(markdown: string) {
 		if (item.referenceMax) item.referenceMax = fn(item.referenceMax);
 	};
 
+	// snapshot originals before normalization mutates them
+	const originals = result.output.measurements.map(m => ({
+		valueText: m.valueText,
+		valueNumeric: m.valueNumeric,
+		unit: m.unit,
+	}));
+
 	for (const item of result.output.measurements) {
 		const matchedDb = measurementsDb[item.name.toLocaleLowerCase().trim()];
 		if (item.valueNumeric == null) {
-			if (/^\d+$/.test(item.valueText)) item.valueNumeric = parseInt(item.valueText, 10);
-			else if (/^\d+(\.\d+)?$/.test(item.valueText)) item.valueNumeric = parseFloat(item.valueText);
+			if (/^\d+(\.\d+)?$/.test(item.valueText)) item.valueNumeric = parseFloat(item.valueText);
 		}
 		if (!item.unit) continue;
 		item.unit = item.unit.toLocaleLowerCase().trim();
@@ -154,7 +304,6 @@ async function extractData(markdown: string) {
 
 		if (!matchedDb) continue;
 
-		// one time mapping for units that never need to stay there (might not never be used in practice). also handles pretty formatting that's used
 		if (unitsJson[item.unit]) {
 			const m = unitsJson[item.unit];
 			if (typeof m === 'string') item.unit = m;
@@ -166,7 +315,6 @@ async function extractData(markdown: string) {
 
 		if (item.unit === matchedDb.unit) continue;
 
-		// matched AND both have units AND units are different AND we know how to convert
 		if (matchedDb.unit) {
 			const conversionKey = `${item.unit}→${matchedDb.unit}` as const;
 			if (getMeasureKind(item.unit)) {
@@ -178,7 +326,6 @@ async function extractData(markdown: string) {
 				const m = unitsJson[conversionKey];
 				if (typeof m !== 'string') updateMeasurement(item, m.count);
 			} else {
-				// all else fail, fuck it let's send it to another LLM to fix
 				unitsToFigureOut.push({ measurement: item.name, unit: item.unit });
 			}
 		}
@@ -239,26 +386,32 @@ async function extractData(markdown: string) {
 	if (jsonUpdated)
 		fs.writeFileSync(path.join(__dirname, 'units.json'), JSON.stringify(unitsJson, null, 4));
 
-	async function compileMeasurementDatabase() {
-		const result: Record<string, { aliases: string[]; unit: string | null }> = {};
-		const db = getDatabase();
-		const measurements = db
-			.select()
-			.from(labMeasurements)
-			.orderBy(labMeasurements.name, labMeasurements.id)
-			.all();
+	// merge originals back onto measurements so saveResults can store both
+	return {
+		...result.output,
+		measurements: result.output.measurements.map((m, i) => ({
+			...m,
+			originalValueText: originals[i].valueText,
+			originalValueNumeric: originals[i].valueNumeric,
+			originalUnit: originals[i].unit,
+		})),
+	};
+}
 
-		for (const measurement of measurements) {
-			const aliases = measurement.aliasesJson.filter(alias => alias && alias !== measurement.name);
+function compileMeasurementDatabase() {
+	const result: Record<string, { aliases: string[]; unit: string | null }> = {};
+	const measurements = db
+		.select()
+		.from(labMeasurements)
+		.orderBy(labMeasurements.name, labMeasurements.id)
+		.all();
 
-			result[measurement.name] = {
-				aliases,
-				unit: measurement.unit,
-			};
-		}
-
-		return result;
+	for (const measurement of measurements) {
+		const aliases = measurement.aliasesJson.filter(alias => alias && alias !== measurement.name);
+		result[measurement.name] = { aliases, unit: measurement.unit };
 	}
+
+	return result;
 }
 
 function extractMarkdown(file: string) {
