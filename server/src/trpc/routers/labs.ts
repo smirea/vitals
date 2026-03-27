@@ -159,9 +159,9 @@ export const labsRouter = createRouter({
 
 				queued.push({ ...inserted, deduplicated: false });
 				console.log(`[labs] #${inserted.id} ${inserted.fileName}: queued for import`);
-				processNextImport();
 			}
 
+			processNextImport();
 			return { documents: queued };
 		}),
 
@@ -280,6 +280,16 @@ function processNextImport() {
 		.orderBy(asc(labDocuments.retryCount), asc(labDocuments.id))
 		.get();
 	if (!next) return;
+
+	db.update(labDocuments)
+		.set({
+			status: 'processing',
+			statusText: 'Starting import',
+			statusUpdatedAt: new Date().toISOString(),
+			startedAt: new Date().toISOString(),
+		})
+		.where(eq(labDocuments.id, next.id))
+		.run();
 
 	const tmpPath = path.join(tmpDir, `doc_${next.id}_${next.fileName}`);
 	fs.writeFileSync(tmpPath, new Uint8Array(next.pdfData));

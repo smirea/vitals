@@ -265,60 +265,61 @@ async function extractData(
 					maxOutputTokens: 16e3,
 					output: Output.object({ schema: extractedDataSchema }),
 					system: textBlock`
-					You are extracting structured lab results from parsed PDF markdown.
-					You must explicitly extract values visible in the <markdown /> and do not infer any data not provided.
-					You must translate all text to english if it's not already in english.
-					If the chunk contains no lab measurements, return an empty measurements array.
-					The <markdown /> is a chunk of a larger document extracted from a multi-page PDF of lab results. The parsing is pretty good but not 100% reliable so there might be areas to fix - a usual pitfall is tables that are missing headers because they spanned across multiple pages and the parser did not detect that.
-					You are provided a <database /> of the existing canonical names, it is not exhaustive as we are using this process to build it. If you find matches in the <database /> then use those as the canonical names, otherwise take your best guess given the context.
+						You are extracting structured lab results from parsed PDF markdown.
+						You MUST extract EVERY measurement from EVERY table in the chunk. Do not skip any rows. Each table row with a test name and value is a measurement.
+						You must explicitly extract values visible in the <markdown /> and do not infer any data not provided.
+						You must translate all text to english if it's not already in english.
+						If the chunk contains no lab measurements, return an empty measurements array.
+						The <markdown /> is a chunk of a larger document extracted from a multi-page PDF of lab results. The parsing is pretty good but not 100% reliable so there might be areas to fix - a usual pitfall is tables that are missing headers because they spanned across multiple pages and the parser did not detect that.
+						You are provided a <database /> of the existing canonical names, it is not exhaustive as we are using this process to build it. If you find matches in the <database /> then use those as the canonical names, otherwise take your best guess given the context.
 
-					<database>${databaseBlock}</database>
+						<database>${databaseBlock}</database>
 
-					type output_json_schema = {
-						date?: string; // ISO date the lab was made, if provided
-						labName?: string; // the name of the company that processed this
-						location?: string; // full address including city, country, if available
-						measurements: Array<{
-							name: string; // canonical name according to the <database /> if possible. If there is no high certainty match in the <database /> then translate and sanitize the source name
-							sourceName: string; // the literal name from the source, unaltered
-							valueText: string; // the literal value from the source, unaltered and without the unit
-							valueNumeric?: number; // the number value if this is a numeric value
-							unit: 'n/a' | string; // the unit for this measurement
-							referenceText?: string; // it's very common that every measurement has its own reference range indicated next to it
-							referenceMin?: number; // parse min reference value if provided
-							referenceMax?: number; // parsed max reference value if provided
-							flag?: string; // if there is any flag for this specific measurement or notes
-						}>
-					}
+						type output_json_schema = {
+							date?: string; // ISO date the lab was made, if provided
+							labName?: string; // the name of the company that processed this
+							location?: string; // full address including city, country, if available
+							measurements: Array<{
+								name: string; // canonical name according to the <database /> if possible. If there is no high certainty match in the <database /> then translate and sanitize the source name
+								sourceName: string; // the literal name from the source, unaltered
+								valueText: string; // the literal value from the source, unaltered and without the unit
+								valueNumeric?: number; // the number value if this is a numeric value
+								unit: 'n/a' | string; // the unit for this measurement
+								referenceText?: string; // it's very common that every measurement has its own reference range indicated next to it
+								referenceMin?: number; // parse min reference value if provided
+								referenceMax?: number; // parsed max reference value if provided
+								flag?: string; // if there is any flag for this specific measurement or notes
+							}>
+						}
 
-					<example_response>${JSON.stringify({
-						date: '2017-11-02',
-						labName: 'Quest Diagnostics',
-						location: 'One Malcolm Avenue, Teterboro, NJ 07608, USA',
-						measurements: [
-							{
-								name: 'MPV',
-								sourceName: 'MPV',
-								valueText: '8.7',
-								unit: 'fl',
-								valueNumeric: 8.7,
-								referenceText: '7.5-12.5',
-								referenceMin: 7.5,
-								referenceMax: 12.5,
-							},
-							{
-								name: 'Hemoglobin A1c',
-								sourceName: 'HEMOGLOBIN A1C (calc)',
-								valueText: '5.0',
-								unit: '% of total hgb',
-								valueNumeric: 5,
-								referenceText: '<5.7',
-								referenceMax: 5.7,
-							},
-						],
-					})}</example_response>
-					${continuationHint}
-				`,
+						<example_response>${JSON.stringify({
+							date: '2017-11-02',
+							labName: 'Quest Diagnostics',
+							location: 'One Malcolm Avenue, Teterboro, NJ 07608, USA',
+							measurements: [
+								{
+									name: 'MPV',
+									sourceName: 'MPV',
+									valueText: '8.7',
+									unit: 'fl',
+									valueNumeric: 8.7,
+									referenceText: '7.5-12.5',
+									referenceMin: 7.5,
+									referenceMax: 12.5,
+								},
+								{
+									name: 'Hemoglobin A1c',
+									sourceName: 'HEMOGLOBIN A1C (calc)',
+									valueText: '5.0',
+									unit: '% of total hgb',
+									valueNumeric: 5,
+									referenceText: '<5.7',
+									referenceMax: 5.7,
+								},
+							],
+						})}</example_response>
+						${continuationHint}
+					`,
 					prompt: `<markdown>${chunk}</markdown>`,
 				});
 				const output = result.output;
