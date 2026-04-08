@@ -91,22 +91,22 @@ void createScript(async () => {
 			startedAt: new Date().toISOString(),
 		});
 
-		const markdown = extractMarkdown(filePath, forceParse);
+		const markdown = extractMarkdown(filePath, sha256, forceParse);
 		updateDocStatus(documentId, { rawMarkdown: markdown, statusText: 'Extracting measurements' });
 
 		const data = await extractData(markdown, (done, total) => {
 			updateDocStatus(documentId, { statusText: `Extracting measurements (${done}/${total})` });
 		});
 
-		const seen = new Map<string, number>();
+		const deduped = new Map<string, number>();
 		for (let i = 0; i < data.measurements.length; i++) {
-			seen.set(data.measurements[i].name.toLowerCase().trim(), i);
+			deduped.set(data.measurements[i].name.toLowerCase().trim(), i);
 		}
-		const uniqueMeasurements = [...seen.values()].map(i => data.measurements[i]);
-		const resultCount = uniqueMeasurements.length;
+		data.measurements = [...deduped.values()].map(i => data.measurements[i]);
+		const resultCount = data.measurements.length;
 
 		console.table(
-			uniqueMeasurements.map((m, i) => ({
+			data.measurements.map((m, i) => ({
 				'#': i + 1,
 				name: m.name,
 				value: m.valueText,
@@ -119,7 +119,7 @@ void createScript(async () => {
 		console.log(style.label('total measurements', String(resultCount)));
 
 		const tmpJsonPath = path.join(tmpDir, `extracted_${documentId}.json`);
-		fs.writeFileSync(tmpJsonPath, JSON.stringify(uniqueMeasurements, null, 2));
+		fs.writeFileSync(tmpJsonPath, JSON.stringify(data.measurements, null, 2));
 		console.log(style.label('saved to', tmpJsonPath));
 
 		updateDocStatus(documentId, { statusText: `Saving ${resultCount} results` });
@@ -154,15 +154,10 @@ function saveResults(documentId: number, data: Awaited<ReturnType<typeof extract
 		tx.delete(labResults).where(eq(labResults.documentId, documentId)).run();
 
 		const now = new Date().toISOString();
-		const seen = new Map<string, number>();
 
-		for (let i = 0; i < data.measurements.length; i++) {
-			const key = data.measurements[i].name.toLowerCase().trim();
-			seen.set(key, i);
-		}
-
-		for (const [key, index] of seen) {
+		for (let index = 0; index < data.measurements.length; index++) {
 			const m = data.measurements[index];
+			const key = m.name.toLowerCase().trim();
 
 			let measurement = tx.select().from(labMeasurements).where(eq(labMeasurements.key, key)).get();
 
@@ -238,7 +233,12 @@ async function extractData(
 		)
 		.join('\n');
 
-	type Measurement = z.infer<typeof extractedDataSchema>['measurements'][number];
+	type RawMeasurement = z.infer<typeof extractedDataSchema>['measurements'][number];
+	type Measurement = RawMeasurement & {
+		originalValueText: string;
+		originalValueNumeric?: number;
+		originalUnit: string;
+	};
 	const allMeasurements: Measurement[] = [];
 	let date: string | undefined;
 	let labName: string | undefined;
@@ -327,7 +327,14 @@ async function extractData(
 				if (!date && output.date) date = output.date;
 				if (!labName && output.labName) labName = output.labName;
 				if (!location && output.location) location = output.location;
-				allMeasurements.push(...output.measurements);
+				allMeasurements.push(
+					...output.measurements.map(m => ({
+						...m,
+						originalValueText: m.valueText,
+						originalValueNumeric: m.valueNumeric,
+						originalUnit: m.unit,
+					})),
+				);
 				if (chunks.length > 1) onChunkDone?.(i + 1, chunks.length);
 				break;
 			} catch (error: any) {
@@ -359,12 +366,6 @@ async function extractData(
 		if (item.referenceMin) item.referenceMin = fn(item.referenceMin);
 		if (item.referenceMax) item.referenceMax = fn(item.referenceMax);
 	};
-
-	const originals = allMeasurements.map(m => ({
-		valueText: m.valueText,
-		valueNumeric: m.valueNumeric,
-		unit: m.unit,
-	}));
 
 	for (const item of allMeasurements) {
 		const matchedDb = measurementsDb[item.name.toLocaleLowerCase().trim()];
@@ -466,12 +467,7 @@ async function extractData(
 		date,
 		labName,
 		location,
-		measurements: allMeasurements.map((m, i) => ({
-			...m,
-			originalValueText: originals[i].valueText,
-			originalValueNumeric: originals[i].valueNumeric,
-			originalUnit: originals[i].unit,
-		})),
+		measurements: allMeasurements,
 	};
 }
 
@@ -553,15 +549,14 @@ function compileMeasurementDatabase() {
 
 	for (const measurement of measurements) {
 		const aliases = measurement.aliasesJson.filter(alias => alias && alias !== measurement.name);
-		result[measurement.name] = { aliases, unit: measurement.unit };
+		result[measurement.name.toLowerCase()] = { aliases, unit: measurement.unit };
 	}
 
 	return result;
 }
 
-function extractMarkdown(file: string, forceParse = false) {
+function extractMarkdown(file: string, hash: string, forceParse = false) {
 	console.log(style.header('convert to markdown via marker-pdf'));
-	const hash = createHash('sha256').update(fs.readFileSync(file).toString()).digest('hex');
 	const targetDir = path.join(tmpDir, 'bloodwork_' + hash);
 	let outDir: string | undefined = undefined;
 
