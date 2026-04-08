@@ -19,6 +19,7 @@ export default defineConfig(async ({ command, mode }) => {
 				? {
 						port: clientPort,
 						strictPort: true,
+						allowedHosts: [env.VITE_HOST],
 						proxy: {
 							'/api': {
 								target: env.VITE_API_URL,

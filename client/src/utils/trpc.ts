@@ -18,12 +18,10 @@ export function createQueryClient() {
 }
 
 export function createBrowserTrpcClient() {
-	const apiBaseUrl = import.meta.env.VITE_API_URL.trim();
-
 	return createTRPCClient<AppRouter>({
 		links: [
 			httpBatchLink({
-				url: `${apiBaseUrl}/trpc`,
+				url: `/api/trpc`,
 			}),
 		],
 	});
