@@ -11,6 +11,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
 import {
+	Alert,
 	AutoComplete,
 	Badge,
 	Button,
@@ -158,6 +159,7 @@ function PillsRouteComponent() {
 	const [deletingPeriodId, setDeletingPeriodId] = useState<number | null>(null);
 	const [isSaveDisabled, setIsSaveDisabled] = useState(true);
 	const [expandedComponentRowKeys, setExpandedComponentRowKeys] = useState<string[]>([]);
+	const [imageError, setImageError] = useState<string | null>(null);
 	const [openPeriodTagEditorKey, setOpenPeriodTagEditorKey] = useState<string | null>(null);
 	const deferredPillQuery = useDeferredValue(pillQuery);
 	const watchedFormValues = Form.useWatch([], form) as PillFormValues | undefined;
@@ -179,6 +181,7 @@ function PillsRouteComponent() {
 	const extractionMutation = useMutation({
 		...trpc.pills.extractFromImages.mutationOptions(),
 		onSuccess: extraction => {
+			setImageError(null);
 			if (!extraction.detected) {
 				message.info(
 					extraction.extractionNotes ??
@@ -191,6 +194,7 @@ function PillsRouteComponent() {
 			message.success(`Filled pill details from images using ${extraction.model}.`);
 		},
 		onError: error => {
+			setImageError(error.message);
 			message.error(error.message);
 		},
 	});
@@ -371,6 +375,7 @@ function PillsRouteComponent() {
 
 			void (async () => {
 				try {
+					setImageError(null);
 					const nextImages = await filesToFormImages(pastedFiles);
 					const currentImages = (form.getFieldValue('images') ?? []) as PillImageFormValue[];
 					form.setFieldValue('images', [...currentImages, ...nextImages]);
@@ -378,9 +383,10 @@ function PillsRouteComponent() {
 						pastedFiles.length === 1 ? 'Pasted 1 image.' : `Pasted ${pastedFiles.length} images.`,
 					);
 				} catch (error) {
-					message.error(
-						error instanceof Error ? error.message : 'Unable to process pasted images.',
-					);
+					const errorMessage =
+						error instanceof Error ? error.message : 'Unable to process pasted images.';
+					setImageError(errorMessage);
+					message.error(errorMessage);
 				}
 			})();
 		};
@@ -393,6 +399,7 @@ function PillsRouteComponent() {
 	}, [form, isDrawerOpen]);
 
 	function resetPillForm() {
+		setImageError(null);
 		form.resetFields();
 		form.setFieldsValue({
 			...createEmptyFormValues(),
@@ -446,12 +453,14 @@ function PillsRouteComponent() {
 	function openExistingPillDrawer(pill: PillRecord) {
 		setIsCreateDrawerOpen(false);
 		setHydratedEditPillId(null);
+		setImageError(null);
 		setOpenPeriodTagEditorKey(null);
 		onEditPillChange(pill.id);
 	}
 
 	function handleCloseDrawer() {
 		setIsCreateDrawerOpen(false);
+		setImageError(null);
 		setOpenPeriodTagEditorKey(null);
 		onEditPillChange(null);
 	}
@@ -493,6 +502,7 @@ function PillsRouteComponent() {
 
 	async function syncImagesFromUpload(event: UploadChangeParam<UploadFile<any>>) {
 		try {
+			setImageError(null);
 			const nextImages = await Promise.all(
 				event.fileList.map(async file => {
 					if (typeof file.url === 'string' && !file.originFileObj) {
@@ -522,7 +532,10 @@ function PillsRouteComponent() {
 
 			form.setFieldValue('images', nextImages);
 		} catch (error) {
-			message.error(error instanceof Error ? error.message : 'Unable to process uploaded images.');
+			const errorMessage =
+				error instanceof Error ? error.message : 'Unable to process uploaded images.';
+			setImageError(errorMessage);
+			message.error(errorMessage);
 		}
 	}
 
@@ -531,6 +544,7 @@ function PillsRouteComponent() {
 			return;
 		}
 
+		setImageError(null);
 		await extractionMutation.mutateAsync({
 			images: getImagePayload(watchedImages),
 		});
@@ -547,6 +561,7 @@ function PillsRouteComponent() {
 			void syncImagesFromUpload(info);
 		},
 		onRemove: file => {
+			setImageError(null);
 			form.setFieldValue('images', removeImageByUid(watchedImages, file.uid));
 			return true;
 		},
@@ -1280,6 +1295,7 @@ function PillsRouteComponent() {
 										danger
 										icon={<DeleteOutlined />}
 										onClick={() => {
+											setImageError(null);
 											form.setFieldValue('images', removeImageByUid(watchedImages, image.uid));
 										}}
 										className='pills-image-remove'
@@ -1319,6 +1335,9 @@ function PillsRouteComponent() {
 								Parsing uploaded images and filling the form…
 							</Typography.Text>
 						</div>
+					) : null}
+					{imageError ? (
+						<Alert type='error' showIcon message={imageError} className='pills-image-error' />
 					) : null}
 
 					<Divider>Date Ranges</Divider>
@@ -1822,25 +1841,58 @@ function readFileAsDataUrl(file: File) {
 	});
 }
 
-function buildPastedImageFileName(file: File, index: number) {
-	if (file.name.trim()) {
-		return file.name;
+function replaceFileExtension(fileName: string, nextExtension: string) {
+	const trimmedFileName = fileName.trim();
+	if (!trimmedFileName) {
+		return `pasted-image-${Date.now()}.${nextExtension}`;
 	}
 
-	const fileExtension = file.type.split('/')[1] || 'png';
-	return `pasted-image-${Date.now()}-${index}.${fileExtension}`;
+	const sanitizedExtension = nextExtension.replace(/^\./, '');
+	const extensionPattern = /\.[^./\\]+$/;
+	return extensionPattern.test(trimmedFileName)
+		? trimmedFileName.replace(extensionPattern, `.${sanitizedExtension}`)
+		: `${trimmedFileName}.${sanitizedExtension}`;
+}
+
+async function readPastedImageAsDataUrl(file: File) {
+	if (typeof createImageBitmap !== 'function' || typeof document === 'undefined') {
+		throw new Error('Pasted images are unavailable in this browser.');
+	}
+
+	const bitmap = await createImageBitmap(file);
+
+	try {
+		const canvas = document.createElement('canvas');
+		canvas.width = bitmap.width;
+		canvas.height = bitmap.height;
+
+		const context = canvas.getContext('2d');
+		if (!context) {
+			throw new Error(`Unable to process ${file.name || 'pasted image'}.`);
+		}
+
+		context.drawImage(bitmap, 0, 0);
+		return canvas.toDataURL('image/png');
+	} finally {
+		bitmap.close();
+	}
+}
+
+function buildPastedImageFileName(file: File, index: number) {
+	const defaultName = `pasted-image-${Date.now()}-${index}`;
+	return replaceFileExtension(file.name.trim() || defaultName, 'png');
 }
 
 async function filesToFormImages(files: File[]) {
 	return Promise.all(
-		files.map(
-			async (file, index) =>
-				({
-					uid: `pasted-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 10)}`,
-					fileName: buildPastedImageFileName(file, index),
-					dataUrl: await readFileAsDataUrl(file),
-				}) satisfies PillImageFormValue,
-		),
+		files.map(async (file, index) => {
+			const fileName = buildPastedImageFileName(file, index);
+			return {
+				uid: `pasted-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 10)}`,
+				fileName,
+				dataUrl: await readPastedImageAsDataUrl(file),
+			} satisfies PillImageFormValue;
+		}),
 	);
 }
 

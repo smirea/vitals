@@ -4,7 +4,6 @@ import { z } from 'zod';
 
 import type { VitalsDatabase } from 'server/db/client.ts';
 import { ensureTagsByNames } from 'server/db/tags.ts';
-import env from 'server/env.ts';
 import {
 	type PillComponentRow,
 	type PillImageRow,
@@ -131,6 +130,8 @@ const pillImageExtractionSchema = z.object({
 		.optional()
 		.describe('Confidence score from 0 to 1.'),
 });
+
+const PILL_IMAGE_EXTRACTION_TIMEOUT_MS = 45_000;
 
 type PillRecord = ReturnType<typeof buildPillsPayload>[number];
 type PillsReadDb = Pick<VitalsDatabase, 'select'>;
@@ -734,48 +735,62 @@ export async function extractPillFromImages(input: z.infer<typeof pillImageExtra
 		};
 	});
 
-	const result = await generateText({
-		model: models.smart_and_expensive,
-		messages: [
-			{
-				role: 'user',
-				content: [
-					{
-						type: 'text',
-						text: [
-							'Analyze all uploaded images together as one pill or supplement label extraction task.',
-							'Return exactly one valid JSON object and nothing else. Do not wrap it in markdown.',
-							'Schema:',
-							'{',
-							'  "detected": boolean,',
-							'  "name": string | null,',
-							'  "value": string | null,',
-							'  "unit": string | null,',
-							'  "note": string | null,',
-							'  "components": [{ "name": string, "value": string | null, "unit": string | null }],',
-							'  "extractionNotes": string | null,',
-							'  "confidence": number | null',
-							'}',
-							'Rules:',
-							'- If this is not clearly a supplement or medication label, set detected to false.',
-							'- The top-level value and unit are serving size only.',
-							'- Never put the full supplement panel or ingredient list into the top-level value or unit fields.',
-							'- If a Supplement Facts or active ingredients panel is visible, components must contain one row per listed ingredient.',
-							'- Keep values short and exact when possible.',
-							'- If a label says something like "2 Veggie Capsules", return value="2" and unit="Veggie Capsules".',
-							'- If a component row says something like "EPA 400 mg", return value="400" and unit="mg".',
-							'- If the images show a supplement facts panel, capture every visible row.',
-						].join('\n'),
-					},
-					...imageParts,
-				],
-			},
-		],
-		temperature: 0,
-		maxRetries: 2,
-		maxOutputTokens: 4_000,
-		system: 'You are a precise supplement label extraction engine.',
-	});
+	let result;
+
+	try {
+		result = await generateText({
+			model: models.smart_and_expensive,
+			messages: [
+				{
+					role: 'user',
+					content: [
+						{
+							type: 'text',
+							text: [
+								'Analyze all uploaded images together as one pill or supplement label extraction task.',
+								'Return exactly one valid JSON object and nothing else. Do not wrap it in markdown.',
+								'Schema:',
+								'{',
+								'  "detected": boolean,',
+								'  "name": string | null,',
+								'  "value": string | null,',
+								'  "unit": string | null,',
+								'  "note": string | null,',
+								'  "components": [{ "name": string, "value": string | null, "unit": string | null }],',
+								'  "extractionNotes": string | null,',
+								'  "confidence": number | null',
+								'}',
+								'Rules:',
+								'- If this is not clearly a supplement or medication label, set detected to false.',
+								'- The top-level value and unit are serving size only.',
+								'- Never put the full supplement panel or ingredient list into the top-level value or unit fields.',
+								'- If a Supplement Facts or active ingredients panel is visible, components must contain one row per listed ingredient.',
+								'- Keep values short and exact when possible.',
+								'- If a label says something like "2 Veggie Capsules", return value="2" and unit="Veggie Capsules".',
+								'- If a component row says something like "EPA 400 mg", return value="400" and unit="mg".',
+								'- If the images show a supplement facts panel, capture every visible row.',
+							].join('\n'),
+						},
+						...imageParts,
+					],
+				},
+			],
+			temperature: 0,
+			maxRetries: 2,
+			maxOutputTokens: 4_000,
+			timeout: { totalMs: PILL_IMAGE_EXTRACTION_TIMEOUT_MS },
+			system: 'You are a precise supplement label extraction engine.',
+		});
+	} catch (error) {
+		if (
+			error instanceof Error &&
+			(error.name === 'AbortError' || /timed?\s*out|timeout/i.test(error.message))
+		) {
+			throw new Error('Image parsing timed out. Try again or upload fewer images.');
+		}
+
+		throw error;
+	}
 
 	const parsedResponse = pillImageExtractionSchema.parse(
 		parseJsonFromText(result.text),

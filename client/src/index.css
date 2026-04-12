@@ -298,6 +298,10 @@ body,
 	color: inherit;
 }
 
+.pills-image-error.ant-alert {
+	margin-top: 8px;
+}
+
 .pills-list-space.ant-space {
 	display: flex;
 }
