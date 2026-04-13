@@ -113,8 +113,8 @@ function LabsPage() {
 	const [selectedRowKeys, setSelectedRowKeys] = useLocalStorage('selectedRows');
 	const [starredMeasurementKeys, setStarredMeasurementKeys] =
 		useLocalStorage('starredMeasurements');
-	const [dateRangeStart, setDateRangeStart] = useState('');
-	const [dateRangeEnd, setDateRangeEnd] = useState('');
+	const [rawDateRangeStart, setDateRangeStart] = useState('');
+	const [rawDateRangeEnd, setDateRangeEnd] = useState('');
 	const [groupByCategory, setGroupByCategory] = useLocalStorage('groupByCategory');
 	const [sourceFilters, setSourceFilters] = useLocalStorage('sourceFilters');
 	const activeTab = search.tab ?? 'overview';
@@ -122,10 +122,6 @@ function LabsPage() {
 	const previewMeasurementKey = search.m ?? null;
 
 	const deferredMeasurementFilter = useDeferredValue(measurementFilter);
-	const starredMeasurementSet = useMemo(
-		() => new Set(starredMeasurementKeys),
-		[starredMeasurementKeys],
-	);
 
 	const documentsQuery = useQuery({
 		...trpc.labs.listDocuments.queryOptions(),
@@ -143,7 +139,7 @@ function LabsPage() {
 	const uploadDocumentsMutation = useMutation({
 		...trpc.labs.uploadDocuments.mutationOptions(),
 		onSuccess: async data => {
-			await queryClient.invalidateQueries();
+			await queryClient.invalidateQueries({ queryKey: [['labs']] });
 			const queuedCount = data.documents.filter(document => !document.deduplicated).length;
 			const deduplicatedCount = data.documents.length - queuedCount;
 			const parts = [`Queued ${queuedCount} PDF${queuedCount === 1 ? '' : 's'}.`];
@@ -159,7 +155,7 @@ function LabsPage() {
 	const deleteDocumentMutation = useMutation({
 		...trpc.table.labDocuments.deleteMany.mutationOptions(),
 		onSuccess: async data => {
-			await queryClient.invalidateQueries();
+			await queryClient.invalidateQueries({ queryKey: [['labs']] });
 			messageApi.success(
 				data.deletedCount === 1 ? 'Document deleted.' : `${data.deletedCount} documents deleted.`,
 			);
@@ -174,7 +170,7 @@ function LabsPage() {
 	const updateDocumentsMutation = useMutation({
 		...trpc.table.labDocuments.updateMany.mutationOptions(),
 		onSuccess: async data => {
-			await queryClient.invalidateQueries();
+			await queryClient.invalidateQueries({ queryKey: [['labs']] });
 			messageApi.success(
 				data.updatedCount === 1 ? '1 document updated.' : `${data.updatedCount} documents updated.`,
 			);
@@ -187,7 +183,7 @@ function LabsPage() {
 	const retryDocumentMutation = useMutation({
 		...trpc.labs.retryDocument.mutationOptions(),
 		onSuccess: async () => {
-			await queryClient.invalidateQueries();
+			await queryClient.invalidateQueries({ queryKey: [['labs']] });
 			messageApi.success('Document queued for retry.');
 		},
 		onError: error => {
@@ -197,7 +193,7 @@ function LabsPage() {
 	const reprocessDocumentMutation = useMutation({
 		...trpc.labs.reprocessDocument.mutationOptions(),
 		onSuccess: async () => {
-			await queryClient.invalidateQueries();
+			await queryClient.invalidateQueries({ queryKey: [['labs']] });
 			messageApi.success('Document queued for reprocess.');
 		},
 		onError: error => {
@@ -263,39 +259,26 @@ function LabsPage() {
 	);
 	const dateBounds = useMemo(() => getDateBounds(sources), [sources]);
 
-	useEffect(() => {
-		if (!dateBounds.min || !dateBounds.max) {
-			setDateRangeStart('');
-			setDateRangeEnd('');
-			return;
-		}
-
-		setDateRangeStart(previous => {
-			if (!previous) return dateBounds.min;
-			if (previous < dateBounds.min) return dateBounds.min;
-			if (previous > dateBounds.max) return dateBounds.max;
-			return previous;
-		});
-
-		setDateRangeEnd(previous => {
-			if (!previous) return dateBounds.max;
-			if (previous < dateBounds.min) return dateBounds.min;
-			if (previous > dateBounds.max) return dateBounds.max;
-			return previous;
-		});
-	}, [dateBounds.max, dateBounds.min]);
-
-	useEffect(() => {
+	const { dateRangeStart, dateRangeEnd } = useMemo(() => {
 		if (availableDates.length === 0) {
-			return;
+			return { dateRangeStart: '', dateRangeEnd: '' };
 		}
-		if (!availableDates.includes(dateRangeStart)) {
-			setDateRangeStart(availableDates[0] ?? '');
-		}
-		if (!availableDates.includes(dateRangeEnd)) {
-			setDateRangeEnd(availableDates[availableDates.length - 1] ?? '');
-		}
-	}, [availableDates, dateRangeEnd, dateRangeStart]);
+
+		const clampToAvailable = (raw: string, fallback: string) => {
+			if (!raw || !dateBounds.min || !dateBounds.max) return fallback;
+			const clamped =
+				raw < dateBounds.min ? dateBounds.min : raw > dateBounds.max ? dateBounds.max : raw;
+			return availableDates.includes(clamped) ? clamped : fallback;
+		};
+
+		return {
+			dateRangeStart: clampToAvailable(rawDateRangeStart, availableDates[0] ?? ''),
+			dateRangeEnd: clampToAvailable(
+				rawDateRangeEnd,
+				availableDates[availableDates.length - 1] ?? '',
+			),
+		};
+	}, [availableDates, dateBounds.min, dateBounds.max, rawDateRangeStart, rawDateRangeEnd]);
 
 	const visibleSources = useMemo(
 		() =>
@@ -317,24 +300,23 @@ function LabsPage() {
 		[measurements, results, sources],
 	);
 
-	useEffect(() => {
+	const effectiveSelectedImportDocumentIds = useMemo(() => {
 		const documentIds = new Set(importDocuments.map(document => document.id));
-		setSelectedImportDocumentIds(previous => {
-			const next = previous.filter(documentId => documentIds.has(documentId));
-			return next.length === previous.length ? previous : next;
-		});
-	}, [importDocuments]);
+		const pruned = selectedImportDocumentIds.filter(documentId => documentIds.has(documentId));
+		return pruned.length === selectedImportDocumentIds.length ? selectedImportDocumentIds : pruned;
+	}, [importDocuments, selectedImportDocumentIds]);
 
-	useEffect(() => {
-		if (allMeasurementRows.length === 0) {
-			return;
-		}
+	const effectiveStarredMeasurementKeys = useMemo(() => {
+		if (allMeasurementRows.length === 0) return starredMeasurementKeys;
 		const availableRowIds = new Set(allMeasurementRows.map(item => item.key));
-		setStarredMeasurementKeys(previous => {
-			const next = previous.filter(item => availableRowIds.has(item));
-			return next.length === previous.length ? previous : next;
-		});
-	}, [allMeasurementRows]);
+		const pruned = starredMeasurementKeys.filter(item => availableRowIds.has(item));
+		return pruned.length === starredMeasurementKeys.length ? starredMeasurementKeys : pruned;
+	}, [allMeasurementRows, starredMeasurementKeys]);
+
+	const starredMeasurementSet = useMemo(
+		() => new Set(effectiveStarredMeasurementKeys),
+		[effectiveStarredMeasurementKeys],
+	);
 
 	const filteredMeasurementRows = useMemo(
 		() =>
@@ -373,38 +355,35 @@ function LabsPage() {
 		[baseTableSources, rowsWithVisibleData],
 	);
 
-	useEffect(() => {
+	const effectiveSourceFilters = useMemo(() => {
 		const availableSourceIds = new Set(baseTableSources.map(source => source.id));
-		setSourceFilters(previous => {
-			const next = previous.filter(f => availableSourceIds.has(f.sourceId));
-			return next.length === previous.length ? previous : next;
-		});
-	}, [baseTableSources]);
+		const pruned = sourceFilters.filter(f => availableSourceIds.has(f.sourceId));
+		return pruned.length === sourceFilters.length ? sourceFilters : pruned;
+	}, [baseTableSources, sourceFilters]);
 
 	const tableMeasurementRows = useMemo(
 		() =>
 			getRowsMatchingSourceFilters({
 				filteredMeasurementRows: baseTableMeasurementRows,
 				tableSources: baseTableSources,
-				sourceFilters,
+				sourceFilters: effectiveSourceFilters,
 			}),
-		[baseTableMeasurementRows, baseTableSources, sourceFilters],
+		[baseTableMeasurementRows, baseTableSources, effectiveSourceFilters],
 	);
 
-	useEffect(() => {
-		if (allMeasurementRows.length === 0) {
-			return;
-		}
-		setSelectedRowKeys(previous => {
-			const next = getPrunedSelectedRowKeys({
-				selectedRowKeys: previous,
-				filteredMeasurementRows: tableMeasurementRows,
-			});
-			return next.length === previous.length ? previous : next;
+	const effectiveSelectedRowKeys = useMemo(() => {
+		if (allMeasurementRows.length === 0) return selectedRowKeys;
+		const pruned = getPrunedSelectedRowKeys({
+			selectedRowKeys,
+			filteredMeasurementRows: tableMeasurementRows,
 		});
-	}, [allMeasurementRows.length, tableMeasurementRows]);
+		return pruned.length === selectedRowKeys.length ? selectedRowKeys : pruned;
+	}, [allMeasurementRows.length, selectedRowKeys, tableMeasurementRows]);
 
-	const selectedRowKeySet = useMemo(() => new Set(selectedRowKeys), [selectedRowKeys]);
+	const selectedRowKeySet = useMemo(
+		() => new Set(effectiveSelectedRowKeys),
+		[effectiveSelectedRowKeys],
+	);
 
 	const sourceCountsBySourceId = useMemo(
 		() =>
@@ -818,7 +797,7 @@ function LabsPage() {
 
 	const onGroupDocuments = useCallback(async () => {
 		const documentIds = importDocuments
-			.filter(document => selectedImportDocumentIds.includes(document.id))
+			.filter(document => effectiveSelectedImportDocumentIds.includes(document.id))
 			.map(document => document.id);
 		if (documentIds.length < 2) {
 			return;
@@ -836,11 +815,11 @@ function LabsPage() {
 				group: buildLabsDocumentGroupId(),
 			},
 		});
-	}, [importDocuments, selectedImportDocumentIds, updateDocumentsMutation]);
+	}, [importDocuments, effectiveSelectedImportDocumentIds, updateDocumentsMutation]);
 
 	const onClearDocumentGroup = useCallback(async () => {
 		const documentIds = importDocuments
-			.filter(document => selectedImportDocumentIds.includes(document.id))
+			.filter(document => effectiveSelectedImportDocumentIds.includes(document.id))
 			.filter(document => Boolean(document.group))
 			.map(document => document.id);
 		if (documentIds.length === 0) {
@@ -859,11 +838,12 @@ function LabsPage() {
 				group: null,
 			},
 		});
-	}, [importDocuments, selectedImportDocumentIds, updateDocumentsMutation]);
+	}, [importDocuments, effectiveSelectedImportDocumentIds, updateDocumentsMutation]);
 
 	const selectedGroupableDocuments = useMemo(
-		() => importDocuments.filter(document => selectedImportDocumentIds.includes(document.id)),
-		[importDocuments, selectedImportDocumentIds],
+		() =>
+			importDocuments.filter(document => effectiveSelectedImportDocumentIds.includes(document.id)),
+		[importDocuments, effectiveSelectedImportDocumentIds],
 	);
 	const hasSelectedDocumentGroup = selectedGroupableDocuments.some(document =>
 		Boolean(document.group),
@@ -955,7 +935,7 @@ function LabsPage() {
 									<Flex justify='space-between' align='center' gap={12} wrap>
 										<Flex align='center' gap={8} wrap>
 											<Checkbox
-												checked={selectedImportDocumentIds.includes(item.id)}
+												checked={effectiveSelectedImportDocumentIds.includes(item.id)}
 												onChange={event => onToggleImportDocument(item.id, event.target.checked)}
 												disabled={updateDocumentsMutation.isPending}
 											/>
@@ -1102,7 +1082,7 @@ function LabsPage() {
 			<VitalsTable
 				rows={tableRows}
 				tableSources={baseTableSources}
-				sourceFilters={sourceFilters}
+				sourceFilters={effectiveSourceFilters}
 				sourceCountsBySourceId={sourceCountsBySourceId}
 				selectedRowKeySet={selectedRowKeySet}
 				categorySelectionByName={categorySelectionByName}

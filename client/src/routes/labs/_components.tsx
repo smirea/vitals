@@ -837,7 +837,9 @@ function getDirectionLabel(direction: MeaningfulChangeDirection) {
 	return 'Changed';
 }
 
-export function CategoriesOverview({ items }: CategoriesOverviewProps) {
+export const CategoriesOverview = memo(function CategoriesOverview({
+	items,
+}: CategoriesOverviewProps) {
 	if (items.length === 0) {
 		return null;
 	}
@@ -898,9 +900,11 @@ export function CategoriesOverview({ items }: CategoriesOverviewProps) {
 			</section>
 		</ScopedVitals>
 	);
-}
+});
 
-export function MeaningfulChanges({ items }: MeaningfulChangesProps) {
+export const MeaningfulChanges = memo(function MeaningfulChanges({
+	items,
+}: MeaningfulChangesProps) {
 	if (items.length === 0) {
 		return null;
 	}
@@ -971,7 +975,7 @@ export function MeaningfulChanges({ items }: MeaningfulChangesProps) {
 			</section>
 		</ScopedVitals>
 	);
-}
+});
 
 export const TrendChart = memo(function TrendChart({
 	series,
@@ -1360,7 +1364,7 @@ export const TrendChart = memo(function TrendChart({
 	);
 });
 
-export function VitalsControls({
+export const VitalsControls = memo(function VitalsControls({
 	measurementFilter,
 	onMeasurementFilterChange,
 	availableDates,
@@ -1441,7 +1445,7 @@ export function VitalsControls({
 			</div>
 		</ScopedVitals>
 	);
-}
+});
 
 const SelectionCheckbox = memo(function SelectionCheckbox({
 	checked,

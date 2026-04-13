@@ -41,7 +41,8 @@ function TagsRouteComponent() {
 	const createTagMutation = useMutation({
 		...trpc.tags.create.mutationOptions(),
 		onSuccess: async () => {
-			await queryClient.invalidateQueries();
+			await queryClient.invalidateQueries({ queryKey: [['tags']] });
+			await queryClient.invalidateQueries({ queryKey: [['pills']] });
 			resetTagForm();
 			message.success('Tag created.');
 		},
@@ -52,7 +53,8 @@ function TagsRouteComponent() {
 	const updateTagMutation = useMutation({
 		...trpc.tags.update.mutationOptions(),
 		onSuccess: async () => {
-			await queryClient.invalidateQueries();
+			await queryClient.invalidateQueries({ queryKey: [['tags']] });
+			await queryClient.invalidateQueries({ queryKey: [['pills']] });
 			resetTagForm();
 			message.success('Tag updated.');
 		},

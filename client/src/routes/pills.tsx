@@ -40,7 +40,7 @@ import type { UploadChangeParam, UploadFile, UploadProps } from 'antd/es/upload/
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import dayjs from 'dayjs';
 import type { Key } from 'react';
-import { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { z } from 'zod';
 
 import type {
@@ -203,7 +203,8 @@ function PillsRouteComponent() {
 	const upsertMutation = useMutation({
 		...trpc.pills.upsert.mutationOptions(),
 		onSuccess: () => {
-			void queryClient.invalidateQueries();
+			void queryClient.invalidateQueries({ queryKey: [['pills']] });
+			void queryClient.invalidateQueries({ queryKey: [['tags']] });
 			setIsCreateDrawerOpen(false);
 			setOpenPeriodTagEditorKey(null);
 			onEditPillChange(null);
@@ -217,7 +218,8 @@ function PillsRouteComponent() {
 	const deletePillMutation = useMutation({
 		...trpc.table.pills.deleteMany.mutationOptions(),
 		onSuccess: () => {
-			void queryClient.invalidateQueries();
+			void queryClient.invalidateQueries({ queryKey: [['pills']] });
+			void queryClient.invalidateQueries({ queryKey: [['tags']] });
 			setIsCreateDrawerOpen(false);
 			setOpenPeriodTagEditorKey(null);
 			onEditPillChange(null);
@@ -231,7 +233,7 @@ function PillsRouteComponent() {
 	const deletePeriodMutation = useMutation({
 		...trpc.table.pillPeriods.deleteMany.mutationOptions(),
 		onSuccess: async () => {
-			await queryClient.invalidateQueries();
+			await queryClient.invalidateQueries({ queryKey: [['pills']] });
 		},
 		onError: error => {
 			message.error(error.message);
@@ -318,6 +320,10 @@ function PillsRouteComponent() {
 	);
 
 	useEffect(() => {
+		if (!isDrawerRequestedOpen) {
+			return;
+		}
+
 		let isCancelled = false;
 
 		const syncSaveDisabledState = async () => {
@@ -332,10 +338,10 @@ function PillsRouteComponent() {
 		return () => {
 			isCancelled = true;
 		};
-	}, [form, watchedFormValues]);
+	}, [form, isDrawerRequestedOpen, watchedFormValues]);
 
 	useEffect(() => {
-		if (watchedPeriods.length === 0) {
+		if (!isDrawerRequestedOpen || watchedPeriods.length === 0) {
 			return;
 		}
 
@@ -351,7 +357,7 @@ function PillsRouteComponent() {
 		if (hasChanged) {
 			form.setFieldValue('periods', nextPeriods);
 		}
-	}, [form, watchedPeriods]);
+	}, [form, isDrawerRequestedOpen, watchedPeriods]);
 
 	useEffect(() => {
 		if (!isDrawerOpen) {
@@ -450,13 +456,16 @@ function PillsRouteComponent() {
 		resetPillForm();
 	}
 
-	function openExistingPillDrawer(pill: PillRecord) {
-		setIsCreateDrawerOpen(false);
-		setHydratedEditPillId(null);
-		setImageError(null);
-		setOpenPeriodTagEditorKey(null);
-		onEditPillChange(pill.id);
-	}
+	const openExistingPillDrawer = useCallback(
+		(pill: PillRecord) => {
+			setIsCreateDrawerOpen(false);
+			setHydratedEditPillId(null);
+			setImageError(null);
+			setOpenPeriodTagEditorKey(null);
+			onEditPillChange(pill.id);
+		},
+		[onEditPillChange],
+	);
 
 	function handleCloseDrawer() {
 		setIsCreateDrawerOpen(false);
@@ -465,13 +474,13 @@ function PillsRouteComponent() {
 		onEditPillChange(null);
 	}
 
-	function toggleExpandedComponentsRow(rowKey: string) {
+	const toggleExpandedComponentsRow = useCallback((rowKey: string) => {
 		setExpandedComponentRowKeys(currentKeys =>
 			currentKeys.includes(rowKey)
 				? currentKeys.filter(currentKey => currentKey !== rowKey)
 				: [...currentKeys, rowKey],
 		);
-	}
+	}, []);
 
 	async function handleExport() {
 		try {
@@ -732,262 +741,282 @@ function PillsRouteComponent() {
 		);
 	}
 
-	const activeColumns: TableColumnsType<ActivePillRow> = [
-		{
-			title: 'Pill',
-			key: 'name',
-			width: 360,
-			render: (_: unknown, row: ActivePillRow) =>
-				renderPillNameCell(
-					row.pill,
-					row.activePeriod.tags.map(tag => tag.name),
+	const activeColumns: TableColumnsType<ActivePillRow> = useMemo(
+		() => [
+			{
+				title: 'Pill',
+				key: 'name',
+				width: 360,
+				render: (_: unknown, row: ActivePillRow) =>
+					renderPillNameCell(
+						row.pill,
+						row.activePeriod.tags.map(tag => tag.name),
+					),
+			},
+			{
+				title: 'Amount',
+				key: 'amount',
+				render: (_: unknown, row: ActivePillRow) => (
+					<Typography.Text>
+						{formatServing(
+							multiplyServingValue(row.pill.value, row.activePeriod.count),
+							row.pill.unit,
+						)}
+					</Typography.Text>
 				),
-		},
-		{
-			title: 'Amount',
-			key: 'amount',
-			render: (_: unknown, row: ActivePillRow) => (
-				<Typography.Text>
-					{formatServing(
-						multiplyServingValue(row.pill.value, row.activePeriod.count),
-						row.pill.unit,
-					)}
-				</Typography.Text>
-			),
-		},
-		{
-			title: 'Timing',
-			key: 'timing',
-			render: (_: unknown, row: ActivePillRow) => (
-				<Typography.Text>{formatTiming(row.activePeriod.timing)}</Typography.Text>
-			),
-		},
-		{
-			title: 'Started',
-			key: 'started',
-			render: (_: unknown, row: ActivePillRow) => (
-				<Typography.Text>{formatRelativeDate(row.activePeriod.startDate)}</Typography.Text>
-			),
-		},
-		{
-			title: 'Components',
-			key: 'components',
-			render: (_: unknown, row: ActivePillRow) =>
-				renderComponents(row.pill.components, row.activePeriod.count),
-			onCell: row =>
-				row.pill.components.length > 0
-					? {
-							onClick: () => {
-								toggleExpandedComponentsRow(String(row.pill.id));
-							},
-							style: { cursor: 'pointer' },
-						}
-					: {},
-		},
-		{
-			title: 'Images',
-			key: 'images',
-			render: (_: unknown, row: ActivePillRow) => renderImages(row.pill.images),
-		},
-	];
-
-	const futureColumns: TableColumnsType<FuturePillRow> = [
-		{
-			title: 'Pill',
-			key: 'name',
-			width: 360,
-			render: (_: unknown, row: FuturePillRow) =>
-				renderPillNameCell(
-					row.pill,
-					row.futurePeriod.tags.map(tag => tag.name),
+			},
+			{
+				title: 'Timing',
+				key: 'timing',
+				render: (_: unknown, row: ActivePillRow) => (
+					<Typography.Text>{formatTiming(row.activePeriod.timing)}</Typography.Text>
 				),
-		},
-		{
-			title: 'Amount',
-			key: 'amount',
-			render: (_: unknown, row: FuturePillRow) => (
-				<Typography.Text>
-					{formatServing(
-						multiplyServingValue(row.pill.value, row.futurePeriod.count),
-						row.pill.unit,
-					)}
-				</Typography.Text>
-			),
-		},
-		{
-			title: 'Timing',
-			key: 'timing',
-			render: (_: unknown, row: FuturePillRow) => (
-				<Typography.Text>{formatTiming(row.futurePeriod.timing)}</Typography.Text>
-			),
-		},
-		{
-			title: 'Starts',
-			key: 'starts',
-			render: (_: unknown, row: FuturePillRow) => (
-				<Typography.Text>{formatRelativeDate(row.futurePeriod.startDate)}</Typography.Text>
-			),
-		},
-		{
-			title: 'Components',
-			key: 'components',
-			render: (_: unknown, row: FuturePillRow) =>
-				renderComponents(row.pill.components, row.futurePeriod.count),
-			onCell: row =>
-				row.pill.components.length > 0
-					? {
-							onClick: () => {
-								toggleExpandedComponentsRow(`future-${row.pill.id}`);
-							},
-							style: { cursor: 'pointer' },
-						}
-					: {},
-		},
-		{
-			title: 'Images',
-			key: 'images',
-			render: (_: unknown, row: FuturePillRow) => renderImages(row.pill.images),
-		},
-	];
-
-	const pastColumns: TableColumnsType<PastPillRow> = [
-		{
-			title: 'Pill',
-			key: 'name',
-			width: 360,
-			render: (_: unknown, row: PastPillRow) =>
-				renderPillNameCell(
-					row.pill,
-					row.period.tags.map(tag => tag.name),
+			},
+			{
+				title: 'Started',
+				key: 'started',
+				render: (_: unknown, row: ActivePillRow) => (
+					<Typography.Text>{formatRelativeDate(row.activePeriod.startDate)}</Typography.Text>
 				),
-		},
-		{
-			title: 'Amount',
-			key: 'amount',
-			render: (_: unknown, row: PastPillRow) => (
-				<Typography.Text>
-					{formatServing(multiplyServingValue(row.pill.value, row.period.count), row.pill.unit)}
-				</Typography.Text>
-			),
-		},
-		{
-			title: 'Timing',
-			key: 'timing',
-			render: (_: unknown, row: PastPillRow) => (
-				<Typography.Text>{formatTiming(row.period.timing)}</Typography.Text>
-			),
-		},
-		{
-			title: 'Period',
-			key: 'period',
-			render: (_: unknown, row: PastPillRow) => (
-				<Typography.Text>{formatPeriodRange(row.period)}</Typography.Text>
-			),
-		},
-		{
-			title: 'Components',
-			key: 'components',
-			render: (_: unknown, row: PastPillRow) =>
-				renderComponents(row.pill.components, row.period.count),
-			onCell: row =>
-				row.pill.components.length > 0
-					? {
-							onClick: () => {
-								toggleExpandedComponentsRow(row.key);
-							},
-							style: { cursor: 'pointer' },
-						}
-					: {},
-		},
-		{
-			title: 'Images',
-			key: 'images',
-			render: (_: unknown, row: PastPillRow) => renderImages(row.pill.images),
-		},
-	];
+			},
+			{
+				title: 'Components',
+				key: 'components',
+				render: (_: unknown, row: ActivePillRow) =>
+					renderComponents(row.pill.components, row.activePeriod.count),
+				onCell: row =>
+					row.pill.components.length > 0
+						? {
+								onClick: () => {
+									toggleExpandedComponentsRow(String(row.pill.id));
+								},
+								style: { cursor: 'pointer' },
+							}
+						: {},
+			},
+			{
+				title: 'Images',
+				key: 'images',
+				render: (_: unknown, row: ActivePillRow) => renderImages(row.pill.images),
+			},
+		],
+		[availableTags, openExistingPillDrawer, toggleExpandedComponentsRow],
+	);
 
-	const notTrackedColumns: TableColumnsType<NotTrackedPillRow> = [
-		{
-			title: 'Pill',
-			key: 'name',
-			width: 360,
-			render: (_: unknown, row: NotTrackedPillRow) => renderPillNameCell(row.pill, []),
-		},
-		{
-			title: 'Amount',
-			key: 'amount',
-			render: (_: unknown, row: NotTrackedPillRow) => (
-				<Typography.Text>{formatServing(row.pill.value, row.pill.unit)}</Typography.Text>
-			),
-		},
-		{
-			title: 'Timing',
-			key: 'timing',
-			render: () => <Typography.Text />,
-		},
-		{
-			title: 'Components',
-			key: 'components',
-			render: (_: unknown, row: NotTrackedPillRow) => renderComponents(row.pill.components),
-			onCell: row =>
-				row.pill.components.length > 0
-					? {
-							onClick: () => {
-								toggleExpandedComponentsRow(String(row.pill.id));
-							},
-							style: { cursor: 'pointer' },
-						}
-					: {},
-		},
-		{
-			title: 'Images',
-			key: 'images',
-			render: (_: unknown, row: NotTrackedPillRow) => renderImages(row.pill.images),
-		},
-	];
+	const futureColumns: TableColumnsType<FuturePillRow> = useMemo(
+		() => [
+			{
+				title: 'Pill',
+				key: 'name',
+				width: 360,
+				render: (_: unknown, row: FuturePillRow) =>
+					renderPillNameCell(
+						row.pill,
+						row.futurePeriod.tags.map(tag => tag.name),
+					),
+			},
+			{
+				title: 'Amount',
+				key: 'amount',
+				render: (_: unknown, row: FuturePillRow) => (
+					<Typography.Text>
+						{formatServing(
+							multiplyServingValue(row.pill.value, row.futurePeriod.count),
+							row.pill.unit,
+						)}
+					</Typography.Text>
+				),
+			},
+			{
+				title: 'Timing',
+				key: 'timing',
+				render: (_: unknown, row: FuturePillRow) => (
+					<Typography.Text>{formatTiming(row.futurePeriod.timing)}</Typography.Text>
+				),
+			},
+			{
+				title: 'Starts',
+				key: 'starts',
+				render: (_: unknown, row: FuturePillRow) => (
+					<Typography.Text>{formatRelativeDate(row.futurePeriod.startDate)}</Typography.Text>
+				),
+			},
+			{
+				title: 'Components',
+				key: 'components',
+				render: (_: unknown, row: FuturePillRow) =>
+					renderComponents(row.pill.components, row.futurePeriod.count),
+				onCell: row =>
+					row.pill.components.length > 0
+						? {
+								onClick: () => {
+									toggleExpandedComponentsRow(`future-${row.pill.id}`);
+								},
+								style: { cursor: 'pointer' },
+							}
+						: {},
+			},
+			{
+				title: 'Images',
+				key: 'images',
+				render: (_: unknown, row: FuturePillRow) => renderImages(row.pill.images),
+			},
+		],
+		[availableTags, openExistingPillDrawer, toggleExpandedComponentsRow],
+	);
 
-	const activeTableExpandable = {
-		expandedRowKeys: expandedComponentRowKeys,
-		expandedRowRender: (row: ActivePillRow) =>
-			renderExpandedComponents(row.pill.components, row.activePeriod.count),
-		onExpandedRowsChange: (keys: readonly Key[]) => {
-			setExpandedComponentRowKeys(keys.map(key => String(key)));
-		},
-		rowExpandable: (row: ActivePillRow) => row.pill.components.length > 0,
-		showExpandColumn: false,
-	};
+	const pastColumns: TableColumnsType<PastPillRow> = useMemo(
+		() => [
+			{
+				title: 'Pill',
+				key: 'name',
+				width: 360,
+				render: (_: unknown, row: PastPillRow) =>
+					renderPillNameCell(
+						row.pill,
+						row.period.tags.map(tag => tag.name),
+					),
+			},
+			{
+				title: 'Amount',
+				key: 'amount',
+				render: (_: unknown, row: PastPillRow) => (
+					<Typography.Text>
+						{formatServing(multiplyServingValue(row.pill.value, row.period.count), row.pill.unit)}
+					</Typography.Text>
+				),
+			},
+			{
+				title: 'Timing',
+				key: 'timing',
+				render: (_: unknown, row: PastPillRow) => (
+					<Typography.Text>{formatTiming(row.period.timing)}</Typography.Text>
+				),
+			},
+			{
+				title: 'Period',
+				key: 'period',
+				render: (_: unknown, row: PastPillRow) => (
+					<Typography.Text>{formatPeriodRange(row.period)}</Typography.Text>
+				),
+			},
+			{
+				title: 'Components',
+				key: 'components',
+				render: (_: unknown, row: PastPillRow) =>
+					renderComponents(row.pill.components, row.period.count),
+				onCell: row =>
+					row.pill.components.length > 0
+						? {
+								onClick: () => {
+									toggleExpandedComponentsRow(row.key);
+								},
+								style: { cursor: 'pointer' },
+							}
+						: {},
+			},
+			{
+				title: 'Images',
+				key: 'images',
+				render: (_: unknown, row: PastPillRow) => renderImages(row.pill.images),
+			},
+		],
+		[availableTags, openExistingPillDrawer, toggleExpandedComponentsRow],
+	);
 
-	const futureTableExpandable = {
-		expandedRowKeys: expandedComponentRowKeys,
-		expandedRowRender: (row: FuturePillRow) =>
-			renderExpandedComponents(row.pill.components, row.futurePeriod.count),
-		onExpandedRowsChange: (keys: readonly Key[]) => {
-			setExpandedComponentRowKeys(keys.map(key => String(key)));
-		},
-		rowExpandable: (row: FuturePillRow) => row.pill.components.length > 0,
-		showExpandColumn: false,
-	};
+	const notTrackedColumns: TableColumnsType<NotTrackedPillRow> = useMemo(
+		() => [
+			{
+				title: 'Pill',
+				key: 'name',
+				width: 360,
+				render: (_: unknown, row: NotTrackedPillRow) => renderPillNameCell(row.pill, []),
+			},
+			{
+				title: 'Amount',
+				key: 'amount',
+				render: (_: unknown, row: NotTrackedPillRow) => (
+					<Typography.Text>{formatServing(row.pill.value, row.pill.unit)}</Typography.Text>
+				),
+			},
+			{
+				title: 'Timing',
+				key: 'timing',
+				render: () => <Typography.Text />,
+			},
+			{
+				title: 'Components',
+				key: 'components',
+				render: (_: unknown, row: NotTrackedPillRow) => renderComponents(row.pill.components),
+				onCell: row =>
+					row.pill.components.length > 0
+						? {
+								onClick: () => {
+									toggleExpandedComponentsRow(String(row.pill.id));
+								},
+								style: { cursor: 'pointer' },
+							}
+						: {},
+			},
+			{
+				title: 'Images',
+				key: 'images',
+				render: (_: unknown, row: NotTrackedPillRow) => renderImages(row.pill.images),
+			},
+		],
+		[availableTags, openExistingPillDrawer, toggleExpandedComponentsRow],
+	);
 
-	const pastTableExpandable = {
-		expandedRowKeys: expandedComponentRowKeys,
-		expandedRowRender: (row: PastPillRow) =>
-			renderExpandedComponents(row.pill.components, row.period.count),
-		onExpandedRowsChange: (keys: readonly Key[]) => {
-			setExpandedComponentRowKeys(keys.map(key => String(key)));
-		},
-		rowExpandable: (row: PastPillRow) => row.pill.components.length > 0,
-		showExpandColumn: false,
-	};
+	const onExpandedRowsChange = useCallback((keys: readonly Key[]) => {
+		setExpandedComponentRowKeys(keys.map(key => String(key)));
+	}, []);
 
-	const notTrackedTableExpandable = {
-		expandedRowKeys: expandedComponentRowKeys,
-		expandedRowRender: (row: NotTrackedPillRow) => renderExpandedComponents(row.pill.components),
-		onExpandedRowsChange: (keys: readonly Key[]) => {
-			setExpandedComponentRowKeys(keys.map(key => String(key)));
-		},
-		rowExpandable: (row: NotTrackedPillRow) => row.pill.components.length > 0,
-		showExpandColumn: false,
-	};
+	const activeTableExpandable = useMemo(
+		() => ({
+			expandedRowKeys: expandedComponentRowKeys,
+			expandedRowRender: (row: ActivePillRow) =>
+				renderExpandedComponents(row.pill.components, row.activePeriod.count),
+			onExpandedRowsChange,
+			rowExpandable: (row: ActivePillRow) => row.pill.components.length > 0,
+			showExpandColumn: false,
+		}),
+		[expandedComponentRowKeys, onExpandedRowsChange],
+	);
+
+	const futureTableExpandable = useMemo(
+		() => ({
+			expandedRowKeys: expandedComponentRowKeys,
+			expandedRowRender: (row: FuturePillRow) =>
+				renderExpandedComponents(row.pill.components, row.futurePeriod.count),
+			onExpandedRowsChange,
+			rowExpandable: (row: FuturePillRow) => row.pill.components.length > 0,
+			showExpandColumn: false,
+		}),
+		[expandedComponentRowKeys, onExpandedRowsChange],
+	);
+
+	const pastTableExpandable = useMemo(
+		() => ({
+			expandedRowKeys: expandedComponentRowKeys,
+			expandedRowRender: (row: PastPillRow) =>
+				renderExpandedComponents(row.pill.components, row.period.count),
+			onExpandedRowsChange,
+			rowExpandable: (row: PastPillRow) => row.pill.components.length > 0,
+			showExpandColumn: false,
+		}),
+		[expandedComponentRowKeys, onExpandedRowsChange],
+	);
+
+	const notTrackedTableExpandable = useMemo(
+		() => ({
+			expandedRowKeys: expandedComponentRowKeys,
+			expandedRowRender: (row: NotTrackedPillRow) => renderExpandedComponents(row.pill.components),
+			onExpandedRowsChange,
+			rowExpandable: (row: NotTrackedPillRow) => row.pill.components.length > 0,
+			showExpandColumn: false,
+		}),
+		[expandedComponentRowKeys, onExpandedRowsChange],
+	);
 
 	return (
 		<main className='pills-page' style={{ background: token.colorBgLayout }}>
