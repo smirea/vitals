@@ -298,6 +298,84 @@ body,
 	color: inherit;
 }
 
+.diary-page-inner {
+	max-width: 1600px;
+}
+
+.diary-composer-note {
+	position: relative;
+}
+
+.diary-composer-note .ant-input {
+	padding-bottom: 48px;
+	resize: none;
+}
+
+.diary-add-button {
+	position: absolute;
+	right: 10px;
+	bottom: 10px;
+}
+
+.diary-actions {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+}
+
+.diary-transcript-preview.ant-typography {
+	margin-bottom: 0;
+	cursor: pointer;
+}
+
+.diary-markdown {
+	max-width: 100%;
+	overflow-wrap: anywhere;
+	line-height: 1.5;
+}
+
+.diary-markdown > :first-child {
+	margin-top: 0;
+}
+
+.diary-markdown > :last-child {
+	margin-bottom: 0;
+}
+
+.diary-markdown p,
+.diary-markdown ul,
+.diary-markdown ol {
+	margin: 0 0 8px;
+}
+
+.diary-markdown ul,
+.diary-markdown ol {
+	padding-left: 20px;
+}
+
+.diary-markdown table {
+	width: 100%;
+	border-collapse: collapse;
+}
+
+.diary-markdown th,
+.diary-markdown td {
+	padding: 4px 6px;
+	border: 1px solid currentColor;
+}
+
+.diary-voice-memo {
+	display: flex;
+	min-width: 0;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.diary-audio {
+	width: 100%;
+	max-width: 260px;
+}
+
 .pills-image-error.ant-alert {
 	margin-top: 8px;
 }

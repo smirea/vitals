@@ -1,6 +1,7 @@
 import {
 	BulbOutlined,
 	ExperimentOutlined,
+	FormOutlined,
 	HomeOutlined,
 	MedicineBoxOutlined,
 	MoonOutlined,
@@ -29,6 +30,12 @@ const navigationItems = [
 		to: '/pills',
 		label: 'Pills',
 		icon: <ExperimentOutlined />,
+	},
+	{
+		key: '/diary',
+		to: '/diary',
+		label: "Captain's Log",
+		icon: <FormOutlined />,
 	},
 	{
 		key: '/tags',

@@ -2,7 +2,7 @@ import { asc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 
 import type { VitalsDatabase } from 'server/db/client.ts';
-import { pillPeriodTags, tags, type TagRow } from 'server/db/schema.ts';
+import { diaryEntryTags, pillPeriodTags, tags, type TagRow } from 'server/db/schema.ts';
 import { TAG_COLOR_PRESETS } from '../../../shared/constants.ts';
 
 type TagsReadDb = Pick<VitalsDatabase, 'select'>;
@@ -61,16 +61,27 @@ export function listTags(db: TagsReadDb) {
 		})
 		.from(pillPeriodTags)
 		.all();
+	const diaryTagLinkRows = db
+		.select({
+			tagId: diaryEntryTags.tagId,
+		})
+		.from(diaryEntryTags)
+		.all();
 
 	const pillPeriodCounts = new Map<number, number>();
 	for (const row of tagLinkRows) {
 		pillPeriodCounts.set(row.tagId, (pillPeriodCounts.get(row.tagId) ?? 0) + 1);
+	}
+	const diaryEntryCounts = new Map<number, number>();
+	for (const row of diaryTagLinkRows) {
+		diaryEntryCounts.set(row.tagId, (diaryEntryCounts.get(row.tagId) ?? 0) + 1);
 	}
 
 	return tagRows.map(row => ({
 		...row,
 		attachmentCounts: {
 			pillPeriods: pillPeriodCounts.get(row.id) ?? 0,
+			diaryEntries: diaryEntryCounts.get(row.id) ?? 0,
 		},
 	}));
 }

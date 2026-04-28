@@ -10,6 +10,8 @@ export type LabDashboardMeasurement = LabDashboardPayload['measurements'][number
 export type LabDashboardResult = LabDashboardPayload['results'][number];
 export type LabImportDocument = RouterOutput['labs']['listDocuments'][number];
 
+export type DiaryEntry = RouterOutput['diary']['list'][number];
+export type DiaryVoiceMemo = DiaryEntry['voiceMemos'][number];
 export type PillsDashboardPayload = RouterOutput['pills']['getDashboard'];
 export type PillRecord = PillsDashboardPayload['pills'][number];
 export type PillComponent = PillRecord['components'][number];

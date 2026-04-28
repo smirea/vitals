@@ -11,6 +11,13 @@ import {
 
 const labDocumentStatusValues = ['pending', 'processing', 'completed', 'failed'] as const;
 const pillTimingValues = ['morning', 'afternoon', 'evening'] as const;
+const voiceMemoStatusValues = [
+	'uploaded',
+	'transcribing',
+	'summarizing',
+	'completed',
+	'failed',
+] as const;
 
 export const labDocuments = sqliteTable(
 	'lab_documents',
@@ -183,6 +190,89 @@ export const tags = sqliteTable(
 	],
 );
 
+export const locations = sqliteTable(
+	'locations',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		name: text('name'),
+		city: text('city'),
+		country: text('country'),
+		countryCode: text('country_code'),
+		geocodedAt: text('geocoded_at'),
+		capturedAt: text('captured_at').notNull(),
+		latitude: real('latitude').notNull(),
+		longitude: real('longitude').notNull(),
+		accuracy: real('accuracy'),
+		altitude: real('altitude'),
+		altitudeAccuracy: real('altitude_accuracy'),
+		heading: real('heading'),
+		speed: real('speed'),
+	},
+	table => [index('locations_captured_at_idx').on(table.capturedAt, table.id)],
+);
+
+export const diaryEntries = sqliteTable(
+	'diary_entries',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		createdAt: text('created_at').notNull(),
+		notes: text('notes').notNull().default(''),
+		summary: text('summary'),
+		locationId: integer('location_id')
+			.notNull()
+			.references(() => locations.id, { onDelete: 'cascade' }),
+	},
+	table => [
+		index('diary_entries_created_at_idx').on(table.createdAt, table.id),
+		index('diary_entries_location_idx').on(table.locationId, table.id),
+	],
+);
+
+export const diaryVoiceMemos = sqliteTable(
+	'diary_voice_memos',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		entryId: integer('entry_id')
+			.notNull()
+			.references(() => diaryEntries.id, { onDelete: 'cascade' }),
+		createdAt: text('created_at').notNull(),
+		fileName: text('file_name').notNull(),
+		mimeType: text('mime_type').notNull(),
+		audioData: blob('audio_data', { mode: 'buffer' }).notNull(),
+		durationSeconds: real('duration_seconds'),
+		transcriptionStatus: text('transcription_status', { enum: voiceMemoStatusValues })
+			.notNull()
+			.default('uploaded'),
+		transcript: text('transcript'),
+		transcriptLanguage: text('transcript_language'),
+		transcriptionDurationSeconds: real('transcription_duration_seconds'),
+		transcriptionError: text('transcription_error'),
+		processedAt: text('processed_at'),
+	},
+	table => [
+		index('diary_voice_memos_entry_idx').on(table.entryId, table.createdAt, table.id),
+		index('diary_voice_memos_status_idx').on(table.transcriptionStatus, table.id),
+	],
+);
+
+export const diaryEntryTags = sqliteTable(
+	'diary_entry_tags',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		entryId: integer('entry_id')
+			.notNull()
+			.references(() => diaryEntries.id, { onDelete: 'cascade' }),
+		tagId: integer('tag_id')
+			.notNull()
+			.references(() => tags.id, { onDelete: 'cascade' }),
+	},
+	table => [
+		uniqueIndex('diary_entry_tags_entry_tag_idx').on(table.entryId, table.tagId),
+		index('diary_entry_tags_entry_idx').on(table.entryId, table.id),
+		index('diary_entry_tags_tag_idx').on(table.tagId, table.id),
+	],
+);
+
 export const pillTags = sqliteTable(
 	'pill_tags',
 	{
@@ -281,6 +371,7 @@ export const pillTagsRelations = relations(pillTags, ({ one }) => ({
 export const tagsRelations = relations(tags, ({ many }) => ({
 	pillLinks: many(pillTags),
 	pillPeriodLinks: many(pillPeriodTags),
+	diaryEntryLinks: many(diaryEntryTags),
 }));
 
 export const pillPeriodTagsRelations = relations(pillPeriodTags, ({ one }) => ({
@@ -290,6 +381,37 @@ export const pillPeriodTagsRelations = relations(pillPeriodTags, ({ one }) => ({
 	}),
 	tag: one(tags, {
 		fields: [pillPeriodTags.tagId],
+		references: [tags.id],
+	}),
+}));
+
+export const locationsRelations = relations(locations, ({ many }) => ({
+	diaryEntries: many(diaryEntries),
+}));
+
+export const diaryEntriesRelations = relations(diaryEntries, ({ one, many }) => ({
+	location: one(locations, {
+		fields: [diaryEntries.locationId],
+		references: [locations.id],
+	}),
+	voiceMemos: many(diaryVoiceMemos),
+	tagLinks: many(diaryEntryTags),
+}));
+
+export const diaryVoiceMemosRelations = relations(diaryVoiceMemos, ({ one }) => ({
+	entry: one(diaryEntries, {
+		fields: [diaryVoiceMemos.entryId],
+		references: [diaryEntries.id],
+	}),
+}));
+
+export const diaryEntryTagsRelations = relations(diaryEntryTags, ({ one }) => ({
+	entry: one(diaryEntries, {
+		fields: [diaryEntryTags.entryId],
+		references: [diaryEntries.id],
+	}),
+	tag: one(tags, {
+		fields: [diaryEntryTags.tagId],
 		references: [tags.id],
 	}),
 }));
@@ -309,6 +431,10 @@ export const appTables = {
 	pillTags,
 	tags,
 	pillPeriodTags,
+	locations,
+	diaryEntries,
+	diaryVoiceMemos,
+	diaryEntryTags,
 } as const;
 
 export const schema = {
@@ -323,6 +449,10 @@ export const schema = {
 	pillTagsRelations,
 	tagsRelations,
 	pillPeriodTagsRelations,
+	locationsRelations,
+	diaryEntriesRelations,
+	diaryVoiceMemosRelations,
+	diaryEntryTagsRelations,
 };
 
 export type LabDocumentRow = typeof labDocuments.$inferSelect;
@@ -335,3 +465,7 @@ export type PillPeriodRow = typeof pillPeriods.$inferSelect;
 export type PillTagRow = typeof pillTags.$inferSelect;
 export type TagRow = typeof tags.$inferSelect;
 export type PillPeriodTagRow = typeof pillPeriodTags.$inferSelect;
+export type LocationRow = typeof locations.$inferSelect;
+export type DiaryEntryRow = typeof diaryEntries.$inferSelect;
+export type DiaryVoiceMemoRow = typeof diaryVoiceMemos.$inferSelect;
+export type DiaryEntryTagRow = typeof diaryEntryTags.$inferSelect;
