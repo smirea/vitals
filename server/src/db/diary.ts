@@ -16,7 +16,7 @@ import {
 	tags,
 	type TagRow,
 } from 'server/db/schema.ts';
-import models, { transcribeAudioWithXai } from 'server/utils/models.ts';
+import models from 'server/utils/models.ts';
 
 const optionalLocationNumberSchema = z.number().finite().nullable().optional();
 const NEARBY_LOCATION_DISTANCE_METERS = 100;
@@ -58,6 +58,7 @@ export const diaryCreateEntryInputSchema = z.object({
 
 export const diaryUploadVoiceMemoInputSchema = z.object({
 	notes: z.string().trim().optional().default(''),
+	transcript: z.string().trim().optional().default(''),
 	fileName: z.string().trim().min(1),
 	mimeType: z.string().trim().min(1),
 	dataBase64: z.string().trim().min(1),
@@ -518,7 +519,7 @@ export async function uploadDiaryVoiceMemo(
 		};
 	});
 
-	await processDiaryVoiceMemo(db, voiceMemoId);
+	await processDiaryVoiceMemo(db, voiceMemoId, input.transcript);
 
 	const record = getDiaryRecord(db, entryId);
 	if (!record) {
@@ -528,7 +529,11 @@ export async function uploadDiaryVoiceMemo(
 	return record;
 }
 
-async function processDiaryVoiceMemo(db: VitalsDatabase, voiceMemoId: number) {
+async function processDiaryVoiceMemo(
+	db: VitalsDatabase,
+	voiceMemoId: number,
+	streamingTranscript: string,
+) {
 	const voiceMemo = db
 		.select()
 		.from(diaryVoiceMemos)
@@ -545,33 +550,18 @@ async function processDiaryVoiceMemo(db: VitalsDatabase, voiceMemoId: number) {
 		throw new Error(`Diary entry ${voiceMemo.entryId} does not exist.`);
 	}
 
-	db.update(diaryVoiceMemos)
-		.set({
-			transcriptionStatus: 'transcribing',
-			transcriptionError: null,
-		})
-		.where(eq(diaryVoiceMemos.id, voiceMemoId))
-		.run();
-
 	try {
-		const transcription = await transcribeAudioWithXai({
-			audioData: voiceMemo.audioData,
-			fileName: voiceMemo.fileName,
-			mimeType: voiceMemo.mimeType,
-			language: 'en',
-		});
-		const transcript = normalizeOptionalText(transcription.text);
+		const transcript = normalizeOptionalText(streamingTranscript);
 
 		if (!transcript) {
-			throw new Error('xAI speech-to-text returned an empty transcript.');
+			throw new Error('Streaming transcription did not return text.');
 		}
 
 		db.update(diaryVoiceMemos)
 			.set({
 				transcriptionStatus: 'summarizing',
 				transcript,
-				transcriptLanguage: normalizeOptionalText(transcription.language),
-				transcriptionDurationSeconds: nullableNumber(transcription.duration),
+				transcriptLanguage: 'English',
 				transcriptionError: null,
 			})
 			.where(eq(diaryVoiceMemos.id, voiceMemoId))

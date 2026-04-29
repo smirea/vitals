@@ -9,7 +9,6 @@ const env = z
 		VITE_API_URL: z.url(),
 		OPENROUTER_API_KEY: z.string().regex(/^sk-or-v1-/),
 		MARKER_PDF_GEMINI_KEY: z.string(),
-		XAI_API_KEY: z.string().regex(/^xai-/),
 		VITALS_DATA_DIR: z.string(),
 		VITALS_DB_PATH: z.string(),
 		AWS_REGION: z.string(),
@@ -18,6 +17,7 @@ const env = z
 		AWS_SESSION_TOKEN: z.string().optional(),
 		VITALS_S3_BUCKET: z.string(),
 		VITALS_S3_PREFIX: z.string(),
+		ELEVENLABS_API_KEY: z.string(),
 	})
 	.parse(process.env);
 
