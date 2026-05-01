@@ -81,6 +81,11 @@ export const diaryDeleteVoiceMemoInputSchema = z.object({
 	voiceMemoId: z.number().int().positive(),
 });
 
+export const diaryAddEntryTagsInputSchema = z.object({
+	entryId: z.number().int().positive(),
+	tagNames: z.array(z.string().trim().min(1)).min(1).max(50),
+});
+
 export const diaryAddVoiceMemoTagsInputSchema = z.object({
 	voiceMemoId: z.number().int().positive(),
 	tagNames: z.array(z.string().trim().min(1)).min(1).max(50),
@@ -770,6 +775,26 @@ export function deleteDiaryVoiceMemo(
 	});
 
 	return getPendingVoiceMemoRecords(db);
+}
+
+export function addTagsToDiaryEntry(
+	db: VitalsDatabase,
+	input: z.infer<typeof diaryAddEntryTagsInputSchema>,
+) {
+	const entry = db.select().from(diaryEntries).where(eq(diaryEntries.id, input.entryId)).get();
+
+	if (!entry) {
+		throw new Error(`Diary entry ${input.entryId} does not exist.`);
+	}
+
+	insertEntryTags(db, entry.id, input.tagNames);
+
+	const record = getDiaryRecord(db, entry.id);
+	if (!record) {
+		throw new Error(`Diary entry ${entry.id} was not found after tagging.`);
+	}
+
+	return record;
 }
 
 export function addTagsToDiaryVoiceMemo(

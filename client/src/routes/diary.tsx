@@ -89,6 +89,7 @@ function DiaryRouteComponent() {
 	const [deletingEntryId, setDeletingEntryId] = useState<number | null>(null);
 	const [reprocessingVoiceMemoId, setReprocessingVoiceMemoId] = useState<number | null>(null);
 	const [deletingVoiceMemoId, setDeletingVoiceMemoId] = useState<number | null>(null);
+	const [addingTagsEntryId, setAddingTagsEntryId] = useState<number | null>(null);
 	const [addingTagsVoiceMemoId, setAddingTagsVoiceMemoId] = useState<number | null>(null);
 	const [errorDetails, setErrorDetails] = useState<DiaryErrorDetails | null>(null);
 	const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -164,6 +165,18 @@ function DiaryRouteComponent() {
 		onError: showError,
 		onSettled: () => {
 			setDeletingVoiceMemoId(null);
+			void invalidateDiary();
+		},
+	});
+
+	const addEntryTagsMutation = useMutation({
+		...trpc.diary.addEntryTags.mutationOptions(),
+		onSuccess: async () => {
+			await invalidateDiary();
+		},
+		onError: showError,
+		onSettled: () => {
+			setAddingTagsEntryId(null);
 			void invalidateDiary();
 		},
 	});
@@ -585,6 +598,19 @@ function DiaryRouteComponent() {
 		deleteVoiceMemoMutation.mutate({ voiceMemoId });
 	}
 
+	function handleAddTagsToEntry(entryId: number, nextTagNames: string[]) {
+		const names = nextTagNames.map(name => name.trim()).filter(Boolean);
+		if (names.length === 0) {
+			return;
+		}
+
+		setAddingTagsEntryId(entryId);
+		addEntryTagsMutation.mutate({
+			entryId,
+			tagNames: names,
+		});
+	}
+
 	function handleAddTagsToVoiceMemo(voiceMemoId: number, nextTagNames: string[]) {
 		const names = nextTagNames.map(name => name.trim()).filter(Boolean);
 		if (names.length === 0) {
@@ -775,8 +801,8 @@ function DiaryRouteComponent() {
 						) : (
 							<Typography.Text type='secondary'>No tags</Typography.Text>
 						)}
-						<MemoTagSelect
-							memoId={row.id}
+						<TagAddControl
+							targetId={row.id}
 							tagOptions={tagOptions}
 							loading={addVoiceMemoTagsMutation.isPending && addingTagsVoiceMemoId === row.id}
 							disabled={addVoiceMemoTagsMutation.isPending}
@@ -893,19 +919,29 @@ function DiaryRouteComponent() {
 			{
 				title: 'Tags',
 				key: 'tags',
-				width: 160,
-				render: (_: unknown, row: DiaryEntry) =>
-					row.tags.length > 0 ? (
-						<Space size={[4, 4]} wrap>
-							{row.tags.map(tag => (
-								<Tag key={tag.id} color={tag.color}>
-									{tag.name}
-								</Tag>
-							))}
-						</Space>
-					) : (
-						<Typography.Text type='secondary'>No tags</Typography.Text>
-					),
+				width: 220,
+				render: (_: unknown, row: DiaryEntry) => (
+					<Space direction='vertical' size={6} style={{ width: '100%' }}>
+						{row.tags.length > 0 ? (
+							<Space size={[4, 4]} wrap>
+								{row.tags.map(tag => (
+									<Tag key={tag.id} color={tag.color}>
+										{tag.name}
+									</Tag>
+								))}
+							</Space>
+						) : (
+							<Typography.Text type='secondary'>No tags</Typography.Text>
+						)}
+						<TagAddControl
+							targetId={row.id}
+							tagOptions={tagOptions}
+							loading={addEntryTagsMutation.isPending && addingTagsEntryId === row.id}
+							disabled={addEntryTagsMutation.isPending}
+							onAddTags={handleAddTagsToEntry}
+						/>
+					</Space>
+				),
 			},
 			{
 				title: 'Transcript',
@@ -984,12 +1020,12 @@ function PendingLocationCell(props: { location: DiaryPendingVoiceMemo['location'
 	);
 }
 
-function MemoTagSelect(props: {
-	memoId: number;
+function TagAddControl(props: {
+	targetId: number;
 	tagOptions: Array<{ label: string; value: string }>;
 	loading: boolean;
 	disabled: boolean;
-	onAddTags: (memoId: number, tagNames: string[]) => void;
+	onAddTags: (targetId: number, tagNames: string[]) => void;
 }) {
 	const [selectedTagNames, setSelectedTagNames] = useState<string[]>([]);
 
@@ -999,7 +1035,7 @@ function MemoTagSelect(props: {
 			return;
 		}
 
-		props.onAddTags(props.memoId, names);
+		props.onAddTags(props.targetId, names);
 		setSelectedTagNames([]);
 	}
 

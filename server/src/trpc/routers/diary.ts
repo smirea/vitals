@@ -1,10 +1,12 @@
 import {
+	diaryAddEntryTagsInputSchema,
 	diaryAddVoiceMemoTagsInputSchema,
 	diaryCreateEntryInputSchema,
 	diaryDeleteVoiceMemoInputSchema,
 	diaryFailVoiceMemoInputSchema,
 	diaryProcessVoiceMemoInputSchema,
 	diaryUploadVoiceMemoInputSchema,
+	addTagsToDiaryEntry,
 	addTagsToDiaryVoiceMemo,
 	createDiaryEntry,
 	deleteDiaryVoiceMemo,
@@ -38,6 +40,9 @@ export const diaryRouter = createRouter({
 	deleteVoiceMemo: publicProcedure
 		.input(diaryDeleteVoiceMemoInputSchema)
 		.mutation(({ ctx, input }) => deleteDiaryVoiceMemo(ctx.db, input)),
+	addEntryTags: publicProcedure
+		.input(diaryAddEntryTagsInputSchema)
+		.mutation(({ ctx, input }) => addTagsToDiaryEntry(ctx.db, input)),
 	addVoiceMemoTags: publicProcedure
 		.input(diaryAddVoiceMemoTagsInputSchema)
 		.mutation(({ ctx, input }) => addTagsToDiaryVoiceMemo(ctx.db, input)),
