@@ -1,5 +1,5 @@
 import { generateText } from 'ai';
-import { asc, desc, eq, inArray, isNull, or } from 'drizzle-orm';
+import { asc, desc, eq, inArray, isNull, ne, or } from 'drizzle-orm';
 import { z } from 'zod';
 
 import type { VitalsDatabase } from 'server/db/client.ts';
@@ -16,7 +16,7 @@ import {
 	tags,
 	type TagRow,
 } from 'server/db/schema.ts';
-import models from 'server/utils/models.ts';
+import models, { transcribeAudioWithElevenLabs } from 'server/utils/models.ts';
 
 const optionalLocationNumberSchema = z.number().finite().nullable().optional();
 const NEARBY_LOCATION_DISTANCE_METERS = 100;
@@ -65,6 +65,25 @@ export const diaryUploadVoiceMemoInputSchema = z.object({
 	durationSeconds: z.number().finite().positive().nullable().optional(),
 	tagNames: z.array(z.string().trim().min(1)).max(50).default([]),
 	location: diaryLocationInputSchema,
+});
+
+export const diaryProcessVoiceMemoInputSchema = z.object({
+	voiceMemoId: z.number().int().positive(),
+	transcript: z.string().trim().optional(),
+});
+
+export const diaryFailVoiceMemoInputSchema = z.object({
+	voiceMemoId: z.number().int().positive(),
+	error: z.string().trim().min(1),
+});
+
+export const diaryDeleteVoiceMemoInputSchema = z.object({
+	voiceMemoId: z.number().int().positive(),
+});
+
+export const diaryAddVoiceMemoTagsInputSchema = z.object({
+	voiceMemoId: z.number().int().positive(),
+	tagNames: z.array(z.string().trim().min(1)).min(1).max(50),
 });
 
 type DiaryReadDb = Pick<VitalsDatabase, 'select'>;
@@ -249,6 +268,105 @@ function getDiaryRecord(db: DiaryReadDb, entryId: number) {
 	return getDiaryRecords(db, [entryId])[0] ?? null;
 }
 
+function getPendingVoiceMemoRecords(db: DiaryReadDb) {
+	const voiceMemoRows = db
+		.select()
+		.from(diaryVoiceMemos)
+		.where(ne(diaryVoiceMemos.transcriptionStatus, 'completed'))
+		.orderBy(desc(diaryVoiceMemos.createdAt), desc(diaryVoiceMemos.id))
+		.all();
+	const entryIds = [...new Set(voiceMemoRows.map(row => row.entryId))];
+
+	if (entryIds.length === 0) {
+		return [];
+	}
+
+	const entryRows = db
+		.select()
+		.from(diaryEntries)
+		.where(inArray(diaryEntries.id, entryIds))
+		.orderBy(desc(diaryEntries.createdAt), desc(diaryEntries.id))
+		.all();
+	const entryRowsById = new Map(entryRows.map(row => [row.id, row]));
+
+	const locationRows = db
+		.select()
+		.from(locations)
+		.where(
+			inArray(
+				locations.id,
+				entryRows.map(row => row.locationId),
+			),
+		)
+		.orderBy(asc(locations.id))
+		.all();
+	const locationsById = new Map(locationRows.map(row => [row.id, row]));
+
+	const entryTagRows = db
+		.select()
+		.from(diaryEntryTags)
+		.where(inArray(diaryEntryTags.entryId, entryIds))
+		.orderBy(asc(diaryEntryTags.entryId), asc(diaryEntryTags.tagId))
+		.all();
+	const tagIds = [...new Set(entryTagRows.map(row => row.tagId))];
+	const tagRows =
+		tagIds.length === 0
+			? []
+			: db
+					.select()
+					.from(tags)
+					.where(inArray(tags.id, tagIds))
+					.orderBy(asc(tags.name), asc(tags.id))
+					.all();
+	const tagsById = new Map(tagRows.map(row => [row.id, row]));
+	const tagsByEntryId = new Map<number, TagRow[]>();
+
+	for (const row of entryTagRows) {
+		const tag = tagsById.get(row.tagId);
+		if (!tag) {
+			continue;
+		}
+
+		const list = tagsByEntryId.get(row.entryId) ?? [];
+		list.push(tag);
+		tagsByEntryId.set(row.entryId, list);
+	}
+
+	return voiceMemoRows.map(row => {
+		const entry = entryRowsById.get(row.entryId);
+		if (!entry) {
+			throw new Error(`Voice memo ${row.id} is missing diary entry ${row.entryId}.`);
+		}
+
+		const location = locationsById.get(entry.locationId);
+		if (!location) {
+			throw new Error(`Diary entry ${entry.id} is missing its location.`);
+		}
+
+		return {
+			id: row.id,
+			entryId: row.entryId,
+			createdAt: row.createdAt,
+			fileName: row.fileName,
+			mimeType: row.mimeType,
+			audioBytes: row.audioData.byteLength,
+			durationSeconds: row.durationSeconds,
+			transcriptionStatus: row.transcriptionStatus,
+			transcript: row.transcript,
+			transcriptLanguage: row.transcriptLanguage,
+			transcriptionDurationSeconds: row.transcriptionDurationSeconds,
+			transcriptionError: row.transcriptionError,
+			processedAt: row.processedAt,
+			notes: entry.notes,
+			summary: entry.summary,
+			location,
+			tags: (tagsByEntryId.get(entry.id) ?? []).sort((left, right) =>
+				left.name.localeCompare(right.name),
+			),
+		};
+	});
+}
+
 async function resolveLocation(db: DiaryWriteDb, input: z.infer<typeof diaryLocationInputSchema>) {
 	const nearbyLocation = getNearbyLocation(db, input);
 	if (nearbyLocation?.name && nearbyLocation.city && nearbyLocation.country) {
@@ -370,10 +488,21 @@ function degreesToRadians(value: number) {
 
 function insertEntryTags(db: DiaryWriteDb, entryId: number, tagNames: string[]) {
 	const resolvedTags = ensureTagsByNames(db, tagNames);
+	const existingTagIds = new Set(
+		db
+			.select({
+				tagId: diaryEntryTags.tagId,
+			})
+			.from(diaryEntryTags)
+			.where(eq(diaryEntryTags.entryId, entryId))
+			.all()
+			.map(row => row.tagId),
+	);
+	const missingTags = resolvedTags.filter(tag => !existingTagIds.has(tag.id));
 
-	if (resolvedTags.length > 0) {
+	if (missingTags.length > 0) {
 		db.insert(diaryEntryTags)
-			.values(resolvedTags.map(tag => ({ entryId, tagId: tag.id })))
+			.values(missingTags.map(tag => ({ entryId, tagId: tag.id })))
 			.run();
 	}
 }
@@ -417,6 +546,10 @@ async function summarizeDiaryEntry(input: { notes: string; transcript?: string |
 export async function listDiaryEntries(db: VitalsDatabase) {
 	await ensureMissingLocationNames(db);
 	return getDiaryRecords(db);
+}
+
+export function listPendingDiaryVoiceMemos(db: VitalsDatabase) {
+	return getPendingVoiceMemoRecords(db);
 }
 
 async function ensureMissingLocationNames(db: VitalsDatabase) {
@@ -480,6 +613,31 @@ export async function uploadDiaryVoiceMemo(
 	db: VitalsDatabase,
 	input: z.infer<typeof diaryUploadVoiceMemoInputSchema>,
 ) {
+	const { voiceMemoId } = await saveDiaryVoiceMemo(db, input);
+	await processDiaryVoiceMemo(db, voiceMemoId, input.transcript);
+
+	const voiceMemo = db
+		.select()
+		.from(diaryVoiceMemos)
+		.where(eq(diaryVoiceMemos.id, voiceMemoId))
+		.get();
+
+	if (!voiceMemo) {
+		throw new Error(`Voice memo ${voiceMemoId} was not found after processing.`);
+	}
+
+	const record = getDiaryRecord(db, voiceMemo.entryId);
+	if (!record) {
+		throw new Error(`Diary entry ${voiceMemo.entryId} was not found after voice memo processing.`);
+	}
+
+	return record;
+}
+
+export async function saveDiaryVoiceMemo(
+	db: VitalsDatabase,
+	input: z.infer<typeof diaryUploadVoiceMemoInputSchema>,
+) {
 	const locationId = await resolveLocation(db, input.location);
 	const audioData = Buffer.from(input.dataBase64, 'base64');
 	const { entryId, voiceMemoId } = db.transaction(tx => {
@@ -507,6 +665,8 @@ export async function uploadDiaryVoiceMemo(
 				audioData,
 				durationSeconds: nullableNumber(input.durationSeconds),
 				transcriptionStatus: 'uploaded',
+				transcript: normalizeOptionalText(input.transcript),
+				transcriptLanguage: normalizeOptionalText(input.transcript) ? 'English' : null,
 			})
 			.returning({
 				id: diaryVoiceMemos.id,
@@ -519,20 +679,121 @@ export async function uploadDiaryVoiceMemo(
 		};
 	});
 
-	await processDiaryVoiceMemo(db, voiceMemoId, input.transcript);
+	return {
+		entryId,
+		voiceMemoId,
+	};
+}
 
-	const record = getDiaryRecord(db, entryId);
+export async function processSavedDiaryVoiceMemo(
+	db: VitalsDatabase,
+	input: z.infer<typeof diaryProcessVoiceMemoInputSchema>,
+) {
+	await processDiaryVoiceMemo(db, input.voiceMemoId, input.transcript);
+
+	const voiceMemo = db
+		.select()
+		.from(diaryVoiceMemos)
+		.where(eq(diaryVoiceMemos.id, input.voiceMemoId))
+		.get();
+
+	if (!voiceMemo) {
+		throw new Error(`Voice memo ${input.voiceMemoId} was not found after processing.`);
+	}
+
+	const record = getDiaryRecord(db, voiceMemo.entryId);
 	if (!record) {
-		throw new Error(`Diary entry ${entryId} was not found after voice memo processing.`);
+		throw new Error(`Diary entry ${voiceMemo.entryId} was not found after voice memo processing.`);
 	}
 
 	return record;
 }
 
+export function failDiaryVoiceMemo(
+	db: VitalsDatabase,
+	input: z.infer<typeof diaryFailVoiceMemoInputSchema>,
+) {
+	const voiceMemo = db
+		.select()
+		.from(diaryVoiceMemos)
+		.where(eq(diaryVoiceMemos.id, input.voiceMemoId))
+		.get();
+
+	if (!voiceMemo) {
+		throw new Error(`Voice memo ${input.voiceMemoId} does not exist.`);
+	}
+
+	db.update(diaryVoiceMemos)
+		.set({
+			transcriptionStatus: 'failed',
+			transcriptionError: input.error,
+			processedAt: new Date().toISOString(),
+		})
+		.where(eq(diaryVoiceMemos.id, input.voiceMemoId))
+		.run();
+
+	return getPendingVoiceMemoRecords(db);
+}
+
+export function deleteDiaryVoiceMemo(
+	db: VitalsDatabase,
+	input: z.infer<typeof diaryDeleteVoiceMemoInputSchema>,
+) {
+	const voiceMemo = db
+		.select()
+		.from(diaryVoiceMemos)
+		.where(eq(diaryVoiceMemos.id, input.voiceMemoId))
+		.get();
+
+	if (!voiceMemo) {
+		throw new Error(`Voice memo ${input.voiceMemoId} does not exist.`);
+	}
+
+	db.transaction(tx => {
+		tx.delete(diaryVoiceMemos).where(eq(diaryVoiceMemos.id, input.voiceMemoId)).run();
+
+		const entry = tx
+			.select()
+			.from(diaryEntries)
+			.where(eq(diaryEntries.id, voiceMemo.entryId))
+			.get();
+		const remainingMemo = tx
+			.select({ id: diaryVoiceMemos.id })
+			.from(diaryVoiceMemos)
+			.where(eq(diaryVoiceMemos.entryId, voiceMemo.entryId))
+			.limit(1)
+			.get();
+
+		if (entry && !entry.notes.trim() && !remainingMemo) {
+			tx.delete(diaryEntries).where(eq(diaryEntries.id, entry.id)).run();
+		}
+	});
+
+	return getPendingVoiceMemoRecords(db);
+}
+
+export function addTagsToDiaryVoiceMemo(
+	db: VitalsDatabase,
+	input: z.infer<typeof diaryAddVoiceMemoTagsInputSchema>,
+) {
+	const voiceMemo = db
+		.select()
+		.from(diaryVoiceMemos)
+		.where(eq(diaryVoiceMemos.id, input.voiceMemoId))
+		.get();
+
+	if (!voiceMemo) {
+		throw new Error(`Voice memo ${input.voiceMemoId} does not exist.`);
+	}
+
+	insertEntryTags(db, voiceMemo.entryId, input.tagNames);
+	return getPendingVoiceMemoRecords(db);
+}
+
 async function processDiaryVoiceMemo(
 	db: VitalsDatabase,
 	voiceMemoId: number,
-	streamingTranscript: string,
+	streamingTranscript: string | undefined,
 ) {
 	const voiceMemo = db
 		.select()
@@ -551,10 +812,29 @@ async function processDiaryVoiceMemo(
 	}
 
 	try {
-		const transcript = normalizeOptionalText(streamingTranscript);
+		db.update(diaryVoiceMemos)
+			.set({
+				transcriptionStatus: 'transcribing',
+				transcriptionError: null,
+			})
+			.where(eq(diaryVoiceMemos.id, voiceMemoId))
+			.run();
+
+		const transcript =
+			normalizeOptionalText(streamingTranscript) ??
+			normalizeOptionalText(
+				(
+					await transcribeAudioWithElevenLabs({
+						audioData: voiceMemo.audioData,
+						fileName: voiceMemo.fileName,
+						mimeType: voiceMemo.mimeType,
+					})
+				).text,
+			) ??
+			normalizeOptionalText(voiceMemo.transcript);
 
 		if (!transcript) {
-			throw new Error('Streaming transcription did not return text.');
+			throw new Error('Transcription did not return text.');
 		}
 
 		db.update(diaryVoiceMemos)
