@@ -76,6 +76,11 @@ type PillImageFormValue = {
 	dataUrl: string;
 };
 
+type PillImageErrorDetails = {
+	message: string;
+	details: string;
+};
+
 type PillComponentFormValue = {
 	name: string;
 	value: string;
@@ -159,7 +164,7 @@ function PillsRouteComponent() {
 	const [deletingPeriodId, setDeletingPeriodId] = useState<number | null>(null);
 	const [isSaveDisabled, setIsSaveDisabled] = useState(true);
 	const [expandedComponentRowKeys, setExpandedComponentRowKeys] = useState<string[]>([]);
-	const [imageError, setImageError] = useState<string | null>(null);
+	const [imageError, setImageError] = useState<PillImageErrorDetails | null>(null);
 	const [openPeriodTagEditorKey, setOpenPeriodTagEditorKey] = useState<string | null>(null);
 	const deferredPillQuery = useDeferredValue(pillQuery);
 	const watchedFormValues = Form.useWatch([], form) as PillFormValues | undefined;
@@ -194,8 +199,9 @@ function PillsRouteComponent() {
 			message.success(`Filled pill details from images using ${extraction.model}.`);
 		},
 		onError: error => {
-			setImageError(error.message);
-			message.error(error.message);
+			const errorDetails = formatPillImageError(error, 'Image parsing failed.');
+			setImageError(errorDetails);
+			message.error(errorDetails.message);
 		},
 	});
 	const isParsingImages = extractionMutation.isPending;
@@ -389,10 +395,9 @@ function PillsRouteComponent() {
 						pastedFiles.length === 1 ? 'Pasted 1 image.' : `Pasted ${pastedFiles.length} images.`,
 					);
 				} catch (error) {
-					const errorMessage =
-						error instanceof Error ? error.message : 'Unable to process pasted images.';
-					setImageError(errorMessage);
-					message.error(errorMessage);
+					const errorDetails = formatPillImageError(error, 'Unable to process pasted images.');
+					setImageError(errorDetails);
+					message.error(errorDetails.message);
 				}
 			})();
 		};
@@ -541,20 +546,19 @@ function PillsRouteComponent() {
 
 			form.setFieldValue('images', nextImages);
 		} catch (error) {
-			const errorMessage =
-				error instanceof Error ? error.message : 'Unable to process uploaded images.';
-			setImageError(errorMessage);
-			message.error(errorMessage);
+			const errorDetails = formatPillImageError(error, 'Unable to process uploaded images.');
+			setImageError(errorDetails);
+			message.error(errorDetails.message);
 		}
 	}
 
-	async function handleParseImages() {
+	function handleParseImages() {
 		if (watchedImages.length === 0) {
 			return;
 		}
 
 		setImageError(null);
-		await extractionMutation.mutateAsync({
+		extractionMutation.mutate({
 			images: getImagePayload(watchedImages),
 		});
 	}
@@ -1288,9 +1292,7 @@ function PillsRouteComponent() {
 								size='small'
 								loading={isParsingImages}
 								disabled={isParsingImages}
-								onClick={() => {
-									void handleParseImages();
-								}}
+								onClick={handleParseImages}
 							>
 								Parse images
 							</Button>
@@ -1366,7 +1368,13 @@ function PillsRouteComponent() {
 						</div>
 					) : null}
 					{imageError ? (
-						<Alert type='error' showIcon message={imageError} className='pills-image-error' />
+						<Alert
+							type='error'
+							showIcon
+							message={imageError.message}
+							description={<pre className='pills-image-error-details'>{imageError.details}</pre>}
+							className='pills-image-error'
+						/>
 					) : null}
 
 					<Divider>Date Ranges</Divider>
@@ -1951,6 +1959,90 @@ function isValidPastedUrl(value: string) {
 	} catch {
 		return false;
 	}
+}
+
+function formatPillImageError(error: unknown, fallbackMessage: string): PillImageErrorDetails {
+	const message =
+		error instanceof Error ? getFirstErrorLine(error.message) || fallbackMessage : fallbackMessage;
+	const details = [
+		error instanceof Error ? `${error.name}: ${error.message}` : `Error: ${String(error)}`,
+		safeJsonStringify(serializeError(error)),
+	]
+		.filter(Boolean)
+		.join('\n\n');
+
+	return {
+		message,
+		details: details || message,
+	};
+}
+
+function getFirstErrorLine(value: string) {
+	return value
+		.split('\n')
+		.map(line => line.trim())
+		.find(Boolean);
+}
+
+function serializeError(error: unknown): unknown {
+	if (typeof error === 'bigint') {
+		return error.toString();
+	}
+	if (typeof error !== 'object' || error === null) {
+		return error;
+	}
+
+	const output: Record<string, unknown> = {};
+	for (const key of Reflect.ownKeys(error)) {
+		output[String(key)] = (error as Record<PropertyKey, unknown>)[key];
+	}
+	if (error instanceof Error) {
+		output.name = error.name;
+		output.message = error.message;
+		output.stack = error.stack;
+		output.cause = serializeError(error.cause);
+	}
+
+	return output;
+}
+
+function safeJsonStringify(value: unknown) {
+	try {
+		return JSON.stringify(value, getDebugJsonReplacer(), 2);
+	} catch {
+		return String(value);
+	}
+}
+
+function getDebugJsonReplacer() {
+	const seen = new WeakSet<object>();
+	return (_key: string, value: unknown) => {
+		if (typeof value === 'bigint') {
+			return value.toString();
+		}
+		if (value instanceof Error) {
+			return serializeError(value);
+		}
+		if (typeof Response !== 'undefined' && value instanceof Response) {
+			return {
+				status: value.status,
+				statusText: value.statusText,
+				url: value.url,
+				headers: Object.fromEntries(value.headers.entries()),
+			};
+		}
+		if (typeof Headers !== 'undefined' && value instanceof Headers) {
+			return Object.fromEntries(value.entries());
+		}
+		if (typeof value !== 'object' || value === null) {
+			return value;
+		}
+		if (seen.has(value)) {
+			return '[Circular]';
+		}
+		seen.add(value);
+		return value;
+	};
 }
 
 function renderComponents(components: PillComponent[], count = 1) {

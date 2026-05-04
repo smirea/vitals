@@ -152,20 +152,25 @@ function normalizeOptionalText(value: string | null | undefined) {
 
 function parseJsonFromText(text: string) {
 	const trimmedText = text.trim();
+	let jsonText: string;
 
 	if (trimmedText.startsWith('```')) {
 		const withoutOpeningFence = trimmedText.replace(/^```(?:json)?\s*/i, '');
-		const withoutClosingFence = withoutOpeningFence.replace(/\s*```$/, '');
-		return JSON.parse(withoutClosingFence);
+		jsonText = withoutOpeningFence.replace(/\s*```$/, '');
+	} else {
+		const firstObjectCharacter = trimmedText.indexOf('{');
+		const lastObjectCharacter = trimmedText.lastIndexOf('}');
+		if (firstObjectCharacter < 0 || lastObjectCharacter <= firstObjectCharacter) {
+			throw new Error('Model response did not contain valid JSON.');
+		}
+		jsonText = trimmedText.slice(firstObjectCharacter, lastObjectCharacter + 1);
 	}
 
-	const firstObjectCharacter = trimmedText.indexOf('{');
-	const lastObjectCharacter = trimmedText.lastIndexOf('}');
-	if (firstObjectCharacter >= 0 && lastObjectCharacter > firstObjectCharacter) {
-		return JSON.parse(trimmedText.slice(firstObjectCharacter, lastObjectCharacter + 1));
+	try {
+		return JSON.parse(jsonText);
+	} catch (error) {
+		throw new Error(`Model response was not valid JSON.\n\n${getDebugErrorMessage(error)}`);
 	}
-
-	throw new Error('Model response did not contain valid JSON.');
 }
 
 function sanitizePillComponents(input: z.infer<typeof pillUpsertInputSchema>['components']) {
@@ -243,6 +248,67 @@ function parseDataUrl(dataUrl: string) {
 	return {
 		mimeType: match[1],
 		data: match[2],
+	};
+}
+
+function isTimeoutError(error: unknown) {
+	return (
+		error instanceof Error &&
+		(error.name === 'AbortError' || /timed?\s*out|timeout/i.test(error.message))
+	);
+}
+
+function getDebugErrorMessage(error: unknown) {
+	const message =
+		error instanceof Error ? `${error.name}: ${error.message}` : `Error: ${String(error)}`;
+	const details = safeJsonStringify(serializeError(error));
+	return details && details !== '{}' ? `${message}\n\n${details}` : message;
+}
+
+function serializeError(error: unknown): unknown {
+	if (typeof error === 'bigint') {
+		return error.toString();
+	}
+	if (typeof error !== 'object' || error === null) {
+		return error;
+	}
+
+	const output: Record<string, unknown> = {};
+	for (const key of Reflect.ownKeys(error)) {
+		output[String(key)] = (error as Record<PropertyKey, unknown>)[key];
+	}
+	if (error instanceof Error) {
+		output.name = error.name;
+		output.message = error.message;
+		output.stack = error.stack;
+		output.cause = serializeError(error.cause);
+	}
+
+	return output;
+}
+
+function safeJsonStringify(value: unknown) {
+	try {
+		return JSON.stringify(value, getCircularJsonReplacer(), 2);
+	} catch {
+		return String(value);
+	}
+}
+
+function getCircularJsonReplacer() {
+	const seen = new WeakSet<object>();
+	return (_key: string, value: unknown) => {
+		if (typeof value === 'bigint') {
+			return value.toString();
+		}
+		if (typeof value !== 'object' || value === null) {
+			return value;
+		}
+		if (seen.has(value)) {
+			return '[Circular]';
+		}
+		seen.add(value);
+		return value;
 	};
 }
 
@@ -735,10 +801,10 @@ export async function extractPillFromImages(input: z.infer<typeof pillImageExtra
 		};
 	});
 
-	let result;
+	let modelText = '';
 
 	try {
-		result = await generateText({
+		const result = await generateText({
 			model: models.smart_and_expensive,
 			messages: [
 				{
@@ -781,20 +847,26 @@ export async function extractPillFromImages(input: z.infer<typeof pillImageExtra
 			timeout: { totalMs: PILL_IMAGE_EXTRACTION_TIMEOUT_MS },
 			system: 'You are a precise supplement label extraction engine.',
 		});
+		modelText = result.text;
 	} catch (error) {
-		if (
-			error instanceof Error &&
-			(error.name === 'AbortError' || /timed?\s*out|timeout/i.test(error.message))
-		) {
-			throw new Error('Image parsing timed out. Try again or upload fewer images.');
+		if (isTimeoutError(error)) {
+			throw new Error(
+				`Image parsing timed out. Try again or upload fewer images.\n\n${getDebugErrorMessage(error)}`,
+			);
 		}
 
-		throw error;
+		throw new Error(`Image parsing failed.\n\n${getDebugErrorMessage(error)}`);
 	}
 
-	const parsedResponse = pillImageExtractionSchema.parse(
-		parseJsonFromText(result.text),
-	) as PillImageExtraction;
+	let parsedResponse: PillImageExtraction;
+	try {
+		parsedResponse = pillImageExtractionSchema.parse(parseJsonFromText(modelText));
+	} catch (error) {
+		throw new Error(
+			`Image parsing failed.\n\n${getDebugErrorMessage(error)}\n\nModel response:\n${modelText}`,
+		);
+	}
+
 	return {
 		detected: parsedResponse.detected,
 		name: normalizeOptionalText(parsedResponse.name),
