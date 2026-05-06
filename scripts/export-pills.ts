@@ -18,7 +18,7 @@ void createScript(() => {
 			return [
 				pill.name,
 				formatServing(multiplyServingValue(pill.value, activePeriod.count), pill.unit),
-				formatTiming(activePeriod.timing),
+				formatPillSchedule(activePeriod),
 				activePeriod.startDate,
 				pill.components
 					.map(component =>
@@ -43,6 +43,19 @@ void createScript(() => {
 
 type PillRecord = ReturnType<typeof getPillsDashboard>['pills'][number];
 type PillPeriod = PillRecord['periods'][number];
+type PillTiming = PillPeriod['timing'];
+type PillWeekday = PillPeriod['daysOfWeek'][number];
+
+const weekdayOptions = [
+	{ label: 'Mon', value: 'monday' },
+	{ label: 'Tue', value: 'tuesday' },
+	{ label: 'Wed', value: 'wednesday' },
+	{ label: 'Thu', value: 'thursday' },
+	{ label: 'Fri', value: 'friday' },
+	{ label: 'Sat', value: 'saturday' },
+	{ label: 'Sun', value: 'sunday' },
+] satisfies Array<{ label: string; value: PillWeekday }>;
+const pillWeekdayValues = weekdayOptions.map(option => option.value);
 
 function getTodayDateString() {
 	const date = new Date();
@@ -93,16 +106,45 @@ function formatServing(value?: string | null, unit?: string | null) {
 	return [value?.trim(), unit?.trim()].filter(Boolean).join(' ');
 }
 
-function formatTiming(timing?: PillPeriod['timing']) {
-	if (!timing) {
-		return '';
-	}
-
-	return timing.charAt(0).toUpperCase() + timing.slice(1);
-}
-
 function formatCsvRow(values: string[]) {
 	return values.map(formatCsvCell).join(',');
+}
+
+function normalizeWeekdaySelection(values: readonly PillWeekday[]) {
+	const selectedValues = new Set(values);
+	const orderedValues = pillWeekdayValues.filter(value => selectedValues.has(value));
+	return orderedValues.length === pillWeekdayValues.length ? [] : orderedValues;
+}
+
+function formatWeekdayFrequency(daysOfWeek: readonly PillWeekday[] | null | undefined) {
+	const selectedDays = normalizeWeekdaySelection(daysOfWeek ?? []);
+	if (selectedDays.length === 0) {
+		return 'daily';
+	}
+
+	const dayLabels = selectedDays.map(
+		day => weekdayOptions.find(option => option.value === day)?.label ?? day,
+	);
+	return `every ${dayLabels.join(', ')}`;
+}
+
+function formatTimingPhrase(timing: PillTiming | null | undefined) {
+	switch (timing) {
+		case 'morning':
+			return 'in the morning';
+		case 'afternoon':
+			return 'in the afternoon';
+		case 'evening':
+			return 'in the evening';
+		default:
+			return '';
+	}
+}
+
+function formatPillSchedule(period: Pick<PillPeriod, 'daysOfWeek' | 'timing'>) {
+	return [formatWeekdayFrequency(period.daysOfWeek), formatTimingPhrase(period.timing)]
+		.filter(Boolean)
+		.join(' ');
 }
 
 function formatCsvCell(value: string) {

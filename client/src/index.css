@@ -401,6 +401,46 @@ body,
 	display: flex;
 }
 
+.pills-periods-table .ant-table-cell {
+	vertical-align: top;
+}
+
+.pills-frequency-control {
+	display: flex;
+	min-height: 32px;
+	width: 100%;
+	align-items: flex-start;
+	gap: 8px;
+}
+
+.pills-frequency-daily {
+	display: inline-flex;
+	flex: 0 0 auto;
+	align-items: center;
+	gap: 6px;
+	min-height: 32px;
+}
+
+.pills-weekday-selector.ant-checkbox-group {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 2px 6px;
+	min-width: 0;
+	padding-top: 3px;
+}
+
+.pills-weekday-selector .ant-checkbox-wrapper {
+	margin-inline-start: 0;
+	font-size: 12px;
+	line-height: 1.2;
+}
+
+.pills-period-actions.ant-space {
+	justify-content: flex-end;
+	width: 100%;
+}
+
 .vitals-chart-fallback {
 	display: grid;
 	height: 100%;

@@ -11,6 +11,15 @@ import {
 
 const labDocumentStatusValues = ['pending', 'processing', 'completed', 'failed'] as const;
 const pillTimingValues = ['morning', 'afternoon', 'evening'] as const;
+const pillWeekdayValues = [
+	'monday',
+	'tuesday',
+	'wednesday',
+	'thursday',
+	'friday',
+	'saturday',
+	'sunday',
+] as const;
 const voiceMemoStatusValues = [
 	'uploaded',
 	'transcribing',
@@ -171,6 +180,10 @@ export const pillPeriods = sqliteTable(
 		endDate: text('end_date'),
 		count: real('count').notNull().default(1),
 		timing: text('timing', { enum: pillTimingValues }),
+		daysOfWeekJson: text('days_of_week_json', { mode: 'json' })
+			.$type<(typeof pillWeekdayValues)[number][]>()
+			.notNull()
+			.default(sql`'[]'`),
 	},
 	table => [index('pill_periods_pill_start_idx').on(table.pillId, table.startDate, table.id)],
 );

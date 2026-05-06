@@ -34,6 +34,16 @@ const pillComponentInputSchema = z.object({
 });
 
 const pillTimingSchema = z.enum(['morning', 'afternoon', 'evening']);
+const pillWeekdayValues = [
+	'monday',
+	'tuesday',
+	'wednesday',
+	'thursday',
+	'friday',
+	'saturday',
+	'sunday',
+] as const;
+const pillWeekdaySchema = z.enum(pillWeekdayValues);
 
 const pillPeriodInputSchema = z.object({
 	id: z.number().int().positive().optional(),
@@ -41,6 +51,7 @@ const pillPeriodInputSchema = z.object({
 	endDate: z.string().trim().optional().default(''),
 	count: z.number().positive().optional().default(1),
 	timing: pillTimingSchema.optional(),
+	daysOfWeek: z.array(pillWeekdaySchema).default([]),
 	tagNames: z.array(z.string().trim()).max(50).default([]),
 });
 
@@ -193,6 +204,7 @@ function sanitizePillPeriods(args: { input: z.infer<typeof pillUpsertInputSchema
 			endDate: normalizeOptionalText(period.endDate),
 			count: period.count,
 			timing: period.timing ?? null,
+			daysOfWeek: normalizePillWeekdays(period.daysOfWeek),
 			tagNames: [
 				...new Map(
 					period.tagNames
@@ -208,6 +220,7 @@ function sanitizePillPeriods(args: { input: z.infer<typeof pillUpsertInputSchema
 				period.endDate !== null ||
 				period.count !== 1 ||
 				period.timing !== null ||
+				period.daysOfWeek.length > 0 ||
 				period.tagNames.length > 0,
 		)
 		.map(period => {
@@ -318,6 +331,16 @@ function normalizeStoredPillTiming(
 	return value === 'morning' || value === 'afternoon' || value === 'evening' ? value : null;
 }
 
+function normalizePillWeekdays(values: readonly z.infer<typeof pillWeekdaySchema>[]) {
+	const selectedValues = new Set(values);
+	const orderedValues = pillWeekdayValues.filter(value => selectedValues.has(value));
+	return orderedValues.length === pillWeekdayValues.length ? [] : orderedValues;
+}
+
+function normalizeStoredPillWeekdays(value: unknown) {
+	return normalizePillWeekdays(z.array(pillWeekdaySchema).parse(value));
+}
+
 function buildPillsPayload(args: {
 	pillRows: PillRow[];
 	componentRows: PillComponentRow[];
@@ -352,6 +375,7 @@ function buildPillsPayload(args: {
 			endDate: string | null;
 			count: number;
 			timing: z.infer<typeof pillTimingSchema> | null;
+			daysOfWeek: z.infer<typeof pillWeekdaySchema>[];
 			tags: Array<{
 				id: number;
 				name: string;
@@ -431,6 +455,7 @@ function buildPillsPayload(args: {
 			endDate: row.endDate,
 			count: row.count,
 			timing: normalizeStoredPillTiming(row.timing),
+			daysOfWeek: normalizeStoredPillWeekdays(row.daysOfWeekJson),
 			tags: periodTags.sort((left, right) => left.name.localeCompare(right.name)),
 		});
 		periodMap.set(row.pillId, list);
@@ -740,6 +765,7 @@ export function upsertPill(db: VitalsDatabase, input: z.infer<typeof pillUpsertI
 							endDate: period.endDate,
 							count: period.count,
 							timing: period.timing,
+							daysOfWeekJson: period.daysOfWeek,
 						})
 						.where(eq(pillPeriods.id, period.id))
 						.run();
@@ -753,6 +779,7 @@ export function upsertPill(db: VitalsDatabase, input: z.infer<typeof pillUpsertI
 							endDate: period.endDate,
 							count: period.count,
 							timing: period.timing,
+							daysOfWeekJson: period.daysOfWeek,
 						})
 						.returning({
 							id: pillPeriods.id,

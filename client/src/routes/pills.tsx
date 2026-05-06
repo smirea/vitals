@@ -16,6 +16,7 @@ import {
 	Badge,
 	Button,
 	Card,
+	Checkbox,
 	DatePicker,
 	Divider,
 	Drawer,
@@ -28,6 +29,7 @@ import {
 	Select,
 	Space,
 	Spin,
+	Switch,
 	Tag,
 	Table,
 	Typography,
@@ -68,6 +70,14 @@ export const Route = createFileRoute('/pills')({
 });
 
 type PillTiming = 'morning' | 'afternoon' | 'evening';
+type PillWeekday =
+	| 'monday'
+	| 'tuesday'
+	| 'wednesday'
+	| 'thursday'
+	| 'friday'
+	| 'saturday'
+	| 'sunday';
 
 type PillImageFormValue = {
 	id?: number;
@@ -93,6 +103,7 @@ type PillPeriodFormValue = {
 	endDate?: string;
 	count?: number;
 	timing?: PillTiming;
+	daysOfWeek?: PillWeekday[];
 	tagNames?: string[];
 };
 
@@ -144,6 +155,16 @@ const timingOptions = [
 	{ label: 'Afternoon', value: 'afternoon' },
 	{ label: 'Evening', value: 'evening' },
 ] as const;
+const weekdayOptions = [
+	{ label: 'Mon', value: 'monday' },
+	{ label: 'Tue', value: 'tuesday' },
+	{ label: 'Wed', value: 'wednesday' },
+	{ label: 'Thu', value: 'thursday' },
+	{ label: 'Fri', value: 'friday' },
+	{ label: 'Sat', value: 'saturday' },
+	{ label: 'Sun', value: 'sunday' },
+] satisfies Array<{ label: string; value: PillWeekday }>;
+const pillWeekdayValues = weekdayOptions.map(option => option.value);
 
 function PillsRouteComponent() {
 	const search = Route.useSearch();
@@ -588,6 +609,7 @@ function PillsRouteComponent() {
 			...period,
 			id: isNewPill ? undefined : period.id,
 			count: normalizePeriodCount(period.count),
+			daysOfWeek: normalizeWeekdaySelection(period.daysOfWeek ?? []),
 			tagNames: normalizeTagNames(period.tagNames ?? []),
 		}));
 
@@ -636,6 +658,60 @@ function PillsRouteComponent() {
 
 	function handlePeriodTagNamesChange(fieldIndex: number, values: string[]) {
 		form.setFieldValue(['periods', fieldIndex, 'tagNames'], normalizeTagNames(values));
+	}
+
+	function handlePeriodDailyChange(fieldIndex: number, isDaily: boolean) {
+		const rowValue = watchedPeriods[fieldIndex];
+		form.setFieldValue(
+			['periods', fieldIndex, 'daysOfWeek'],
+			isDaily ? [] : [getDefaultWeekdayForPeriod(rowValue)],
+		);
+	}
+
+	function handlePeriodWeekdaysChange(fieldIndex: number, values: unknown[]) {
+		form.setFieldValue(
+			['periods', fieldIndex, 'daysOfWeek'],
+			normalizeWeekdaySelection(values.filter(isPillWeekday)),
+		);
+	}
+
+	function renderPeriodFrequencyEditor(fieldIndex: number) {
+		const rowValue = watchedPeriods[fieldIndex];
+		const selectedDays = normalizeWeekdaySelection(rowValue?.daysOfWeek ?? []);
+		const isDaily = selectedDays.length === 0;
+
+		return (
+			<div className='pills-frequency-control'>
+				<Form.Item
+					name={[fieldIndex, 'daysOfWeek']}
+					hidden
+					style={{ marginBottom: 0 }}
+					getValueProps={value => ({
+						value: value ?? [],
+					})}
+				>
+					<Select mode='multiple' />
+				</Form.Item>
+
+				<div className='pills-frequency-daily'>
+					<Switch
+						size='small'
+						checked={isDaily}
+						onChange={checked => handlePeriodDailyChange(fieldIndex, checked)}
+					/>
+					<Typography.Text>Daily</Typography.Text>
+				</div>
+
+				{isDaily ? null : (
+					<Checkbox.Group
+						className='pills-weekday-selector'
+						options={weekdayOptions}
+						value={selectedDays}
+						onChange={values => handlePeriodWeekdaysChange(fieldIndex, values)}
+					/>
+				)}
+			</div>
+		);
 	}
 
 	function renderPeriodTagEditor(fieldIndex: number) {
@@ -770,10 +846,10 @@ function PillsRouteComponent() {
 				),
 			},
 			{
-				title: 'Timing',
-				key: 'timing',
+				title: 'Frequency',
+				key: 'frequency',
 				render: (_: unknown, row: ActivePillRow) => (
-					<Typography.Text>{formatTiming(row.activePeriod.timing)}</Typography.Text>
+					<Typography.Text>{formatPillSchedule(row.activePeriod)}</Typography.Text>
 				),
 			},
 			{
@@ -832,10 +908,10 @@ function PillsRouteComponent() {
 				),
 			},
 			{
-				title: 'Timing',
-				key: 'timing',
+				title: 'Frequency',
+				key: 'frequency',
 				render: (_: unknown, row: FuturePillRow) => (
-					<Typography.Text>{formatTiming(row.futurePeriod.timing)}</Typography.Text>
+					<Typography.Text>{formatPillSchedule(row.futurePeriod)}</Typography.Text>
 				),
 			},
 			{
@@ -891,10 +967,10 @@ function PillsRouteComponent() {
 				),
 			},
 			{
-				title: 'Timing',
-				key: 'timing',
+				title: 'Frequency',
+				key: 'frequency',
 				render: (_: unknown, row: PastPillRow) => (
-					<Typography.Text>{formatTiming(row.period.timing)}</Typography.Text>
+					<Typography.Text>{formatPillSchedule(row.period)}</Typography.Text>
 				),
 			},
 			{
@@ -944,8 +1020,8 @@ function PillsRouteComponent() {
 				),
 			},
 			{
-				title: 'Timing',
-				key: 'timing',
+				title: 'Frequency',
+				key: 'frequency',
 				render: () => <Typography.Text />,
 			},
 			{
@@ -1388,11 +1464,13 @@ function PillsRouteComponent() {
 										pagination={false}
 										rowKey='key'
 										dataSource={fields}
-										scroll={{ x: 860 }}
+										tableLayout='fixed'
+										className='pills-periods-table'
+										scroll={{ x: 820 }}
 										columns={[
 											{
 												title: 'Period',
-												width: 290,
+												width: 248,
 												render: (_: unknown, field) => (
 													<div style={{ width: '100%' }}>
 														<Form.Item name={[field.name, 'id']} hidden>
@@ -1435,7 +1513,7 @@ function PillsRouteComponent() {
 											},
 											{
 												title: 'Count',
-												width: 120,
+												width: 88,
 												render: (_: unknown, field) => (
 													<Form.Item
 														name={[field.name, 'count']}
@@ -1452,8 +1530,13 @@ function PillsRouteComponent() {
 												),
 											},
 											{
+												title: 'Frequency',
+												width: 190,
+												render: (_: unknown, field) => renderPeriodFrequencyEditor(field.name),
+											},
+											{
 												title: 'Timing',
-												width: 140,
+												width: 128,
 												render: (_: unknown, field) => (
 													<Form.Item name={[field.name, 'timing']} style={{ marginBottom: 0 }}>
 														<Select
@@ -1467,7 +1550,8 @@ function PillsRouteComponent() {
 												),
 											},
 											{
-												width: 170,
+												width: 84,
+												align: 'right',
 												render: (_: unknown, field) => {
 													const rowValue = watchedPeriods[field.name] as
 														| PillPeriodFormValue
@@ -1475,7 +1559,7 @@ function PillsRouteComponent() {
 													const isSavedRow = Boolean(rowValue?.id);
 
 													return (
-														<Space size='small' align='center'>
+														<Space size={4} align='center' className='pills-period-actions'>
 															<Form.Item
 																name={[field.name, 'tagNames']}
 																hidden
@@ -1490,6 +1574,7 @@ function PillsRouteComponent() {
 															{renderPeriodTagEditor(field.name)}
 
 															<Button
+																size='small'
 																danger
 																icon={<DeleteOutlined />}
 																loading={isSavedRow && deletingPeriodId === rowValue?.id}
@@ -1620,6 +1705,7 @@ function createBlankPeriod(): PillPeriodFormValue {
 		startDate: getTodayDateString(),
 		endDate: '',
 		count: 1,
+		daysOfWeek: [],
 		tagNames: [],
 	};
 }
@@ -1631,6 +1717,7 @@ function getPillPeriodFormValues(pill: PillRecord) {
 		endDate: period.endDate ?? '',
 		count: normalizePeriodCount(period.count),
 		timing: period.timing ?? undefined,
+		daysOfWeek: normalizeWeekdaySelection(period.daysOfWeek ?? []),
 		tagNames: period.tags.map(tag => tag.name),
 	}));
 }
@@ -1722,14 +1809,6 @@ function multiplyServingValue(value: string | null | undefined, count: number | 
 	return formatNumericValue(numericValue * normalizedCount);
 }
 
-function formatTiming(timing?: PillTiming | null) {
-	if (!timing) {
-		return '';
-	}
-
-	return timing.charAt(0).toUpperCase() + timing.slice(1);
-}
-
 function getActivePeriod(pill: PillRecord) {
 	const today = getTodayDateString();
 
@@ -1756,6 +1835,56 @@ function formatPeriodRange(period: Pick<PillPeriod, 'startDate' | 'endDate'>) {
 	return period.endDate
 		? `${period.startDate} to ${period.endDate}`
 		: `${period.startDate} to ongoing`;
+}
+
+function isPillWeekday(value: unknown): value is PillWeekday {
+	return typeof value === 'string' && (pillWeekdayValues as readonly string[]).includes(value);
+}
+
+function normalizeWeekdaySelection(values: readonly PillWeekday[]) {
+	const selectedValues = new Set(values);
+	const orderedValues = pillWeekdayValues.filter(value => selectedValues.has(value));
+	return orderedValues.length === pillWeekdayValues.length ? [] : orderedValues;
+}
+
+function getDefaultWeekdayForPeriod(period: PillPeriodFormValue | undefined) {
+	const date = period?.startDate ? dayjs(period.startDate, DATE_FORMAT) : dayjs();
+	const weekdayIndex = ((date.isValid() ? date.day() : dayjs().day()) + 6) % 7;
+	return pillWeekdayValues[weekdayIndex];
+}
+
+function formatWeekdayFrequency(daysOfWeek: readonly PillWeekday[] | null | undefined) {
+	const selectedDays = normalizeWeekdaySelection(daysOfWeek ?? []);
+	if (selectedDays.length === 0) {
+		return 'daily';
+	}
+
+	const dayLabels = selectedDays.map(
+		day => weekdayOptions.find(option => option.value === day)?.label ?? day,
+	);
+	return `every ${dayLabels.join(', ')}`;
+}
+
+function formatTimingPhrase(timing: PillTiming | null | undefined) {
+	switch (timing) {
+		case 'morning':
+			return 'in the morning';
+		case 'afternoon':
+			return 'in the afternoon';
+		case 'evening':
+			return 'in the evening';
+		default:
+			return '';
+	}
+}
+
+function formatPillSchedule(period: {
+	daysOfWeek?: readonly PillWeekday[] | null;
+	timing?: PillTiming | null;
+}) {
+	return [formatWeekdayFrequency(period.daysOfWeek), formatTimingPhrase(period.timing)]
+		.filter(Boolean)
+		.join(' ');
 }
 
 function createImageUid(
@@ -2128,6 +2257,7 @@ function buildPillsExport(args: {
 			startDate: row.futurePeriod.startDate,
 			endDate: row.futurePeriod.endDate ?? undefined,
 			timing: row.futurePeriod.timing,
+			daysOfWeek: row.futurePeriod.daysOfWeek,
 		})),
 	);
 	const activePills = buildPillExportTable(
@@ -2138,6 +2268,7 @@ function buildPillsExport(args: {
 			startDate: row.activePeriod.startDate,
 			endDate: row.activePeriod.endDate ?? undefined,
 			timing: row.activePeriod.timing,
+			daysOfWeek: row.activePeriod.daysOfWeek,
 		})),
 	);
 	const notTrackedPills = buildPillExportTable(
@@ -2155,6 +2286,7 @@ function buildPillsExport(args: {
 			startDate: row.period.startDate,
 			endDate: row.period.endDate ?? undefined,
 			timing: row.period.timing,
+			daysOfWeek: row.period.daysOfWeek,
 		})),
 	);
 
@@ -2182,10 +2314,11 @@ function buildPillExportTable(
 		startDate?: string;
 		endDate?: string;
 		timing?: PillPeriod['timing'];
+		daysOfWeek?: PillPeriod['daysOfWeek'];
 	}>,
 ) {
 	return Object.fromEntries(
-		rows.map(({ pill, count, tags, startDate, endDate, timing }) => [
+		rows.map(({ pill, count, tags, startDate, endDate, timing, daysOfWeek }) => [
 			`${pill.name} - ${formatServing(multiplyServingValue(pill.value, count), pill.unit)}`,
 			buildPillExportRow({
 				pill,
@@ -2194,6 +2327,7 @@ function buildPillExportTable(
 				startDate,
 				endDate,
 				timing,
+				daysOfWeek,
 			}),
 		]),
 	);
@@ -2206,6 +2340,7 @@ function buildPillExportRow(args: {
 	startDate?: string;
 	endDate?: string;
 	timing?: PillPeriod['timing'];
+	daysOfWeek?: PillPeriod['daysOfWeek'];
 }): PillExportRow {
 	const exportRow: PillExportRow = {};
 
@@ -2229,8 +2364,11 @@ function buildPillExportRow(args: {
 	if (args.endDate) {
 		exportRow.endDate = args.endDate;
 	}
-	if (args.timing) {
-		exportRow.timing = args.timing;
+	if (args.startDate || args.endDate || args.timing || (args.daysOfWeek?.length ?? 0) > 0) {
+		exportRow.timing = formatPillSchedule({
+			daysOfWeek: args.daysOfWeek ?? [],
+			timing: args.timing,
+		});
 	}
 
 	return exportRow;
