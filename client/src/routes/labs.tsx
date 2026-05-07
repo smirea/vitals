@@ -1,4 +1,4 @@
-import { ChartLineUp, UploadSimple } from '@phosphor-icons/react';
+import { ChartLineUp, UploadSimple, WarningCircle } from '@phosphor-icons/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
 import {
@@ -63,6 +63,8 @@ import {
 	SELECTION_COLUMN_WIDTH,
 	SOURCE_COLUMN_WIDTH,
 	clamp,
+	isCellOutsideReferenceRange,
+	formatCell,
 	type VitalsRowModel,
 	type SourceFilter,
 	type SourceFilterMode,
@@ -95,6 +97,16 @@ export const Route = createFileRoute('/labs')({
 const BLOODWORK_IMPORT_POLL_INTERVAL_MS = 3_000;
 const PREVIEW_DRAWER_CONTENT_HEIGHT = 'calc(100vh - 108px)';
 const PREVIEW_RESULTS_PANEL_WIDTH = 360;
+const NORMAL_PREVIEW_FLAG_NOTES = new Set([
+	'n',
+	'normal',
+	'none',
+	'ok',
+	'n/a',
+	'na',
+	'in range',
+	'within range',
+]);
 
 function LabsPage() {
 	const search = Route.useSearch();
@@ -115,6 +127,7 @@ function LabsPage() {
 		useLocalStorage('starredMeasurements');
 	const [rawDateRangeStart, setDateRangeStart] = useState('');
 	const [rawDateRangeEnd, setDateRangeEnd] = useState('');
+	const [showFlaggedPreviewRowsOnly, setShowFlaggedPreviewRowsOnly] = useState(false);
 	const [groupByCategory, setGroupByCategory] = useLocalStorage('groupByCategory');
 	const [sourceFilters, setSourceFilters] = useLocalStorage('sourceFilters');
 	const activeTab = search.tab ?? 'overview';
@@ -226,18 +239,43 @@ function LabsPage() {
 					.filter(Boolean)
 					.join(' ')
 					.trim();
+				const cell = formatCell({
+					key: measurement?.key ?? '',
+					name: measurement?.name ?? result.originalName ?? 'Unknown measurement',
+					category: measurement?.category ?? null,
+					documentId: result.documentId,
+					valueText: result.valueText,
+					valueNumeric: result.valueNumeric,
+					unit: result.unit,
+					referenceRangeMin: result.originalRangeMin ?? measurement?.rangeMin ?? null,
+					referenceRangeMax: result.originalRangeMax ?? measurement?.rangeMax ?? null,
+					flag: null,
+					note: result.note,
+				});
+				const note = result.note?.trim() || null;
+				const isOutsideRange = isCellOutsideReferenceRange(cell);
+				const issueLabel = getPreviewIssueLabel(note, isOutsideRange);
 
 				return {
 					id: result.id,
 					key: measurement?.key ?? '',
 					name: measurement?.name ?? result.originalName ?? 'Unknown measurement',
-					category: measurement?.category?.trim() || null,
 					valueText: valueText || '—',
-					rangeText: measurement?.range?.trim() || null,
-					note: result.note?.trim() || null,
+					rangeText: result.originalRangeText?.trim() || measurement?.range?.trim() || null,
+					note: getPreviewDisplayNote(note),
+					hasIssue: issueLabel !== null,
+					issueLabel,
 				};
 			});
 	}, [previewDocumentId, previewMeasurementById, results]);
+	const flaggedPreviewRowCount = useMemo(
+		() => previewRows.filter(row => row.hasIssue).length,
+		[previewRows],
+	);
+	const visiblePreviewRows = useMemo(
+		() => (showFlaggedPreviewRowsOnly ? previewRows.filter(row => row.hasIssue) : previewRows),
+		[previewRows, showFlaggedPreviewRowsOnly],
+	);
 
 	useEffect(() => {
 		const previousHadActiveImports = previousHasActiveImportDocumentsRef.current;
@@ -1199,73 +1237,105 @@ function LabsPage() {
 						>
 							<div
 								style={{
-									padding: '12px 14px',
+									padding: '10px 14px',
 									borderBottom: `1px solid ${token.colorBorderSecondary}`,
 								}}
 							>
-								<Typography.Text strong>Parsed Values ({previewRows.length})</Typography.Text>
+								<Flex justify='space-between' align='center' gap={12}>
+									<Typography.Text strong>
+										Parsed Values ({visiblePreviewRows.length})
+									</Typography.Text>
+									<Checkbox
+										checked={showFlaggedPreviewRowsOnly}
+										onChange={event => setShowFlaggedPreviewRowsOnly(event.target.checked)}
+									>
+										Flagged ({flaggedPreviewRowCount})
+									</Checkbox>
+								</Flex>
 							</div>
 							<div style={{ overflowY: 'auto', minHeight: 0, flex: 1 }}>
-								{previewRows.length === 0 ? (
+								{visiblePreviewRows.length === 0 ? (
 									<Empty
 										image={Empty.PRESENTED_IMAGE_SIMPLE}
-										description='No processed values for this document'
+										description={
+											previewRows.length === 0
+												? 'No processed values for this document'
+												: 'No flagged values for this document'
+										}
 										style={{ marginTop: 24 }}
 									/>
 								) : (
 									<div>
-										{previewRows.map(row => {
+										{visiblePreviewRows.map(row => {
 											const isHighlighted = previewMeasurementKey === row.key;
 											return (
 												<div
 													key={row.id}
 													ref={isHighlighted ? scrollToPreviewRow : undefined}
 													style={{
-														padding: '10px 14px',
+														padding: '8px 14px',
 														borderBottom: `1px solid ${token.colorBorderSecondary}`,
 														background: isHighlighted ? token.colorPrimaryBg : undefined,
 													}}
 												>
-													<Flex justify='space-between' align='flex-start' gap={12}>
-														<div style={{ minWidth: 0 }}>
+													<Flex justify='space-between' align='flex-start' gap={10}>
+														<div style={{ minWidth: 0, flex: 1 }}>
+															<Flex align='flex-start' gap={6}>
+																<Typography.Text
+																	strong
+																	style={{
+																		display: 'block',
+																		lineHeight: 1.25,
+																		overflowWrap: 'break-word',
+																	}}
+																>
+																	{row.name}
+																</Typography.Text>
+																{row.issueLabel ? (
+																	<WarningCircle
+																		size={15}
+																		weight='fill'
+																		color={token.colorWarning}
+																		style={{ flexShrink: 0, marginTop: 2 }}
+																		aria-label={row.issueLabel}
+																	/>
+																) : null}
+															</Flex>
+														</div>
+														<div
+															style={{
+																textAlign: 'right',
+																flexShrink: 0,
+																maxWidth: 138,
+															}}
+														>
 															<Typography.Text
-																strong
 																style={{
 																	display: 'block',
-																	lineHeight: 1.35,
-																	overflowWrap: 'break-word',
+																	overflowWrap: 'anywhere',
 																}}
 															>
-																{row.name}
+																{row.valueText}
 															</Typography.Text>
-															{row.category ? (
-																<Typography.Text type='secondary' style={{ fontSize: 12 }}>
-																	{row.category}
+															{row.rangeText ? (
+																<Typography.Text
+																	type='secondary'
+																	style={{
+																		display: 'block',
+																		marginTop: 2,
+																		fontSize: 11,
+																		lineHeight: 1.2,
+																	}}
+																>
+																	ref {row.rangeText}
 																</Typography.Text>
 															) : null}
 														</div>
-														<Typography.Text
-															style={{
-																textAlign: 'right',
-																whiteSpace: 'nowrap',
-																flexShrink: 0,
-															}}
-														>
-															{row.valueText}
-														</Typography.Text>
 													</Flex>
-													{row.rangeText ? (
-														<Typography.Text
-															type='secondary'
-															style={{ display: 'block', marginTop: 4, fontSize: 12 }}
-														>
-															ref {row.rangeText}
-														</Typography.Text>
-													) : null}
 													{row.note ? (
 														<Typography.Text
 															type='secondary'
-															style={{ display: 'block', marginTop: 4, fontSize: 12 }}
+															style={{ display: 'block', marginTop: 3, fontSize: 12 }}
 														>
 															{row.note}
 														</Typography.Text>
@@ -1289,6 +1359,33 @@ function LabsPage() {
 			</Drawer>
 		</main>
 	);
+}
+
+function getPreviewIssueLabel(note: string | null, isOutsideRange: boolean) {
+	const value = note?.trim().toLowerCase();
+	const compactFlagLabel = getPreviewCompactFlagLabel(value, note);
+	if (compactFlagLabel) return compactFlagLabel;
+	if (value && !NORMAL_PREVIEW_FLAG_NOTES.has(value)) return note;
+	return isOutsideRange ? 'Outside reference range' : null;
+}
+
+function getPreviewDisplayNote(note: string | null) {
+	const value = note?.trim().toLowerCase();
+	if (!note || !value) return null;
+	if (getPreviewCompactFlagLabel(value, note)) return null;
+	return note;
+}
+
+function getPreviewCompactFlagLabel(value: string | undefined, note: string | null) {
+	if (!value || NORMAL_PREVIEW_FLAG_NOTES.has(value)) return null;
+	if (value === 'h' || value === 'high') return 'High';
+	if (value === 'l' || value === 'low') return 'Low';
+	if (value === 'a' || value === 'abn' || value === 'abnormal') return 'Abnormal';
+	if (value === 'critical' || value === 'crit') return 'Critical';
+	if (value === 'critical h' || value === 'critical high') return 'Critical high';
+	if (value === 'critical l' || value === 'critical low') return 'Critical low';
+	if (/^[a-z]{1,2}$/.test(value)) return note?.toUpperCase() ?? value.toUpperCase();
+	return null;
 }
 
 function hasActiveLabsImports(documents: LabImportDocument[]) {
