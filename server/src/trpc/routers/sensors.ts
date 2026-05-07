@@ -25,6 +25,7 @@ const labsConfigSchema = z.object({
 	textFilter: z.string().optional().default(''),
 	categories: z.array(z.string().trim().min(1)).optional().default([]),
 	startDate: dateSchema.nullable().optional(),
+	onlyLatest: z.boolean().optional().default(false),
 });
 const voiceMemosConfigSchema = z.object({
 	content: z.enum(['raw', 'summary', 'both']).optional().default('raw'),
@@ -37,7 +38,7 @@ const sensorRunInputSchema = z.object({
 	key: z.enum(sensorKeys),
 	outputMode: z.enum(sensorOutputModes),
 	startDate: dateSchema,
-	labs: labsConfigSchema.optional().default({ textFilter: '', categories: [] }),
+	labs: labsConfigSchema.optional().default({ textFilter: '', categories: [], onlyLatest: false }),
 	voiceMemos: voiceMemosConfigSchema.optional().default({ content: 'raw' }),
 	macrofactor: macrofactorConfigSchema.optional().default({ recipeDetails: false }),
 });
@@ -212,6 +213,7 @@ function runLabsSensor(db: VitalsDatabase, input: SensorRunInput): SensorRunResu
 			return filters.some(filter => haystack.includes(filter));
 		})
 		.map(row => ({
+			measurementKey: row.measurementKey,
 			date: row.date,
 			lab: row.lab,
 			category: row.category,
@@ -227,8 +229,11 @@ function runLabsSensor(db: VitalsDatabase, input: SensorRunInput): SensorRunResu
 				page: row.sourcePage,
 			},
 		}));
+	const outputRows = (config.onlyLatest ? filterLatestLabRows(rows) : rows).map(
+		({ measurementKey: _measurementKey, ...row }) => row,
+	);
 
-	return formatStructuredSensorResult(input, rows, {
+	return formatStructuredSensorResult(input, outputRows, {
 		fileName: 'labs.csv',
 		columns: ['date', 'lab', 'category', 'value', 'unit', 'range', 'flags', 'documentId', 'page'],
 		toCsvRow: row => ({
@@ -243,6 +248,21 @@ function runLabsSensor(db: VitalsDatabase, input: SensorRunInput): SensorRunResu
 			page: row.source.page,
 		}),
 	});
+}
+
+function filterLatestLabRows<
+	Row extends {
+		measurementKey: string;
+	},
+>(rows: Row[]) {
+	const rowsByMeasurementKey = new Map<string, Row>();
+	for (const row of rows) {
+		const key = row.measurementKey.trim().toLocaleLowerCase();
+		if (!rowsByMeasurementKey.has(key)) {
+			rowsByMeasurementKey.set(key, row);
+		}
+	}
+	return [...rowsByMeasurementKey.values()];
 }
 
 function runPillsSensor(db: VitalsDatabase, input: SensorRunInput): SensorRunResult {

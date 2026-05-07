@@ -20,6 +20,7 @@ import {
 	Space,
 	Spin,
 	Tag,
+	Tooltip,
 	Typography,
 	message,
 	theme as antdTheme,
@@ -27,7 +28,7 @@ import {
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import type { ReactNode } from 'react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import type { SensorRunResult } from '../utils/api';
 import { useTRPC, useTRPCClient } from '../utils/trpc';
@@ -87,6 +88,7 @@ function SensorsPage() {
 		textFilter: '',
 		categories: [] as string[],
 		startDate: null as string | null,
+		onlyLatest: false,
 	});
 	const [voiceMemosConfig, setVoiceMemosConfig] = useState({
 		content: 'raw' as VoiceMemoContent,
@@ -102,6 +104,13 @@ function SensorsPage() {
 	);
 
 	const configQuery = useQuery(trpc.sensors.getConfig.queryOptions());
+	const defaultLabStartDate = useMemo(() => {
+		const targetDate = dayjs().subtract(1, 'year').format(DATE_FORMAT);
+		const sortedDates = [...(configQuery.data?.labDates ?? [])].sort((left, right) =>
+			right.localeCompare(left),
+		);
+		return sortedDates.find(date => date <= targetDate) ?? sortedDates.at(-1) ?? null;
+	}, [configQuery.data?.labDates]);
 	const selectedRunKeys = sensorKeys.filter(key => selectedKeys[key]);
 	const isAnySelectedRunning = selectedRunKeys.some(key => runStates[key].status === 'running');
 	const isAnyRunning = sensorKeys.some(key => runStates[key].status === 'running');
@@ -147,6 +156,15 @@ function SensorsPage() {
 		[results],
 	);
 	const outputText = outputMode === 'json' ? compiledJsonText : compiledText;
+
+	useEffect(() => {
+		if (!defaultLabStartDate) {
+			return;
+		}
+		setLabsConfig(previous =>
+			previous.startDate ? previous : { ...previous, startDate: defaultLabStartDate },
+		);
+	}, [defaultLabStartDate]);
 
 	function updateDefaultStartDate(nextStartDate: string) {
 		setDefaultStartDate(nextStartDate);
@@ -469,6 +487,7 @@ function LabsConfig(props: {
 		textFilter: string;
 		categories: string[];
 		startDate: string | null;
+		onlyLatest: boolean;
 	};
 	labDates: string[];
 	labCategories: Array<{
@@ -480,6 +499,7 @@ function LabsConfig(props: {
 		textFilter: string;
 		categories: string[];
 		startDate: string | null;
+		onlyLatest: boolean;
 	}) => void;
 }) {
 	return (
@@ -504,7 +524,6 @@ function LabsConfig(props: {
 				onChange={categories => props.onChange({ ...props.config, categories })}
 			/>
 			<Select
-				allowClear
 				value={props.config.startDate ?? undefined}
 				placeholder='start date'
 				loading={props.isLoading}
@@ -512,6 +531,14 @@ function LabsConfig(props: {
 				options={props.labDates.map(date => ({ label: date, value: date }))}
 				onChange={startDate => props.onChange({ ...props.config, startDate: startDate ?? null })}
 			/>
+			<Tooltip title='Only the latest value for each measurement, if it was in the selected period. When off, returns all measurements taken in that period.'>
+				<Checkbox
+					checked={props.config.onlyLatest}
+					onChange={event => props.onChange({ ...props.config, onlyLatest: event.target.checked })}
+				>
+					Only latest
+				</Checkbox>
+			</Tooltip>
 		</Space>
 	);
 }
