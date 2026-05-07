@@ -267,12 +267,16 @@ function filterLatestLabRows<
 
 function runPillsSensor(db: VitalsDatabase, input: SensorRunInput): SensorRunResult {
 	const dashboard = getPillsDashboard(db);
+	const rangeEnd = getTodayDateString();
 	const rows = dashboard.pills
 		.map(pill => {
-			const periods = pill.periods.filter(
-				period => !period.endDate || period.endDate >= input.startDate,
+			const periods = pill.periods.filter(period =>
+				doPillPeriodsOverlapDateRange(period, {
+					startDate: input.startDate,
+					endDate: rangeEnd,
+				}),
 			);
-			if (pill.periods.length > 0 && periods.length === 0) {
+			if (periods.length === 0) {
 				return null;
 			}
 
@@ -314,6 +318,27 @@ function runPillsSensor(db: VitalsDatabase, input: SensorRunInput): SensorRunRes
 			url: row.url,
 		}),
 	});
+}
+
+function doPillPeriodsOverlapDateRange(
+	period: {
+		startDate: string;
+		endDate: string | null;
+	},
+	range: {
+		startDate: string;
+		endDate: string;
+	},
+) {
+	return period.startDate <= range.endDate && (!period.endDate || period.endDate > range.startDate);
+}
+
+function getTodayDateString() {
+	const date = new Date();
+	const year = String(date.getFullYear());
+	const month = String(date.getMonth() + 1).padStart(2, '0');
+	const day = String(date.getDate()).padStart(2, '0');
+	return `${year}-${month}-${day}`;
 }
 
 function runVoiceMemosSensor(db: VitalsDatabase, input: SensorRunInput): SensorRunResult {
