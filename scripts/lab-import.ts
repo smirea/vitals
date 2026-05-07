@@ -13,6 +13,7 @@ import { eq } from 'drizzle-orm';
 import convert, { getMeasureKind } from 'convert';
 import typedUnits from './units.json';
 import models from 'server/utils/models';
+import { cleanLabReferenceRangeInPlace } from './lab-reference-ranges';
 
 const tmpDir = path.join('/tmp', 'vitals');
 fs.mkdirSync(tmpDir, { recursive: true });
@@ -356,16 +357,18 @@ async function extractData(
 		lastTableHeaders = getLastTableHeaders(chunk);
 	}
 
-	// 🏁 unit normalization across all accumulated measurements
-
 	const unitsToFigureOut: { measurement: string; unit: string }[] = [];
 
 	const updateMeasurement = (item: Measurement, count: number | ((v: number) => number)) => {
 		const fn = typeof count === 'number' ? (x: number) => x * count : count;
-		if (item.valueNumeric) item.valueNumeric = fn(item.valueNumeric);
-		if (item.referenceMin) item.referenceMin = fn(item.referenceMin);
-		if (item.referenceMax) item.referenceMax = fn(item.referenceMax);
+		if (item.valueNumeric != null) item.valueNumeric = fn(item.valueNumeric);
+		if (item.referenceMin != null) item.referenceMin = fn(item.referenceMin);
+		if (item.referenceMax != null) item.referenceMax = fn(item.referenceMax);
 	};
+
+	for (const item of allMeasurements) {
+		cleanLabReferenceRangeInPlace(item);
+	}
 
 	for (const item of allMeasurements) {
 		const matchedDb = measurementsDb[item.name.toLocaleLowerCase().trim()];

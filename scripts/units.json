@@ -1,9 +1,72 @@
 {
-	"example_source_mapped": { "count": 42, "unit": "example_target" },
+	"example_source_mapped": {
+		"count": 42,
+		"unit": "example_target"
+	},
 	"exmple_source_leaf": "canonical_example_source_name",
 	"mmol/l": "mmol/L",
 	"mg/dl": "mg/dL",
 	"g/dl": "g/dL",
 	"ml/min/1.73m2 ": "mL/min/1.73m2",
-	"%": "%"
+	"%": "%",
+	"mg/dL→mg/dL": {
+		"unit": "mg/dL",
+		"count": 1
+	},
+	"ml/min/1.73m2→mL/min/1.73m2": {
+		"unit": "mL/min/1.73m2",
+		"count": 1
+	},
+	"u/l→U/L": {
+		"unit": "U/L",
+		"count": 1
+	},
+	"ng/ml→ng/mL": {
+		"unit": "ng/mL",
+		"count": 1
+	},
+	"mcg/dl→mcg/dL": {
+		"unit": "mcg/dL",
+		"count": 1
+	},
+	"miu/l→mIU/L": {
+		"unit": "mIU/L",
+		"count": 1
+	},
+	"ng/dl→ng/dL": {
+		"unit": "ng/dL",
+		"count": 1
+	},
+	"nmol/l→nmol/L": {
+		"unit": "nmol/L",
+		"count": 1
+	},
+	"pg/ml→pg/mL": {
+		"unit": "pg/mL",
+		"count": 1
+	},
+	"umol/l→umol/L": {
+		"unit": "umol/L",
+		"count": 1
+	},
+	"iu/ml→IU/mL": {
+		"unit": "IU/mL",
+		"count": 1
+	},
+	"thousand/ul→K/uL": {
+		"unit": "K/uL",
+		"count": 1
+	},
+	"million/ul→M/uL": {
+		"unit": "M/uL",
+		"count": 1
+	},
+	"cells/ul→cells/uL": {
+		"unit": "cells/uL",
+		"count": 1
+	},
+	"u/ml→U/mL": {
+		"unit": "U/mL",
+		"count": 1
+	}
 }
