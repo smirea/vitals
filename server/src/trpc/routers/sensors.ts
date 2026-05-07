@@ -235,17 +235,14 @@ function runLabsSensor(db: VitalsDatabase, input: SensorRunInput): SensorRunResu
 
 	return formatStructuredSensorResult(input, outputRows, {
 		fileName: 'labs.csv',
-		columns: ['date', 'lab', 'category', 'value', 'unit', 'range', 'flags', 'documentId', 'page'],
+		columns: ['date', 'measurement', 'value', 'unit', 'range', 'flags'],
 		toCsvRow: row => ({
 			date: row.date,
-			lab: row.lab,
-			category: row.category,
+			measurement: row.lab,
 			value: row.value,
 			unit: row.unit,
 			range: row.range,
 			flags: row.flags,
-			documentId: row.source.documentId,
-			page: row.source.page,
 		}),
 	});
 }
