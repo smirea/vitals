@@ -1,5 +1,5 @@
 import { QueryClient } from '@tanstack/react-query';
-import { createTRPCClient, httpBatchLink } from '@trpc/client';
+import { createTRPCClient, httpBatchLink, httpLink, splitLink } from '@trpc/client';
 import { createTRPCContext } from '@trpc/tanstack-react-query';
 
 import type { AppRouter } from 'server/trpc/index.ts';
@@ -20,8 +20,14 @@ export function createQueryClient() {
 export function createBrowserTrpcClient() {
 	return createTRPCClient<AppRouter>({
 		links: [
-			httpBatchLink({
-				url: `/api/trpc`,
+			splitLink({
+				condition: op => op.path === 'sensors.runExtractor',
+				true: httpLink({
+					url: `/api/trpc`,
+				}),
+				false: httpBatchLink({
+					url: `/api/trpc`,
+				}),
 			}),
 		],
 	});

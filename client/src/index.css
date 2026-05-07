@@ -221,6 +221,115 @@ body,
 	border: 1px solid transparent;
 }
 
+.sensors-page {
+	height: 100%;
+	overflow: auto;
+}
+
+.sensors-page-inner {
+	display: flex;
+	max-width: 1800px;
+	margin: 0 auto;
+	padding: 24px;
+	flex-direction: column;
+	gap: 24px;
+}
+
+.sensors-toolbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	padding: 20px;
+	border: 1px solid;
+	border-radius: 8px;
+}
+
+.sensors-toolbar-title {
+	min-width: 0;
+}
+
+.sensors-toolbar-title .ant-typography {
+	margin: 0;
+}
+
+.sensors-section {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.sensors-section-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.sensors-section-header .ant-typography {
+	margin: 0;
+}
+
+.sensors-list {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.sensors-row {
+	padding: 14px 16px;
+	border: 1px solid;
+	border-radius: 8px;
+}
+
+.sensors-row-error {
+	margin-top: 12px;
+}
+
+.sensors-error-text.ant-typography {
+	margin-bottom: 0;
+	white-space: pre-wrap;
+}
+
+.sensors-output-shell {
+	position: relative;
+}
+
+.sensors-output-actions {
+	position: absolute;
+	top: 8px;
+	right: 8px;
+	z-index: 1;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.sensors-output-textarea.ant-input {
+	font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+	font-size: 12px;
+	line-height: 1.5;
+}
+
+.sensors-csv-list {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+
+.sensors-csv-file {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.sensors-empty-output {
+	display: flex;
+	min-height: 220px;
+	align-items: center;
+	justify-content: center;
+}
+
 .pills-primary-fields {
 	display: grid;
 	gap: 12px;

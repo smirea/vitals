@@ -1,5 +1,6 @@
 import {
 	BulbOutlined,
+	DatabaseOutlined,
 	ExperimentOutlined,
 	FormOutlined,
 	HomeOutlined,
@@ -36,6 +37,12 @@ const navigationItems = [
 		to: '/diary',
 		label: "Captain's Log",
 		icon: <FormOutlined />,
+	},
+	{
+		key: '/sensors',
+		to: '/sensors',
+		label: 'Sensors',
+		icon: <DatabaseOutlined />,
 	},
 	{
 		key: '/tags',

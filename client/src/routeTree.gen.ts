@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as TagsRouteImport } from './routes/tags'
+import { Route as SensorsRouteImport } from './routes/sensors'
 import { Route as PillsRouteImport } from './routes/pills'
 import { Route as LabsRouteImport } from './routes/labs'
 import { Route as DiaryRouteImport } from './routes/diary'
@@ -18,6 +19,11 @@ import { Route as IndexRouteImport } from './routes/index'
 const TagsRoute = TagsRouteImport.update({
   id: '/tags',
   path: '/tags',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SensorsRoute = SensorsRouteImport.update({
+  id: '/sensors',
+  path: '/sensors',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PillsRoute = PillsRouteImport.update({
@@ -46,6 +52,7 @@ export interface FileRoutesByFullPath {
   '/diary': typeof DiaryRoute
   '/labs': typeof LabsRoute
   '/pills': typeof PillsRoute
+  '/sensors': typeof SensorsRoute
   '/tags': typeof TagsRoute
 }
 export interface FileRoutesByTo {
@@ -53,6 +60,7 @@ export interface FileRoutesByTo {
   '/diary': typeof DiaryRoute
   '/labs': typeof LabsRoute
   '/pills': typeof PillsRoute
+  '/sensors': typeof SensorsRoute
   '/tags': typeof TagsRoute
 }
 export interface FileRoutesById {
@@ -61,14 +69,15 @@ export interface FileRoutesById {
   '/diary': typeof DiaryRoute
   '/labs': typeof LabsRoute
   '/pills': typeof PillsRoute
+  '/sensors': typeof SensorsRoute
   '/tags': typeof TagsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/diary' | '/labs' | '/pills' | '/tags'
+  fullPaths: '/' | '/diary' | '/labs' | '/pills' | '/sensors' | '/tags'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/diary' | '/labs' | '/pills' | '/tags'
-  id: '__root__' | '/' | '/diary' | '/labs' | '/pills' | '/tags'
+  to: '/' | '/diary' | '/labs' | '/pills' | '/sensors' | '/tags'
+  id: '__root__' | '/' | '/diary' | '/labs' | '/pills' | '/sensors' | '/tags'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -76,6 +85,7 @@ export interface RootRouteChildren {
   DiaryRoute: typeof DiaryRoute
   LabsRoute: typeof LabsRoute
   PillsRoute: typeof PillsRoute
+  SensorsRoute: typeof SensorsRoute
   TagsRoute: typeof TagsRoute
 }
 
@@ -86,6 +96,13 @@ declare module '@tanstack/react-router' {
       path: '/tags'
       fullPath: '/tags'
       preLoaderRoute: typeof TagsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sensors': {
+      id: '/sensors'
+      path: '/sensors'
+      fullPath: '/sensors'
+      preLoaderRoute: typeof SensorsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/pills': {
@@ -124,6 +141,7 @@ const rootRouteChildren: RootRouteChildren = {
   DiaryRoute: DiaryRoute,
   LabsRoute: LabsRoute,
   PillsRoute: PillsRoute,
+  SensorsRoute: SensorsRoute,
   TagsRoute: TagsRoute,
 }
 export const routeTree = rootRouteImport

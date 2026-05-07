@@ -24,3 +24,5 @@ export type PillTag = PillPeriod['tags'][number];
 export type PillSearchResult = RouterOutput['pills']['search'][number];
 export type PillExtractionResult = RouterOutput['pills']['extractFromImages'];
 export type TagRecord = RouterOutput['tags']['list'][number];
+export type SensorsConfig = RouterOutput['sensors']['getConfig'];
+export type SensorRunResult = RouterOutput['sensors']['runExtractor'];
