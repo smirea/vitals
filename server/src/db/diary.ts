@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+
 import { generateText } from 'ai';
 import { asc, desc, eq, inArray, isNull, ne, or } from 'drizzle-orm';
 import { z } from 'zod';
@@ -21,6 +24,8 @@ import models, { transcribeAudioWithElevenLabs } from 'server/utils/models.ts';
 const optionalLocationNumberSchema = z.number().finite().nullable().optional();
 const NEARBY_LOCATION_DISTANCE_METERS = 100;
 const NOMINATIM_REVERSE_URL = 'https://nominatim.openstreetmap.org/reverse';
+const projectRoot = path.resolve(import.meta.dir, '..', '..', '..');
+const DIARY_RECOVERY_ROOT = path.join(projectRoot, 'data', 'diary');
 
 const nominatimReverseResponseSchema = z.object({
 	display_name: z.string().optional(),
@@ -67,6 +72,26 @@ export const diaryUploadVoiceMemoInputSchema = z.object({
 	location: diaryLocationInputSchema,
 });
 
+export const diaryStartVoiceMemoDraftInputSchema = diaryUploadVoiceMemoInputSchema.omit({
+	dataBase64: true,
+	durationSeconds: true,
+});
+
+export const diaryAppendVoiceMemoDraftInputSchema = z.object({
+	recoveryId: z.string().trim().min(1),
+	dataBase64: z.string().trim().min(1),
+});
+
+export const diaryFinishVoiceMemoDraftInputSchema = z.object({
+	recoveryId: z.string().trim().min(1),
+	transcript: z.string().trim().optional().default(''),
+	durationSeconds: z.number().finite().positive().nullable().optional(),
+});
+
+export const diaryProcessVoiceMemoRecoveryInputSchema = z.object({
+	recoveryId: z.string().trim().min(1),
+});
+
 export const diaryProcessVoiceMemoInputSchema = z.object({
 	voiceMemoId: z.number().int().positive(),
 	transcript: z.string().trim().optional(),
@@ -95,18 +120,294 @@ type DiaryReadDb = Pick<VitalsDatabase, 'select'>;
 type DiaryWriteDb = Pick<VitalsDatabase, 'select' | 'insert' | 'update'>;
 
 type DiaryRecord = ReturnType<typeof buildDiaryPayload>[number];
+type DiaryVoiceMemoRecoveryRecord = {
+	id: string;
+	createdAt: string;
+	updatedAt: string;
+	status:
+		| 'audio_saved'
+		| 'recording'
+		| 'saving_to_database'
+		| 'database_saved'
+		| 'transcribing'
+		| 'summarizing'
+		| 'completed'
+		| 'failed';
+	audioPath: string | null;
+	audioDeletedAt: string | null;
+	fileName: string;
+	mimeType: string;
+	durationSeconds: number | null;
+	audioBytes: number;
+	notes: string;
+	tagNames: string[];
+	location: z.infer<typeof diaryLocationInputSchema>;
+	transcript: string | null;
+	summary: string | null;
+	entryId: number | null;
+	voiceMemoId: number | null;
+	error: string | null;
+	steps: Array<{
+		at: string;
+		status: DiaryVoiceMemoRecoveryRecord['status'];
+		details?: Record<string, unknown>;
+	}>;
+};
 
 function normalizeOptionalText(value: string | null | undefined) {
 	const trimmed = value?.trim() ?? '';
 	return trimmed.length > 0 ? trimmed : null;
 }
 
-function nullableNumber(value: number | null | undefined) {
-	return Number.isFinite(value) ? value : null;
+function nullableNumber(value: number | null | undefined): number | null {
+	return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 function getErrorMessage(error: unknown) {
 	return error instanceof Error ? error.message : String(error);
+}
+
+function getDiaryRecoveryPaths(createdAt: string, fileName: string) {
+	const day = createdAt.slice(0, 10);
+	const id = createdAt.replace(/[:.]/g, '-');
+	const dirPath = path.join(DIARY_RECOVERY_ROOT, day);
+	const audioPath = path.join(dirPath, fileName);
+	const metadataPath = path.join(dirPath, `${id}.json`);
+
+	return {
+		id,
+		dirPath,
+		audioPath,
+		metadataPath,
+	};
+}
+
+function writeDiaryRecoveryRecord(metadataPath: string, record: DiaryVoiceMemoRecoveryRecord) {
+	fs.writeFileSync(metadataPath, `${JSON.stringify(record, null, 2)}\n`);
+}
+
+function createDiaryVoiceMemoRecovery(
+	input: z.infer<typeof diaryUploadVoiceMemoInputSchema>,
+	audioData: Buffer,
+) {
+	const createdAt = new Date().toISOString();
+	const paths = getDiaryRecoveryPaths(createdAt, input.fileName.trim());
+	fs.mkdirSync(paths.dirPath, { recursive: true });
+	fs.writeFileSync(paths.audioPath, audioData);
+
+	const record: DiaryVoiceMemoRecoveryRecord = {
+		id: paths.id,
+		createdAt,
+		updatedAt: createdAt,
+		status: 'audio_saved',
+		audioPath: paths.audioPath,
+		audioDeletedAt: null,
+		fileName: input.fileName.trim(),
+		mimeType: input.mimeType.trim(),
+		durationSeconds: nullableNumber(input.durationSeconds),
+		audioBytes: audioData.byteLength,
+		notes: input.notes.trim(),
+		tagNames: input.tagNames,
+		location: input.location,
+		transcript: normalizeOptionalText(input.transcript),
+		summary: null,
+		entryId: null,
+		voiceMemoId: null,
+		error: null,
+		steps: [
+			{
+				at: createdAt,
+				status: 'audio_saved',
+				details: {
+					audioPath: paths.audioPath,
+					audioBytes: audioData.byteLength,
+				},
+			},
+		],
+	};
+	writeDiaryRecoveryRecord(paths.metadataPath, record);
+
+	return {
+		...paths,
+		record,
+	};
+}
+
+function createDiaryVoiceMemoDraftRecovery(
+	input: z.infer<typeof diaryStartVoiceMemoDraftInputSchema>,
+) {
+	const createdAt = new Date().toISOString();
+	const paths = getDiaryRecoveryPaths(createdAt, input.fileName.trim());
+	fs.mkdirSync(paths.dirPath, { recursive: true });
+	fs.writeFileSync(paths.audioPath, '');
+
+	const record: DiaryVoiceMemoRecoveryRecord = {
+		id: paths.id,
+		createdAt,
+		updatedAt: createdAt,
+		status: 'recording',
+		audioPath: paths.audioPath,
+		audioDeletedAt: null,
+		fileName: input.fileName.trim(),
+		mimeType: input.mimeType.trim(),
+		durationSeconds: null,
+		audioBytes: 0,
+		notes: input.notes.trim(),
+		tagNames: input.tagNames,
+		location: input.location,
+		transcript: normalizeOptionalText(input.transcript),
+		summary: null,
+		entryId: null,
+		voiceMemoId: null,
+		error: null,
+		steps: [
+			{
+				at: createdAt,
+				status: 'recording',
+				details: {
+					audioPath: paths.audioPath,
+				},
+			},
+		],
+	};
+	writeDiaryRecoveryRecord(paths.metadataPath, record);
+
+	return {
+		...paths,
+		record,
+	};
+}
+
+function updateDiaryVoiceMemoRecovery(
+	metadataPath: string,
+	record: DiaryVoiceMemoRecoveryRecord,
+	status: DiaryVoiceMemoRecoveryRecord['status'],
+	updates: Partial<
+		Omit<DiaryVoiceMemoRecoveryRecord, 'id' | 'createdAt' | 'updatedAt' | 'status' | 'steps'>
+	> = {},
+	details: Record<string, unknown> = {},
+) {
+	const updatedAt = new Date().toISOString();
+	const nextRecord: DiaryVoiceMemoRecoveryRecord = {
+		...record,
+		...updates,
+		status,
+		updatedAt,
+		steps: [
+			...record.steps,
+			{
+				at: updatedAt,
+				status,
+				details,
+			},
+		],
+	};
+	writeDiaryRecoveryRecord(metadataPath, nextRecord);
+	return nextRecord;
+}
+
+function deleteDiaryRecoveryAudio(
+	metadataPath: string,
+	record: DiaryVoiceMemoRecoveryRecord,
+	audioPath: string,
+) {
+	fs.unlinkSync(audioPath);
+	return updateDiaryVoiceMemoRecovery(
+		metadataPath,
+		record,
+		'database_saved',
+		{
+			audioPath: null,
+			audioDeletedAt: new Date().toISOString(),
+		},
+		{
+			deletedAudioPath: audioPath,
+		},
+	);
+}
+
+function findDiaryRecoveryByVoiceMemoId(voiceMemoId: number) {
+	if (!fs.existsSync(DIARY_RECOVERY_ROOT)) {
+		return null;
+	}
+
+	for (const day of fs.readdirSync(DIARY_RECOVERY_ROOT)) {
+		const dayPath = path.join(DIARY_RECOVERY_ROOT, day);
+		if (!fs.statSync(dayPath).isDirectory()) {
+			continue;
+		}
+
+		for (const fileName of fs.readdirSync(dayPath)) {
+			if (!fileName.endsWith('.json')) {
+				continue;
+			}
+
+			const metadataPath = path.join(dayPath, fileName);
+			const record = JSON.parse(
+				fs.readFileSync(metadataPath, 'utf8'),
+			) as DiaryVoiceMemoRecoveryRecord;
+			if (record.voiceMemoId === voiceMemoId) {
+				return {
+					metadataPath,
+					record,
+				};
+			}
+		}
+	}
+
+	return null;
+}
+
+function readDiaryRecoveryRecord(metadataPath: string) {
+	return JSON.parse(fs.readFileSync(metadataPath, 'utf8')) as DiaryVoiceMemoRecoveryRecord;
+}
+
+function findDiaryRecoveryById(recoveryId: string) {
+	const metadataPath = path.join(
+		DIARY_RECOVERY_ROOT,
+		recoveryId.slice(0, 10),
+		`${recoveryId}.json`,
+	);
+	if (!fs.existsSync(metadataPath)) {
+		throw new Error(`Diary recovery ${recoveryId} does not exist.`);
+	}
+
+	return {
+		metadataPath,
+		record: readDiaryRecoveryRecord(metadataPath),
+	};
+}
+
+function getDiaryRecoveryMetadataRecords() {
+	if (!fs.existsSync(DIARY_RECOVERY_ROOT)) {
+		return [];
+	}
+
+	const records: Array<{
+		metadataPath: string;
+		record: DiaryVoiceMemoRecoveryRecord;
+	}> = [];
+
+	for (const day of fs.readdirSync(DIARY_RECOVERY_ROOT)) {
+		const dayPath = path.join(DIARY_RECOVERY_ROOT, day);
+		if (!fs.statSync(dayPath).isDirectory()) {
+			continue;
+		}
+
+		for (const fileName of fs.readdirSync(dayPath)) {
+			if (!fileName.endsWith('.json')) {
+				continue;
+			}
+
+			const metadataPath = path.join(dayPath, fileName);
+			records.push({
+				metadataPath,
+				record: readDiaryRecoveryRecord(metadataPath),
+			});
+		}
+	}
+
+	return records;
 }
 
 function buildDiaryPayload(args: {
@@ -557,6 +858,27 @@ export function listPendingDiaryVoiceMemos(db: VitalsDatabase) {
 	return getPendingVoiceMemoRecords(db);
 }
 
+export function listPendingDiaryVoiceMemoRecoveries(_db: VitalsDatabase) {
+	return getDiaryRecoveryMetadataRecords()
+		.filter(({ record }) => record.status !== 'completed' && !record.voiceMemoId)
+		.sort((left, right) => right.record.createdAt.localeCompare(left.record.createdAt))
+		.map(({ metadataPath, record }) => ({
+			id: record.id,
+			metadataPath,
+			createdAt: record.createdAt,
+			updatedAt: record.updatedAt,
+			status: record.status,
+			fileName: record.fileName,
+			mimeType: record.mimeType,
+			durationSeconds: record.durationSeconds,
+			audioBytes: record.audioBytes,
+			audioPath: record.audioPath,
+			transcript: record.transcript,
+			error: record.error,
+			steps: record.steps,
+		}));
+}
+
 async function ensureMissingLocationNames(db: VitalsDatabase) {
 	const missingLocationRows = db
 		.select()
@@ -643,51 +965,243 @@ export async function saveDiaryVoiceMemo(
 	db: VitalsDatabase,
 	input: z.infer<typeof diaryUploadVoiceMemoInputSchema>,
 ) {
-	const locationId = await resolveLocation(db, input.location);
 	const audioData = Buffer.from(input.dataBase64, 'base64');
-	const { entryId, voiceMemoId } = db.transaction(tx => {
-		const insertedEntry = tx
-			.insert(diaryEntries)
-			.values({
-				createdAt: new Date().toISOString(),
-				notes: input.notes.trim(),
-				locationId,
-			})
-			.returning({
-				id: diaryEntries.id,
-			})
-			.get();
+	const recovery = createDiaryVoiceMemoRecovery(input, audioData);
+	let recoveryRecord = recovery.record;
 
-		insertEntryTags(tx, insertedEntry.id, input.tagNames);
+	try {
+		recoveryRecord = updateDiaryVoiceMemoRecovery(
+			recovery.metadataPath,
+			recoveryRecord,
+			'saving_to_database',
+		);
+		const locationId = await resolveLocation(db, input.location);
+		const { entryId, voiceMemoId } = db.transaction(tx => {
+			const insertedEntry = tx
+				.insert(diaryEntries)
+				.values({
+					createdAt: new Date().toISOString(),
+					notes: input.notes.trim(),
+					locationId,
+				})
+				.returning({
+					id: diaryEntries.id,
+				})
+				.get();
 
-		const insertedVoiceMemo = tx
-			.insert(diaryVoiceMemos)
-			.values({
+			insertEntryTags(tx, insertedEntry.id, input.tagNames);
+
+			const insertedVoiceMemo = tx
+				.insert(diaryVoiceMemos)
+				.values({
+					entryId: insertedEntry.id,
+					createdAt: new Date().toISOString(),
+					fileName: input.fileName.trim(),
+					mimeType: input.mimeType.trim(),
+					audioData,
+					durationSeconds: nullableNumber(input.durationSeconds),
+					transcriptionStatus: 'uploaded',
+					transcript: normalizeOptionalText(input.transcript),
+					transcriptLanguage: normalizeOptionalText(input.transcript) ? 'English' : null,
+				})
+				.returning({
+					id: diaryVoiceMemos.id,
+				})
+				.get();
+
+			return {
 				entryId: insertedEntry.id,
-				createdAt: new Date().toISOString(),
-				fileName: input.fileName.trim(),
-				mimeType: input.mimeType.trim(),
-				audioData,
-				durationSeconds: nullableNumber(input.durationSeconds),
-				transcriptionStatus: 'uploaded',
-				transcript: normalizeOptionalText(input.transcript),
-				transcriptLanguage: normalizeOptionalText(input.transcript) ? 'English' : null,
-			})
-			.returning({
-				id: diaryVoiceMemos.id,
-			})
-			.get();
+				voiceMemoId: insertedVoiceMemo.id,
+			};
+		});
+
+		recoveryRecord = updateDiaryVoiceMemoRecovery(
+			recovery.metadataPath,
+			recoveryRecord,
+			'database_saved',
+			{
+				entryId,
+				voiceMemoId,
+			},
+			{
+				entryId,
+				voiceMemoId,
+			},
+		);
+		if (fs.existsSync(recovery.audioPath)) {
+			recoveryRecord = deleteDiaryRecoveryAudio(
+				recovery.metadataPath,
+				recoveryRecord,
+				recovery.audioPath,
+			);
+		}
 
 		return {
-			entryId: insertedEntry.id,
-			voiceMemoId: insertedVoiceMemo.id,
+			entryId,
+			voiceMemoId,
 		};
-	});
+	} catch (error) {
+		updateDiaryVoiceMemoRecovery(
+			recovery.metadataPath,
+			recoveryRecord,
+			'failed',
+			{
+				error: getErrorMessage(error),
+			},
+			{
+				error: getErrorMessage(error),
+			},
+		);
+		throw error;
+	}
+}
+
+export function startDiaryVoiceMemoDraft(
+	_db: VitalsDatabase,
+	input: z.infer<typeof diaryStartVoiceMemoDraftInputSchema>,
+) {
+	const recovery = createDiaryVoiceMemoDraftRecovery(input);
+	return {
+		recoveryId: recovery.record.id,
+		metadataPath: recovery.metadataPath,
+		audioPath: recovery.audioPath,
+	};
+}
+
+export function appendDiaryVoiceMemoDraft(
+	_db: VitalsDatabase,
+	input: z.infer<typeof diaryAppendVoiceMemoDraftInputSchema>,
+) {
+	const recovery = findDiaryRecoveryById(input.recoveryId);
+	const audioPath = recovery.record.audioPath;
+	if (!audioPath) {
+		throw new Error(`Diary recovery ${input.recoveryId} no longer has an audio path.`);
+	}
+
+	const chunk = Buffer.from(input.dataBase64, 'base64');
+	fs.appendFileSync(audioPath, chunk);
+	const audioBytes = recovery.record.audioBytes + chunk.byteLength;
+	const record = updateDiaryVoiceMemoRecovery(
+		recovery.metadataPath,
+		recovery.record,
+		'recording',
+		{
+			audioBytes,
+		},
+		{
+			chunkBytes: chunk.byteLength,
+			audioBytes,
+		},
+	);
 
 	return {
-		entryId,
-		voiceMemoId,
+		recoveryId: record.id,
+		audioBytes: record.audioBytes,
 	};
+}
+
+export async function finishDiaryVoiceMemoDraft(
+	db: VitalsDatabase,
+	input: z.infer<typeof diaryFinishVoiceMemoDraftInputSchema>,
+) {
+	const recovery = findDiaryRecoveryById(input.recoveryId);
+	let recoveryRecord = recovery.record;
+	try {
+		if (!recoveryRecord.audioPath) {
+			throw new Error(`Diary recovery ${input.recoveryId} no longer has an audio path.`);
+		}
+
+		const audioData = fs.readFileSync(recoveryRecord.audioPath);
+		if (audioData.byteLength === 0) {
+			throw new Error(`Diary recovery ${input.recoveryId} did not receive audio.`);
+		}
+
+		recoveryRecord = updateDiaryVoiceMemoRecovery(
+			recovery.metadataPath,
+			recoveryRecord,
+			'saving_to_database',
+			{
+				audioBytes: audioData.byteLength,
+				durationSeconds: nullableNumber(input.durationSeconds),
+				transcript: normalizeOptionalText(input.transcript) ?? recoveryRecord.transcript,
+			},
+			{
+				audioBytes: audioData.byteLength,
+			},
+		);
+		const locationId = await resolveLocation(db, recoveryRecord.location);
+		const inserted = db.transaction(tx => {
+			const insertedEntry = tx
+				.insert(diaryEntries)
+				.values({
+					createdAt: recoveryRecord.createdAt,
+					notes: recoveryRecord.notes,
+					locationId,
+				})
+				.returning({
+					id: diaryEntries.id,
+				})
+				.get();
+
+			insertEntryTags(tx, insertedEntry.id, recoveryRecord.tagNames);
+
+			const insertedVoiceMemo = tx
+				.insert(diaryVoiceMemos)
+				.values({
+					entryId: insertedEntry.id,
+					createdAt: recoveryRecord.createdAt,
+					fileName: recoveryRecord.fileName,
+					mimeType: recoveryRecord.mimeType,
+					audioData,
+					durationSeconds: recoveryRecord.durationSeconds,
+					transcriptionStatus: 'uploaded',
+					transcript: recoveryRecord.transcript,
+					transcriptLanguage: recoveryRecord.transcript ? 'English' : null,
+				})
+				.returning({
+					id: diaryVoiceMemos.id,
+				})
+				.get();
+
+			return {
+				entryId: insertedEntry.id,
+				voiceMemoId: insertedVoiceMemo.id,
+			};
+		});
+
+		recoveryRecord = updateDiaryVoiceMemoRecovery(
+			recovery.metadataPath,
+			recoveryRecord,
+			'database_saved',
+			{
+				entryId: inserted.entryId,
+				voiceMemoId: inserted.voiceMemoId,
+			},
+			inserted,
+		);
+		const audioPath = recoveryRecord.audioPath;
+		if (audioPath && fs.existsSync(audioPath)) {
+			recoveryRecord = deleteDiaryRecoveryAudio(recovery.metadataPath, recoveryRecord, audioPath);
+		}
+
+		return {
+			entryId: inserted.entryId,
+			voiceMemoId: inserted.voiceMemoId,
+		};
+	} catch (error) {
+		updateDiaryVoiceMemoRecovery(
+			recovery.metadataPath,
+			recoveryRecord,
+			'failed',
+			{
+				error: getErrorMessage(error),
+			},
+			{
+				error: getErrorMessage(error),
+			},
+		);
+		throw error;
+	}
 }
 
 export async function processSavedDiaryVoiceMemo(
@@ -709,6 +1223,109 @@ export async function processSavedDiaryVoiceMemo(
 	const record = getDiaryRecord(db, voiceMemo.entryId);
 	if (!record) {
 		throw new Error(`Diary entry ${voiceMemo.entryId} was not found after voice memo processing.`);
+	}
+
+	return record;
+}
+
+export async function processDiaryVoiceMemoRecovery(
+	db: VitalsDatabase,
+	input: z.infer<typeof diaryProcessVoiceMemoRecoveryInputSchema>,
+) {
+	const recovery = findDiaryRecoveryById(input.recoveryId);
+	const resolvedMetadataPath = recovery.metadataPath;
+	let recoveryRecord = readDiaryRecoveryRecord(resolvedMetadataPath);
+	let voiceMemoId = recoveryRecord.voiceMemoId;
+
+	if (!voiceMemoId) {
+		if (!recoveryRecord.audioPath) {
+			throw new Error(`Diary recovery ${resolvedMetadataPath} has no audio path.`);
+		}
+
+		const audioData = fs.readFileSync(recoveryRecord.audioPath);
+		recoveryRecord = updateDiaryVoiceMemoRecovery(
+			resolvedMetadataPath,
+			recoveryRecord,
+			'saving_to_database',
+			{
+				audioBytes: audioData.byteLength,
+			},
+			{
+				audioPath: recoveryRecord.audioPath,
+				audioBytes: audioData.byteLength,
+			},
+		);
+		const locationId = await resolveLocation(db, recoveryRecord.location);
+		const inserted = db.transaction(tx => {
+			const insertedEntry = tx
+				.insert(diaryEntries)
+				.values({
+					createdAt: recoveryRecord.createdAt,
+					notes: recoveryRecord.notes,
+					locationId,
+				})
+				.returning({
+					id: diaryEntries.id,
+				})
+				.get();
+
+			insertEntryTags(tx, insertedEntry.id, recoveryRecord.tagNames);
+
+			const insertedVoiceMemo = tx
+				.insert(diaryVoiceMemos)
+				.values({
+					entryId: insertedEntry.id,
+					createdAt: recoveryRecord.createdAt,
+					fileName: recoveryRecord.fileName,
+					mimeType: recoveryRecord.mimeType,
+					audioData,
+					durationSeconds: recoveryRecord.durationSeconds,
+					transcriptionStatus: 'uploaded',
+					transcript: recoveryRecord.transcript,
+					transcriptLanguage: recoveryRecord.transcript ? 'English' : null,
+				})
+				.returning({
+					id: diaryVoiceMemos.id,
+				})
+				.get();
+
+			return {
+				entryId: insertedEntry.id,
+				voiceMemoId: insertedVoiceMemo.id,
+			};
+		});
+
+		voiceMemoId = inserted.voiceMemoId;
+		recoveryRecord = updateDiaryVoiceMemoRecovery(
+			resolvedMetadataPath,
+			recoveryRecord,
+			'database_saved',
+			{
+				entryId: inserted.entryId,
+				voiceMemoId,
+			},
+			inserted,
+		);
+		const audioPath = recoveryRecord.audioPath;
+		if (audioPath && fs.existsSync(audioPath)) {
+			recoveryRecord = deleteDiaryRecoveryAudio(resolvedMetadataPath, recoveryRecord, audioPath);
+		}
+	}
+
+	await processDiaryVoiceMemo(db, voiceMemoId, recoveryRecord.transcript ?? undefined);
+	const voiceMemo = db
+		.select()
+		.from(diaryVoiceMemos)
+		.where(eq(diaryVoiceMemos.id, voiceMemoId))
+		.get();
+
+	if (!voiceMemo) {
+		throw new Error(`Voice memo ${voiceMemoId} was not found after recovery processing.`);
+	}
+
+	const record = getDiaryRecord(db, voiceMemo.entryId);
+	if (!record) {
+		throw new Error(`Diary entry ${voiceMemo.entryId} was not found after recovery processing.`);
 	}
 
 	return record;
@@ -736,6 +1353,21 @@ export function failDiaryVoiceMemo(
 		})
 		.where(eq(diaryVoiceMemos.id, input.voiceMemoId))
 		.run();
+
+	const recovery = findDiaryRecoveryByVoiceMemoId(input.voiceMemoId);
+	if (recovery) {
+		updateDiaryVoiceMemoRecovery(
+			recovery.metadataPath,
+			recovery.record,
+			'failed',
+			{
+				error: input.error,
+			},
+			{
+				error: input.error,
+			},
+		);
+	}
 
 	return getPendingVoiceMemoRecords(db);
 }
@@ -820,6 +1452,8 @@ async function processDiaryVoiceMemo(
 	voiceMemoId: number,
 	streamingTranscript: string | undefined,
 ) {
+	const recovery = findDiaryRecoveryByVoiceMemoId(voiceMemoId);
+	let recoveryRecord = recovery?.record ?? null;
 	const voiceMemo = db
 		.select()
 		.from(diaryVoiceMemos)
@@ -844,6 +1478,19 @@ async function processDiaryVoiceMemo(
 			})
 			.where(eq(diaryVoiceMemos.id, voiceMemoId))
 			.run();
+		if (recovery && recoveryRecord) {
+			recoveryRecord = updateDiaryVoiceMemoRecovery(
+				recovery.metadataPath,
+				recoveryRecord,
+				'transcribing',
+				{
+					error: null,
+				},
+				{
+					hasStreamingTranscript: Boolean(normalizeOptionalText(streamingTranscript)),
+				},
+			);
+		}
 
 		const transcript =
 			normalizeOptionalText(streamingTranscript) ??
@@ -871,6 +1518,20 @@ async function processDiaryVoiceMemo(
 			})
 			.where(eq(diaryVoiceMemos.id, voiceMemoId))
 			.run();
+		if (recovery && recoveryRecord) {
+			recoveryRecord = updateDiaryVoiceMemoRecovery(
+				recovery.metadataPath,
+				recoveryRecord,
+				'summarizing',
+				{
+					transcript,
+					error: null,
+				},
+				{
+					transcriptChars: transcript.length,
+				},
+			);
+		}
 
 		const summary = await summarizeDiaryEntry({ notes: entry.notes, transcript });
 
@@ -883,6 +1544,20 @@ async function processDiaryVoiceMemo(
 			})
 			.where(eq(diaryVoiceMemos.id, voiceMemoId))
 			.run();
+		if (recovery && recoveryRecord) {
+			updateDiaryVoiceMemoRecovery(
+				recovery.metadataPath,
+				recoveryRecord,
+				'completed',
+				{
+					summary,
+					error: null,
+				},
+				{
+					summaryChars: summary.length,
+				},
+			);
+		}
 	} catch (error) {
 		db.update(diaryVoiceMemos)
 			.set({
@@ -892,6 +1567,19 @@ async function processDiaryVoiceMemo(
 			})
 			.where(eq(diaryVoiceMemos.id, voiceMemoId))
 			.run();
+		if (recovery && recoveryRecord) {
+			updateDiaryVoiceMemoRecovery(
+				recovery.metadataPath,
+				recoveryRecord,
+				'failed',
+				{
+					error: getErrorMessage(error),
+				},
+				{
+					error: getErrorMessage(error),
+				},
+			);
+		}
 		throw error;
 	}
 }

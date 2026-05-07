@@ -13,6 +13,8 @@ export type LabImportDocument = RouterOutput['labs']['listDocuments'][number];
 export type DiaryEntry = RouterOutput['diary']['list'][number];
 export type DiaryVoiceMemo = DiaryEntry['voiceMemos'][number];
 export type DiaryPendingVoiceMemo = RouterOutput['diary']['listPendingVoiceMemos'][number];
+export type DiaryPendingVoiceMemoRecovery =
+	RouterOutput['diary']['listPendingVoiceMemoRecoveries'][number];
 export type PillsDashboardPayload = RouterOutput['pills']['getDashboard'];
 export type PillRecord = PillsDashboardPayload['pills'][number];
 export type PillComponent = PillRecord['components'][number];

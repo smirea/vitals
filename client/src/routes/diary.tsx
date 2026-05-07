@@ -26,7 +26,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-import type { DiaryEntry, DiaryPendingVoiceMemo, DiaryVoiceMemo } from '../utils/api';
+import type {
+	DiaryEntry,
+	DiaryPendingVoiceMemo,
+	DiaryPendingVoiceMemoRecovery,
+	DiaryVoiceMemo,
+} from '../utils/api';
 import { PageNav } from '../components/PageNav';
 import { useTRPC } from '../utils/trpc';
 
@@ -88,6 +93,7 @@ function DiaryRouteComponent() {
 	const [expandedRowKeys, setExpandedRowKeys] = useState<Key[]>([]);
 	const [deletingEntryId, setDeletingEntryId] = useState<number | null>(null);
 	const [reprocessingVoiceMemoId, setReprocessingVoiceMemoId] = useState<number | null>(null);
+	const [reprocessingRecoveryId, setReprocessingRecoveryId] = useState<string | null>(null);
 	const [deletingVoiceMemoId, setDeletingVoiceMemoId] = useState<number | null>(null);
 	const [addingTagsEntryId, setAddingTagsEntryId] = useState<number | null>(null);
 	const [addingTagsVoiceMemoId, setAddingTagsVoiceMemoId] = useState<number | null>(null);
@@ -98,7 +104,8 @@ function DiaryRouteComponent() {
 	const audioContextRef = useRef<AudioContext | null>(null);
 	const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
 	const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
-	const recordingChunksRef = useRef<Blob[]>([]);
+	const recordingRecoveryIdRef = useRef<string | null>(null);
+	const recordingChunkUploadRef = useRef<Promise<void>>(Promise.resolve());
 	const recordingStartedAtRef = useRef<number | null>(null);
 	const finalizedTranscriptRef = useRef('');
 	const interimTranscriptRef = useRef('');
@@ -106,6 +113,9 @@ function DiaryRouteComponent() {
 
 	const entriesQuery = useQuery(trpc.diary.list.queryOptions());
 	const pendingVoiceMemosQuery = useQuery(trpc.diary.listPendingVoiceMemos.queryOptions());
+	const pendingVoiceMemoRecoveriesQuery = useQuery(
+		trpc.diary.listPendingVoiceMemoRecoveries.queryOptions(),
+	);
 	const tagsQuery = useQuery(trpc.tags.list.queryOptions());
 
 	const createEntryMutation = useMutation({
@@ -134,6 +144,30 @@ function DiaryRouteComponent() {
 		},
 	});
 
+	const startVoiceMemoDraftMutation = useMutation({
+		...trpc.diary.startVoiceMemoDraft.mutationOptions(),
+		onSuccess: async () => {
+			await invalidateDiary();
+		},
+		onSettled: () => {
+			void invalidateDiary();
+		},
+	});
+
+	const appendVoiceMemoDraftMutation = useMutation({
+		...trpc.diary.appendVoiceMemoDraft.mutationOptions(),
+	});
+
+	const finishVoiceMemoDraftMutation = useMutation({
+		...trpc.diary.finishVoiceMemoDraft.mutationOptions(),
+		onSuccess: async () => {
+			await invalidateDiary();
+		},
+		onSettled: () => {
+			void invalidateDiary();
+		},
+	});
+
 	const processVoiceMemoMutation = useMutation({
 		...trpc.diary.processVoiceMemo.mutationOptions(),
 		onSuccess: async () => {
@@ -145,6 +179,19 @@ function DiaryRouteComponent() {
 		onError: showError,
 		onSettled: () => {
 			setReprocessingVoiceMemoId(null);
+			void invalidateDiary();
+		},
+	});
+
+	const processVoiceMemoRecoveryMutation = useMutation({
+		...trpc.diary.processVoiceMemoRecovery.mutationOptions(),
+		onSuccess: async () => {
+			await invalidateDiary();
+			message.success('Voice memo saved.');
+		},
+		onError: showError,
+		onSettled: () => {
+			setReprocessingRecoveryId(null);
 			void invalidateDiary();
 		},
 	});
@@ -271,12 +318,16 @@ function DiaryRouteComponent() {
 	const isSaving =
 		createEntryMutation.isPending ||
 		saveVoiceMemoMutation.isPending ||
+		startVoiceMemoDraftMutation.isPending ||
+		finishVoiceMemoDraftMutation.isPending ||
 		processVoiceMemoMutation.isPending;
 	const canAddEntry = notes.trim().length > 0 && currentLocation !== null && !isSaving;
 	const entries = entriesQuery.data ?? [];
 	const pendingVoiceMemos = pendingVoiceMemosQuery.data ?? [];
+	const pendingVoiceMemoRecoveries = pendingVoiceMemoRecoveriesQuery.data ?? [];
 	const columns = getColumns();
 	const pendingVoiceMemoColumns = getPendingVoiceMemoColumns();
+	const pendingVoiceMemoRecoveryColumns = getPendingVoiceMemoRecoveryColumns();
 
 	function getRequiredLocation() {
 		if (!currentLocation) {
@@ -327,24 +378,36 @@ function DiaryRouteComponent() {
 			await startPcmStreaming(stream);
 			const mimeType = getPreferredRecordingMimeType();
 			const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+			const resolvedMimeType = recorder.mimeType || mimeType || 'audio/webm';
+			const extension = extensionFromMimeType(resolvedMimeType);
+			const fileName = `diary-${new Date().toISOString().replace(/[:.]/g, '-')}.${extension}`;
+			const draft = await startVoiceMemoDraftMutation.mutateAsync({
+				notes: '',
+				transcript: '',
+				tagNames,
+				location: getRequiredLocation(),
+				fileName,
+				mimeType: resolvedMimeType,
+			});
 
-			recordingChunksRef.current = [];
+			recordingRecoveryIdRef.current = draft.recoveryId;
+			recordingChunkUploadRef.current = Promise.resolve();
 			recordingStartedAtRef.current = Date.now();
 			mediaRecorderRef.current = recorder;
 
 			recorder.ondataavailable = event => {
 				if (event.data.size > 0) {
-					recordingChunksRef.current.push(event.data);
+					queueRecordingChunkUpload(event.data);
 				}
 			};
 			recorder.onerror = event => {
 				showError(event.error);
 			};
 			recorder.onstop = () => {
-				void uploadStoppedRecording(recorder.mimeType || mimeType || 'audio/webm');
+				void uploadStoppedRecording();
 			};
 
-			recorder.start();
+			recorder.start(1_000);
 			setIsRecording(true);
 		} catch (error) {
 			showError(error);
@@ -366,30 +429,37 @@ function DiaryRouteComponent() {
 		recorder.stop();
 	}
 
-	async function uploadStoppedRecording(mimeType: string) {
+	function queueRecordingChunkUpload(blob: Blob) {
+		const recoveryId = recordingRecoveryIdRef.current;
+		if (!recoveryId) {
+			throw new Error('Recording recovery id is missing.');
+		}
+
+		recordingChunkUploadRef.current = recordingChunkUploadRef.current.then(async () => {
+			await appendVoiceMemoDraftMutation.mutateAsync({
+				recoveryId,
+				dataBase64: await blobToBase64(blob),
+			});
+		});
+		void recordingChunkUploadRef.current.catch(showError);
+	}
+
+	async function uploadStoppedRecording() {
 		let savedVoiceMemoId: number | null = null;
 		try {
 			setIsParsingVoiceMemo(true);
-			const chunks = recordingChunksRef.current;
-			if (chunks.length === 0) {
-				throw new Error('Recording did not produce any audio data.');
+			const recoveryId = recordingRecoveryIdRef.current;
+			if (!recoveryId) {
+				throw new Error('Recording recovery id is missing.');
 			}
 
-			const blob = new Blob(chunks, { type: mimeType });
+			await recordingChunkUploadRef.current;
 			const startedAt = recordingStartedAtRef.current ?? Date.now();
 			const durationSeconds = Math.max((Date.now() - startedAt) / 1000, 0.1);
-			const dataBase64 = await blobToBase64(blob);
-			const extension = extensionFromMimeType(mimeType);
-			const fileName = `diary-${new Date().toISOString().replace(/[:.]/g, '-')}.${extension}`;
 
-			const savedVoiceMemo = await saveVoiceMemoMutation.mutateAsync({
-				notes: '',
+			const savedVoiceMemo = await finishVoiceMemoDraftMutation.mutateAsync({
+				recoveryId,
 				transcript: getDisplayedStreamingTranscript(),
-				tagNames,
-				location: getRequiredLocation(),
-				fileName,
-				mimeType,
-				dataBase64,
 				durationSeconds,
 			});
 			savedVoiceMemoId = savedVoiceMemo.voiceMemoId;
@@ -413,7 +483,8 @@ function DiaryRouteComponent() {
 				}
 			}
 		} finally {
-			recordingChunksRef.current = [];
+			recordingRecoveryIdRef.current = null;
+			recordingChunkUploadRef.current = Promise.resolve();
 			recordingStartedAtRef.current = null;
 			mediaRecorderRef.current = null;
 			transcriptDoneRef.current = null;
@@ -593,6 +664,11 @@ function DiaryRouteComponent() {
 		processVoiceMemoMutation.mutate({ voiceMemoId });
 	}
 
+	function handleReprocessVoiceMemoRecovery(recoveryId: string) {
+		setReprocessingRecoveryId(recoveryId);
+		processVoiceMemoRecoveryMutation.mutate({ recoveryId });
+	}
+
 	function handleDeleteVoiceMemo(voiceMemoId: number) {
 		setDeletingVoiceMemoId(voiceMemoId);
 		deleteVoiceMemoMutation.mutate({ voiceMemoId });
@@ -731,6 +807,27 @@ function DiaryRouteComponent() {
 					</Card>
 				) : null}
 
+				{pendingVoiceMemoRecoveries.length > 0 ? (
+					<Card
+						title='Pending recovery memos'
+						extra={
+							<Typography.Text type='secondary'>
+								{pendingVoiceMemoRecoveries.length} pending
+							</Typography.Text>
+						}
+					>
+						<Table<DiaryPendingVoiceMemoRecovery>
+							rowKey={row => row.id}
+							size='small'
+							loading={pendingVoiceMemoRecoveriesQuery.isLoading}
+							columns={pendingVoiceMemoRecoveryColumns}
+							dataSource={pendingVoiceMemoRecoveries}
+							pagination={false}
+							scroll={{ x: 1200 }}
+						/>
+					</Card>
+				) : null}
+
 				<Card
 					title='Diary'
 					extra={<Typography.Text type='secondary'>{entries.length} entries</Typography.Text>}
@@ -754,6 +851,89 @@ function DiaryRouteComponent() {
 			</div>
 		</main>
 	);
+
+	function getPendingVoiceMemoRecoveryColumns(): TableColumnsType<DiaryPendingVoiceMemoRecovery> {
+		return [
+			{
+				title: 'When',
+				dataIndex: 'createdAt',
+				key: 'createdAt',
+				width: 180,
+				render: (createdAt: string) => (
+					<Space direction='vertical' size={0}>
+						<Typography.Text>{formatDiaryDate(createdAt)}</Typography.Text>
+						<Typography.Text type='secondary'>{formatDiaryTime(createdAt)}</Typography.Text>
+					</Space>
+				),
+			},
+			{
+				title: 'Status',
+				dataIndex: 'status',
+				key: 'status',
+				width: 140,
+				render: (status: string) => <Tag>{status}</Tag>,
+			},
+			{
+				title: 'Metadata',
+				key: 'metadata',
+				width: 360,
+				render: (_: unknown, row: DiaryPendingVoiceMemoRecovery) => (
+					<Space direction='vertical' size={0}>
+						<Typography.Text>{row.fileName}</Typography.Text>
+						<Typography.Text type='secondary'>{row.mimeType}</Typography.Text>
+						<Typography.Text type='secondary'>
+							{formatDuration(row.durationSeconds)} · {formatBytes(row.audioBytes)}
+						</Typography.Text>
+						<Typography.Text type='secondary'>{row.metadataPath}</Typography.Text>
+						{row.audioPath ? (
+							<Typography.Text type='secondary'>{row.audioPath}</Typography.Text>
+						) : null}
+					</Space>
+				),
+			},
+			{
+				title: 'Transcript',
+				key: 'transcript',
+				width: 320,
+				render: (_: unknown, row: DiaryPendingVoiceMemoRecovery) => (
+					<MarkdownBlock emptyText='No transcript'>{row.transcript}</MarkdownBlock>
+				),
+			},
+			{
+				title: 'Error',
+				key: 'error',
+				width: 360,
+				render: (_: unknown, row: DiaryPendingVoiceMemoRecovery) =>
+					row.error ? (
+						<details>
+							<summary>{row.error.split('\n')[0]}</summary>
+							<pre className='diary-error-details'>{row.error}</pre>
+						</details>
+					) : (
+						<Typography.Text type='secondary'>None</Typography.Text>
+					),
+			},
+			{
+				title: '',
+				key: 'actions',
+				width: 130,
+				align: 'right',
+				render: (_: unknown, row: DiaryPendingVoiceMemoRecovery) => (
+					<Button
+						size='small'
+						icon={<ReloadOutlined />}
+						loading={
+							processVoiceMemoRecoveryMutation.isPending && reprocessingRecoveryId === row.id
+						}
+						disabled={processVoiceMemoRecoveryMutation.isPending || isRecording}
+						onClick={() => handleReprocessVoiceMemoRecovery(row.id)}
+					>
+						Reprocess
+					</Button>
+				),
+			},
+		];
+	}
 
 	function getPendingVoiceMemoColumns(): TableColumnsType<DiaryPendingVoiceMemo> {
 		return [

@@ -342,6 +342,7 @@ startLabProcessor();
 const server = Bun.serve<DiarySttSocketData>({
 	development: true,
 	port,
+	idleTimeout: 255,
 	routes: {
 		'/status': Response.json({ ok: true }),
 		'/diary/stt/live': (req: Request, server: Bun.Server<DiarySttSocketData>) => {
