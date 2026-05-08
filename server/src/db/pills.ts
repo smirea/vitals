@@ -6,7 +6,6 @@ import type { VitalsDatabase } from 'server/db/client.ts';
 import { ensureTagsByNames } from 'server/db/tags.ts';
 import {
 	type PillComponentRow,
-	type PillImageRow,
 	type PillPeriodRow,
 	type PillPeriodTagRow,
 	type PillRow,
@@ -20,9 +19,11 @@ import {
 	pills,
 	tags,
 } from 'server/db/schema.ts';
+import { getStaticImageUrl } from 'server/utils/getStaticImageUrl.ts';
 import models from 'server/utils/models';
 
 const pillImageInputSchema = z.object({
+	id: z.number().int().positive().optional(),
 	fileName: z.string().trim().min(1),
 	dataUrl: z.string().trim().min(1),
 });
@@ -146,7 +147,13 @@ const PILL_IMAGE_EXTRACTION_TIMEOUT_MS = 45_000;
 
 type PillRecord = ReturnType<typeof buildPillsPayload>[number];
 type PillsReadDb = Pick<VitalsDatabase, 'select'>;
+type PillsWriteDb = Pick<VitalsDatabase, 'delete' | 'insert' | 'select' | 'update'>;
 type PillImageExtraction = z.infer<typeof pillImageExtractionSchema>;
+type PillImageMetadataRow = {
+	id: number;
+	pillId: number;
+	fileName: string;
+};
 
 function getTodayDateString() {
 	const date = new Date();
@@ -264,6 +271,60 @@ function parseDataUrl(dataUrl: string) {
 	};
 }
 
+function syncPillImages(args: {
+	db: PillsWriteDb;
+	pillId: number;
+	images: z.infer<typeof pillImageInputSchema>[];
+}) {
+	const existingImages = args.db
+		.select({
+			id: pillImages.id,
+		})
+		.from(pillImages)
+		.where(eq(pillImages.pillId, args.pillId))
+		.all();
+	const existingImageIds = new Set(existingImages.map(image => image.id));
+	const retainedImageIds = new Set<number>();
+
+	for (const [index, image] of args.images.entries()) {
+		if (image.dataUrl.startsWith('data:')) {
+			args.db
+				.insert(pillImages)
+				.values({
+					pillId: args.pillId,
+					sortOrder: index,
+					fileName: image.fileName,
+					dataUrl: image.dataUrl,
+				})
+				.run();
+			continue;
+		}
+
+		if (!image.id) {
+			throw new Error(`Image ${image.fileName} must include a base64 data URL.`);
+		}
+		if (!existingImageIds.has(image.id)) {
+			throw new Error(`Pill image ${image.id} does not belong to pill ${args.pillId}.`);
+		}
+
+		retainedImageIds.add(image.id);
+		args.db
+			.update(pillImages)
+			.set({
+				sortOrder: index,
+				fileName: image.fileName,
+			})
+			.where(and(eq(pillImages.id, image.id), eq(pillImages.pillId, args.pillId)))
+			.run();
+	}
+
+	for (const imageId of existingImageIds) {
+		if (!retainedImageIds.has(imageId)) {
+			args.db.delete(pillImages).where(eq(pillImages.id, imageId)).run();
+		}
+	}
+}
+
 function isTimeoutError(error: unknown) {
 	return (
 		error instanceof Error &&
@@ -344,7 +405,7 @@ function normalizeStoredPillWeekdays(value: unknown) {
 function buildPillsPayload(args: {
 	pillRows: PillRow[];
 	componentRows: PillComponentRow[];
-	imageRows: PillImageRow[];
+	imageRows: PillImageMetadataRow[];
 	periodRows: PillPeriodRow[];
 	tagRows: TagRow[];
 	pillTagRows: PillTagRow[];
@@ -413,7 +474,7 @@ function buildPillsPayload(args: {
 		list.push({
 			id: row.id,
 			fileName: row.fileName,
-			dataUrl: row.dataUrl,
+			dataUrl: getStaticImageUrl('pill_images', row.id),
 		});
 		imageMap.set(row.pillId, list);
 	}
@@ -540,7 +601,11 @@ function getPillRecords(db: PillsReadDb, pillIds?: number[]) {
 		.all();
 
 	const imageRows = db
-		.select()
+		.select({
+			id: pillImages.id,
+			pillId: pillImages.pillId,
+			fileName: pillImages.fileName,
+		})
 		.from(pillImages)
 		.where(inArray(pillImages.pillId, resolvedPillIds))
 		.orderBy(asc(pillImages.pillId), asc(pillImages.sortOrder), asc(pillImages.id))
@@ -703,7 +768,6 @@ export function upsertPill(db: VitalsDatabase, input: z.infer<typeof pillUpsertI
 			}
 
 			tx.delete(pillComponents).where(eq(pillComponents.pillId, pillId)).run();
-			tx.delete(pillImages).where(eq(pillImages.pillId, pillId)).run();
 			tx.delete(pillTags).where(eq(pillTags.pillId, pillId)).run();
 
 			const resolvedPillTags = input.tagNames
@@ -730,18 +794,7 @@ export function upsertPill(db: VitalsDatabase, input: z.infer<typeof pillUpsertI
 					.run();
 			}
 
-			if (input.images.length > 0) {
-				tx.insert(pillImages)
-					.values(
-						input.images.map((image, index) => ({
-							pillId,
-							sortOrder: index,
-							fileName: image.fileName,
-							dataUrl: image.dataUrl,
-						})),
-					)
-					.run();
-			}
+			syncPillImages({ db: tx, pillId, images: input.images });
 
 			for (const period of periods) {
 				let pillPeriodId = period.id ?? null;

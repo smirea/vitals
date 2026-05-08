@@ -3,8 +3,10 @@ import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 import { getDiaryVoiceMemoAudio } from 'server/trpc/routers/diary.ts';
 import { getLabDocumentPdf, startLabProcessor } from 'server/trpc/routers/labs.ts';
 import { getDatabase } from 'server/db/client.ts';
+import { getStaticImage } from 'server/db/staticImages.ts';
 import env from 'server/env.ts';
 import { appRouter, createTrpcContext } from 'server/trpc/index.ts';
+import { isStaticImageTable } from 'server/utils/getStaticImageUrl.ts';
 
 const port = env.API_PORT;
 const elevenLabsRealtimeSpeechToTextUrl = new URL(
@@ -337,6 +339,43 @@ function getLabDocumentPdfResponse(req: Request) {
 	});
 }
 
+function getStaticImageResponse(req: Request) {
+	const match = new URL(req.url).pathname.match(/^\/db-image\/([^/]+)\/(\d+)$/);
+	if (!match) {
+		return null;
+	}
+
+	const table = match[1];
+	const id = Number.parseInt(match[2] ?? '', 10);
+	if (!table || !isStaticImageTable(table)) {
+		return Response.json({ ok: false, error: 'Invalid image table' }, { status: 400 });
+	}
+	if (!Number.isFinite(id) || id <= 0) {
+		return Response.json({ ok: false, error: 'Invalid image id' }, { status: 400 });
+	}
+
+	const image = getStaticImage(getDatabase(), table, id);
+	if (!image) {
+		return Response.json({ ok: false, error: 'Image not found' }, { status: 404 });
+	}
+
+	const headers = new Headers(getCorsHeaders(req));
+	headers.set('Content-Type', image.mimeType);
+	const fallbackFileName = image.fileName.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, '');
+	headers.set(
+		'Content-Disposition',
+		`inline; filename="${fallbackFileName}"; filename*=UTF-8''${encodeURIComponent(image.fileName)}`,
+	);
+	headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+	const body = new ArrayBuffer(image.data.byteLength);
+	new Uint8Array(body).set(image.data);
+
+	return new Response(body, {
+		status: 200,
+		headers,
+	});
+}
+
 startLabProcessor();
 
 const server = Bun.serve<DiarySttSocketData>({
@@ -386,6 +425,9 @@ const server = Bun.serve<DiarySttSocketData>({
 		},
 		'/labs/documents/*': (req: Request) =>
 			getLabDocumentPdfResponse(req) ??
+			Response.json({ ok: false, error: 'Not found' }, { status: 404 }),
+		'/db-image/*': (req: Request) =>
+			getStaticImageResponse(req) ??
 			Response.json({ ok: false, error: 'Not found' }, { status: 404 }),
 		'/diary/voice-memos/*': (req: Request) =>
 			getDiaryVoiceMemoAudioResponse(req) ??

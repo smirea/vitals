@@ -1966,6 +1966,7 @@ function buildUploadFileList(images: PillImageFormValue[]): UploadFile[] {
 
 function getImagePayload(images: PillImageFormValue[]) {
 	return images.map(image => ({
+		id: image.id,
 		fileName: image.fileName,
 		dataUrl: image.dataUrl,
 	}));
