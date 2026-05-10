@@ -1,8 +1,8 @@
 import { Database, House, Moon, NotePencil, Pill, Sun, Tag, TestTube } from '@phosphor-icons/react';
 import { Link, useRouterState } from '@tanstack/react-router';
+import { H4, Switch, Text, useTheme } from 'tamagui';
 
 import useAppContext from '../hooks/useAppContext';
-import { Switch, Typography, theme as uiTheme } from './ui';
 
 const navigationItems = [
 	{
@@ -45,7 +45,7 @@ const navigationItems = [
 
 export function AppNavigation() {
 	const { theme, setTheme } = useAppContext();
-	const { token } = uiTheme.useToken();
+	const colors = useTheme();
 	const pathname = useRouterState({
 		select: state => state.location.pathname,
 	});
@@ -56,18 +56,18 @@ export function AppNavigation() {
 		)?.key ?? '/';
 
 	return (
-		<div className='app-nav' style={{ background: token.colorBgContainer }}>
+		<div className='app-nav' style={{ background: colors.bgContainer?.get('web') }}>
 			<div
 				className='app-nav-header'
-				style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}
+				style={{ borderBottom: `1px solid ${colors.borderSubtle?.get('web')}` }}
 			>
-				<Typography.Title level={4} className='app-nav-title'>
+				<H4 className='app-nav-title' m={0}>
 					Vitals
-				</Typography.Title>
-				<Typography.Text type='secondary'>Pages</Typography.Text>
+				</H4>
+				<Text color='$textMuted'>Pages</Text>
 			</div>
 
-			<nav className='app-nav-menu' style={{ background: token.colorBgContainer }}>
+			<nav className='app-nav-menu' style={{ background: colors.bgContainer?.get('web') }}>
 				{navigationItems.map(item => (
 					<Link
 						key={item.key}
@@ -85,21 +85,26 @@ export function AppNavigation() {
 			<div
 				className='app-nav-footer'
 				style={{
-					borderTop: `1px solid ${token.colorBorderSecondary}`,
-					background: token.colorBgContainer,
+					borderTop: `1px solid ${colors.borderSubtle?.get('web')}`,
+					background: colors.bgContainer?.get('web'),
 				}}
 			>
 				<div className='app-nav-footer-copy'>
-					<Typography.Text strong>Dark mode</Typography.Text>
+					<Text fontWeight='700'>Dark mode</Text>
 				</div>
 
 				<Switch
+					size='$2'
 					checked={theme === 'dark'}
-					onChange={checked => setTheme(checked ? 'dark' : 'light')}
-					checkedChildren={<Moon size={12} />}
-					unCheckedChildren={<Sun size={12} />}
+					onCheckedChange={checked => setTheme(checked ? 'dark' : 'light')}
 					aria-label='Toggle dark mode'
-				/>
+				>
+					<Switch.Thumb>
+						<span className='app-nav-switch-icon'>
+							{theme === 'dark' ? <Moon size={10} /> : <Sun size={10} />}
+						</span>
+					</Switch.Thumb>
+				</Switch>
 			</div>
 		</div>
 	);

@@ -5,26 +5,14 @@ import {
 	Stop as StopOutlined,
 	Trash as DeleteOutlined,
 } from '@phosphor-icons/react';
+import { toast } from '@tamagui/toast/v2';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
-import {
-	Button,
-	Card,
-	Input,
-	Alert,
-	Popconfirm,
-	Select,
-	Space,
-	Table,
-	Tag,
-	Typography,
-	message,
-	type TableColumnsType,
-} from '../components/ui';
-import type { Key } from 'react';
+import type { Key, ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Anchor, Button, Card, Paragraph, Text, XStack, YStack, useTheme } from 'tamagui';
 
 import type {
 	DiaryEntry,
@@ -32,7 +20,11 @@ import type {
 	DiaryPendingVoiceMemoRecovery,
 	DiaryVoiceMemo,
 } from '../utils/api';
+import { AutoResizeTextArea } from '../components/AutoResizeTextArea';
+import { DataTable, type DataColumn } from '../components/DataTable';
 import { PageNav } from '../components/PageNav';
+import { TagChip } from '../components/TagChip';
+import { TagInput } from '../components/TagInput';
 import { useTRPC } from '../utils/trpc';
 
 export const Route = createFileRoute('/diary')({
@@ -124,7 +116,7 @@ function DiaryRouteComponent() {
 			await invalidateDiary();
 			setNotes('');
 			setTagNames([]);
-			message.success('Entry added.');
+			toast.success('Entry added.');
 		},
 		onError: error => {
 			showError(error);
@@ -174,7 +166,7 @@ function DiaryRouteComponent() {
 			await invalidateDiary();
 			setNotes('');
 			setTagNames([]);
-			message.success('Voice memo saved.');
+			toast.success('Voice memo saved.');
 		},
 		onError: showError,
 		onSettled: () => {
@@ -187,7 +179,7 @@ function DiaryRouteComponent() {
 		...trpc.diary.processVoiceMemoRecovery.mutationOptions(),
 		onSuccess: async () => {
 			await invalidateDiary();
-			message.success('Voice memo saved.');
+			toast.success('Voice memo saved.');
 		},
 		onError: showError,
 		onSettled: () => {
@@ -207,7 +199,7 @@ function DiaryRouteComponent() {
 		...trpc.diary.deleteVoiceMemo.mutationOptions(),
 		onSuccess: async () => {
 			await invalidateDiary();
-			message.success('Voice memo deleted.');
+			toast.success('Voice memo deleted.');
 		},
 		onError: showError,
 		onSettled: () => {
@@ -244,7 +236,7 @@ function DiaryRouteComponent() {
 		...trpc.table.diaryEntries.deleteMany.mutationOptions(),
 		onSuccess: async () => {
 			await invalidateDiary();
-			message.success('Entry deleted.');
+			toast.success('Entry deleted.');
 		},
 		onError: error => {
 			showError(error);
@@ -311,6 +303,7 @@ function DiaryRouteComponent() {
 			(tagsQuery.data ?? []).map(tag => ({
 				label: tag.name,
 				value: tag.name,
+				color: tag.color,
 			})),
 		[tagsQuery.data],
 	);
@@ -718,268 +711,239 @@ function DiaryRouteComponent() {
 
 			<div className='pills-page-inner diary-page-inner'>
 				{errorDetails ? (
-					<Alert
-						type='error'
-						showIcon
-						closable
-						message={errorDetails.message}
-						description={
+					<InlineAlert
+						kind='error'
+						title={errorDetails.message}
+						onClose={() => setErrorDetails(null)}
+					>
+						{
 							<details>
 								<summary>Stack details</summary>
 								<pre className='diary-error-details'>{errorDetails.details}</pre>
 							</details>
 						}
-						onClose={() => setErrorDetails(null)}
-					/>
+					</InlineAlert>
 				) : null}
 
-				<Card>
-					<Space direction='vertical' size={12} style={{ width: '100%' }}>
+				<Card bg='$bgContainer' borderColor='$borderSubtle' borderWidth={1}>
+					<YStack gap={12} padding={16} width='100%'>
 						<div className='diary-composer-note'>
-							<Input.TextArea
+							<AutoResizeTextArea
 								value={notes}
-								autoSize={{ minRows: 1, maxRows: 14 }}
+								minRows={1}
+								maxRows={14}
 								disabled={isSaving || isRecording}
 								onChange={event => {
-									setNotes(event.target.value);
+									setNotes((event.target as unknown as HTMLTextAreaElement).value);
 								}}
 							/>
 							<Button
-								type='primary'
 								icon={<PlusOutlined />}
 								disabled={!canAddEntry}
-								loading={createEntryMutation.isPending}
+								backgroundColor='$primary'
+								style={{ color: 'white' }}
 								className='diary-add-button'
-								onClick={() => {
+								onPress={() => {
 									void handleAddEntry();
 								}}
 							>
-								Add
+								{createEntryMutation.isPending ? 'Adding...' : 'Add'}
 							</Button>
 						</div>
 
-						<Select
-							mode='tags'
+						<TagInput
 							value={tagNames}
 							options={tagOptions}
 							placeholder='Tags'
 							disabled={isSaving || isRecording}
-							style={{ width: '100%' }}
-							tokenSeparators={[',']}
 							onChange={setTagNames}
 						/>
 
 						<div className='diary-actions'>
 							<Button
 								icon={isRecording ? <StopOutlined /> : <AudioOutlined />}
-								danger={isRecording}
-								loading={isStoppingRecording || isParsingVoiceMemo}
+								backgroundColor={isRecording ? '$error' : undefined}
+								style={isRecording ? { color: 'white' } : undefined}
 								disabled={!currentLocation || createEntryMutation.isPending}
-								onClick={() => {
+								onPress={() => {
 									void handleRecordButton();
 								}}
 							>
-								{isRecording ? 'Stop' : 'Record'}
+								{isStoppingRecording || isParsingVoiceMemo
+									? 'Working...'
+									: isRecording
+										? 'Stop'
+										: 'Record'}
 							</Button>
-							{isParsingVoiceMemo ? (
-								<Typography.Text type='secondary'>Parsing</Typography.Text>
-							) : null}
+							{isParsingVoiceMemo ? <Text color='$textMuted'>Parsing</Text> : null}
 						</div>
-					</Space>
+					</YStack>
 				</Card>
 
 				{pendingVoiceMemos.length > 0 ? (
-					<Card
+					<SectionCard
 						title='Pending memos'
-						extra={
-							<Typography.Text type='secondary'>{pendingVoiceMemos.length} pending</Typography.Text>
-						}
+						extra={<Text color='$textMuted'>{pendingVoiceMemos.length} pending</Text>}
 					>
-						<Table<DiaryPendingVoiceMemo>
-							rowKey={row => String(row.id)}
-							size='small'
+						<DataTable
+							getRowKey={row => row.id}
 							loading={pendingVoiceMemosQuery.isLoading}
 							columns={pendingVoiceMemoColumns}
-							dataSource={pendingVoiceMemos}
-							pagination={false}
-							scroll={{ x: 1400 }}
+							rows={pendingVoiceMemos}
+							minWidth={1400}
 						/>
-					</Card>
+					</SectionCard>
 				) : null}
 
 				{pendingVoiceMemoRecoveries.length > 0 ? (
-					<Card
+					<SectionCard
 						title='Pending recovery memos'
-						extra={
-							<Typography.Text type='secondary'>
-								{pendingVoiceMemoRecoveries.length} pending
-							</Typography.Text>
-						}
+						extra={<Text color='$textMuted'>{pendingVoiceMemoRecoveries.length} pending</Text>}
 					>
-						<Table<DiaryPendingVoiceMemoRecovery>
-							rowKey={row => row.id}
-							size='small'
+						<DataTable
+							getRowKey={row => row.id}
 							loading={pendingVoiceMemoRecoveriesQuery.isLoading}
 							columns={pendingVoiceMemoRecoveryColumns}
-							dataSource={pendingVoiceMemoRecoveries}
-							pagination={false}
-							scroll={{ x: 1200 }}
+							rows={pendingVoiceMemoRecoveries}
+							minWidth={1200}
 						/>
-					</Card>
+					</SectionCard>
 				) : null}
 
-				<Card
-					title='Diary'
-					extra={<Typography.Text type='secondary'>{entries.length} entries</Typography.Text>}
-				>
-					<Table<DiaryEntry>
-						rowKey={row => String(row.id)}
-						size='small'
+				<SectionCard title='Diary' extra={<Text color='$textMuted'>{entries.length} entries</Text>}>
+					<DataTable
+						getRowKey={row => row.id}
 						loading={entriesQuery.isLoading}
 						columns={columns}
-						dataSource={entries}
-						pagination={false}
-						scroll={{ x: 1280 }}
-						expandable={{
-							expandedRowKeys,
-							onExpandedRowsChange: keys => setExpandedRowKeys([...keys]),
-							rowExpandable: row => getEntryTranscriptText(row).length > 0,
-							expandedRowRender: row => <TranscriptPanel entry={row} />,
-						}}
+						rows={entries}
+						minWidth={1280}
+						expandedRowKeys={expandedRowKeys}
+						onExpandedRowKeysChange={keys => setExpandedRowKeys(keys.map(String))}
+						canExpandRow={row => getEntryTranscriptText(row).length > 0}
+						renderExpandedRow={row => <TranscriptPanel entry={row} />}
 					/>
-				</Card>
+				</SectionCard>
 			</div>
 		</main>
 	);
 
-	function getPendingVoiceMemoRecoveryColumns(): TableColumnsType<DiaryPendingVoiceMemoRecovery> {
+	function getPendingVoiceMemoRecoveryColumns(): Array<DataColumn<DiaryPendingVoiceMemoRecovery>> {
 		return [
 			{
-				title: 'When',
-				dataIndex: 'createdAt',
 				key: 'createdAt',
+				header: 'When',
 				width: 180,
-				render: (createdAt: string) => (
-					<Space direction='vertical' size={0}>
-						<Typography.Text>{formatDiaryDate(createdAt)}</Typography.Text>
-						<Typography.Text type='secondary'>{formatDiaryTime(createdAt)}</Typography.Text>
-					</Space>
+				cell: row => (
+					<YStack gap={0}>
+						<Text>{formatDiaryDate(row.createdAt)}</Text>
+						<Text color='$textMuted'>{formatDiaryTime(row.createdAt)}</Text>
+					</YStack>
 				),
 			},
 			{
-				title: 'Status',
-				dataIndex: 'status',
 				key: 'status',
+				header: 'Status',
 				width: 140,
-				render: (status: string) => <Tag>{status}</Tag>,
+				cell: row => <TagChip>{row.status}</TagChip>,
 			},
 			{
-				title: 'Metadata',
 				key: 'metadata',
+				header: 'Metadata',
 				width: 360,
-				render: (_: unknown, row: DiaryPendingVoiceMemoRecovery) => (
-					<Space direction='vertical' size={0}>
-						<Typography.Text>{row.fileName}</Typography.Text>
-						<Typography.Text type='secondary'>{row.mimeType}</Typography.Text>
-						<Typography.Text type='secondary'>
+				cell: row => (
+					<YStack gap={0}>
+						<Text>{row.fileName}</Text>
+						<Text color='$textMuted'>{row.mimeType}</Text>
+						<Text color='$textMuted'>
 							{formatDuration(row.durationSeconds)} · {formatBytes(row.audioBytes)}
-						</Typography.Text>
-						<Typography.Text type='secondary'>{row.metadataPath}</Typography.Text>
-						{row.audioPath ? (
-							<Typography.Text type='secondary'>{row.audioPath}</Typography.Text>
-						) : null}
-					</Space>
+						</Text>
+						<Text color='$textMuted'>{row.metadataPath}</Text>
+						{row.audioPath ? <Text color='$textMuted'>{row.audioPath}</Text> : null}
+					</YStack>
 				),
 			},
 			{
-				title: 'Transcript',
 				key: 'transcript',
+				header: 'Transcript',
 				width: 320,
-				render: (_: unknown, row: DiaryPendingVoiceMemoRecovery) => (
-					<MarkdownBlock emptyText='No transcript'>{row.transcript}</MarkdownBlock>
-				),
+				cell: row => <MarkdownBlock emptyText='No transcript'>{row.transcript}</MarkdownBlock>,
 			},
 			{
-				title: 'Error',
 				key: 'error',
+				header: 'Error',
 				width: 360,
-				render: (_: unknown, row: DiaryPendingVoiceMemoRecovery) =>
+				cell: row =>
 					row.error ? (
 						<details>
 							<summary>{row.error.split('\n')[0]}</summary>
 							<pre className='diary-error-details'>{row.error}</pre>
 						</details>
 					) : (
-						<Typography.Text type='secondary'>None</Typography.Text>
+						<Text color='$textMuted'>None</Text>
 					),
 			},
 			{
-				title: '',
 				key: 'actions',
+				header: '',
 				width: 130,
 				align: 'right',
-				render: (_: unknown, row: DiaryPendingVoiceMemoRecovery) => (
+				cell: row => (
 					<Button
-						size='small'
+						size='$2'
 						icon={<ReloadOutlined />}
-						loading={
-							processVoiceMemoRecoveryMutation.isPending && reprocessingRecoveryId === row.id
-						}
 						disabled={processVoiceMemoRecoveryMutation.isPending || isRecording}
-						onClick={() => handleReprocessVoiceMemoRecovery(row.id)}
+						onPress={() => handleReprocessVoiceMemoRecovery(row.id)}
 					>
-						Reprocess
+						{processVoiceMemoRecoveryMutation.isPending && reprocessingRecoveryId === row.id
+							? 'Working...'
+							: 'Reprocess'}
 					</Button>
 				),
 			},
 		];
 	}
 
-	function getPendingVoiceMemoColumns(): TableColumnsType<DiaryPendingVoiceMemo> {
+	function getPendingVoiceMemoColumns(): Array<DataColumn<DiaryPendingVoiceMemo>> {
 		return [
 			{
-				title: 'When',
-				dataIndex: 'createdAt',
 				key: 'createdAt',
+				header: 'When',
 				width: 180,
-				render: (createdAt: string) => (
-					<Space direction='vertical' size={0}>
-						<Typography.Text>{formatDiaryDate(createdAt)}</Typography.Text>
-						<Typography.Text type='secondary'>{formatDiaryTime(createdAt)}</Typography.Text>
-					</Space>
+				cell: row => (
+					<YStack gap={0}>
+						<Text>{formatDiaryDate(row.createdAt)}</Text>
+						<Text color='$textMuted'>{formatDiaryTime(row.createdAt)}</Text>
+					</YStack>
 				),
 			},
 			{
-				title: 'Status',
-				dataIndex: 'transcriptionStatus',
 				key: 'transcriptionStatus',
+				header: 'Status',
 				width: 120,
-				render: (status: string) => <Tag>{status}</Tag>,
+				cell: row => <TagChip>{row.transcriptionStatus}</TagChip>,
 			},
 			{
-				title: 'Location',
 				key: 'location',
+				header: 'Location',
 				width: 180,
-				render: (_: unknown, row: DiaryPendingVoiceMemo) => (
-					<PendingLocationCell location={row.location} />
-				),
+				cell: row => <PendingLocationCell location={row.location} />,
 			},
 			{
-				title: 'Tags',
 				key: 'tags',
+				header: 'Tags',
 				width: 220,
-				render: (_: unknown, row: DiaryPendingVoiceMemo) => (
-					<Space direction='vertical' size={6} style={{ width: '100%' }}>
+				cell: row => (
+					<YStack gap={6} width='100%'>
 						{row.tags.length > 0 ? (
-							<Space size={[4, 4]} wrap>
+							<XStack gap={4} flexWrap='wrap'>
 								{row.tags.map(tag => (
-									<Tag key={tag.id} color={tag.color}>
+									<TagChip key={tag.id} color={tag.color}>
 										{tag.name}
-									</Tag>
+									</TagChip>
 								))}
-							</Space>
+							</XStack>
 						) : (
-							<Typography.Text type='secondary'>No tags</Typography.Text>
+							<Text color='$textMuted'>No tags</Text>
 						)}
 						<TagAddControl
 							targetId={row.id}
@@ -988,130 +952,124 @@ function DiaryRouteComponent() {
 							disabled={addVoiceMemoTagsMutation.isPending}
 							onAddTags={handleAddTagsToVoiceMemo}
 						/>
-					</Space>
+					</YStack>
 				),
 			},
 			{
-				title: 'Audio',
 				key: 'audio',
+				header: 'Audio',
 				width: 300,
-				render: (_: unknown, row: DiaryPendingVoiceMemo) => (
+				cell: row => (
 					<audio controls src={`/api/diary/voice-memos/${row.id}/audio`} className='diary-audio' />
 				),
 			},
 			{
-				title: 'Metadata',
 				key: 'metadata',
+				header: 'Metadata',
 				width: 300,
-				render: (_: unknown, row: DiaryPendingVoiceMemo) => (
-					<Space direction='vertical' size={0}>
-						<Typography.Text>{row.fileName}</Typography.Text>
-						<Typography.Text type='secondary'>{row.mimeType}</Typography.Text>
-						<Typography.Text type='secondary'>
+				cell: row => (
+					<YStack gap={0}>
+						<Text>{row.fileName}</Text>
+						<Text color='$textMuted'>{row.mimeType}</Text>
+						<Text color='$textMuted'>
 							{formatDuration(row.durationSeconds)} · {formatBytes(row.audioBytes)}
-						</Typography.Text>
+						</Text>
 						{row.processedAt ? (
-							<Typography.Text type='secondary'>
-								processed {formatDiaryTime(row.processedAt)}
-							</Typography.Text>
+							<Text color='$textMuted'>processed {formatDiaryTime(row.processedAt)}</Text>
 						) : null}
-					</Space>
+					</YStack>
 				),
 			},
 			{
-				title: 'Transcript',
 				key: 'transcript',
+				header: 'Transcript',
 				width: 320,
-				render: (_: unknown, row: DiaryPendingVoiceMemo) => (
-					<MarkdownBlock emptyText='No transcript'>{row.transcript}</MarkdownBlock>
-				),
+				cell: row => <MarkdownBlock emptyText='No transcript'>{row.transcript}</MarkdownBlock>,
 			},
 			{
-				title: 'Error',
 				key: 'error',
+				header: 'Error',
 				width: 360,
-				render: (_: unknown, row: DiaryPendingVoiceMemo) =>
+				cell: row =>
 					row.transcriptionError ? (
 						<details>
 							<summary>{row.transcriptionError.split('\n')[0]}</summary>
 							<pre className='diary-error-details'>{row.transcriptionError}</pre>
 						</details>
 					) : (
-						<Typography.Text type='secondary'>None</Typography.Text>
+						<Text color='$textMuted'>None</Text>
 					),
 			},
 			{
-				title: '',
 				key: 'actions',
+				header: '',
 				width: 160,
 				align: 'right',
-				render: (_: unknown, row: DiaryPendingVoiceMemo) => (
-					<Space size={4}>
+				cell: row => (
+					<XStack gap={4}>
 						<Button
-							size='small'
+							size='$2'
 							icon={<ReloadOutlined />}
-							loading={processVoiceMemoMutation.isPending && reprocessingVoiceMemoId === row.id}
 							disabled={processVoiceMemoMutation.isPending || deleteVoiceMemoMutation.isPending}
-							onClick={() => handleReprocessVoiceMemo(row.id)}
+							onPress={() => handleReprocessVoiceMemo(row.id)}
 						>
-							Reprocess
+							{processVoiceMemoMutation.isPending && reprocessingVoiceMemoId === row.id
+								? 'Working...'
+								: 'Reprocess'}
 						</Button>
-						<Popconfirm
-							title='Delete pending memo?'
-							description='This removes the pending audio memo and its diary entry if it is empty.'
-							okText='Delete'
-							okButtonProps={{ danger: true }}
-							onConfirm={() => handleDeleteVoiceMemo(row.id)}
+						<Button
+							size='$2'
+							chromeless
+							icon={<DeleteOutlined />}
 							disabled={deleteVoiceMemoMutation.isPending}
+							onPress={() => {
+								if (
+									window.confirm(
+										'Delete pending memo?\n\nThis removes the pending audio memo and its diary entry if it is empty.',
+									)
+								) {
+									handleDeleteVoiceMemo(row.id);
+								}
+							}}
 						>
-							<Button
-								size='small'
-								type='text'
-								danger
-								icon={<DeleteOutlined />}
-								loading={deleteVoiceMemoMutation.isPending && deletingVoiceMemoId === row.id}
-								disabled={deleteVoiceMemoMutation.isPending}
-							/>
-						</Popconfirm>
-					</Space>
+							{deleteVoiceMemoMutation.isPending && deletingVoiceMemoId === row.id ? '...' : null}
+						</Button>
+					</XStack>
 				),
 			},
 		];
 	}
 
-	function getColumns(): TableColumnsType<DiaryEntry> {
+	function getColumns(): Array<DataColumn<DiaryEntry>> {
 		return [
 			{
-				title: 'When',
-				dataIndex: 'createdAt',
 				key: 'createdAt',
+				header: 'When',
 				width: 140,
-				render: (createdAt: string) => (
-					<Typography.Text>{formatDiaryDate(createdAt)}</Typography.Text>
-				),
+				cell: row => <Text>{formatDiaryDate(row.createdAt)}</Text>,
 			},
 			{
-				title: 'Location',
 				key: 'location',
+				header: 'Location',
 				width: 180,
-				render: (_: unknown, row: DiaryEntry) => <LocationCell location={row.location} />,
+				cell: row => <LocationCell location={row.location} />,
 			},
 			{
-				title: 'Tags',
 				key: 'tags',
+				header: 'Tags',
 				width: 220,
-				render: (_: unknown, row: DiaryEntry) => (
-					<Space direction='vertical' size={6} style={{ width: '100%' }}>
+				cell: row => (
+					<YStack gap={6} width='100%'>
 						{row.tags.length > 0 ? (
-							<Space size={[4, 4]} wrap>
+							<XStack gap={4} flexWrap='wrap'>
 								{row.tags.map(tag => (
-									<Tag key={tag.id} color={tag.color}>
+									<TagChip key={tag.id} color={tag.color}>
 										{tag.name}
-									</Tag>
+									</TagChip>
 								))}
-							</Space>
+							</XStack>
 						) : (
-							<Typography.Text type='secondary'>No tags</Typography.Text>
+							<Text color='$textMuted'>No tags</Text>
 						)}
 						<TagAddControl
 							targetId={row.id}
@@ -1120,14 +1078,14 @@ function DiaryRouteComponent() {
 							disabled={addEntryTagsMutation.isPending}
 							onAddTags={handleAddTagsToEntry}
 						/>
-					</Space>
+					</YStack>
 				),
 			},
 			{
-				title: 'Transcript',
 				key: 'transcript',
+				header: 'Transcript',
 				width: 360,
-				render: (_: unknown, row: DiaryEntry) => (
+				cell: row => (
 					<TranscriptPreview
 						entry={row}
 						onClick={() => {
@@ -1137,55 +1095,118 @@ function DiaryRouteComponent() {
 				),
 			},
 			{
-				title: 'Voice memos',
 				key: 'voiceMemos',
+				header: 'Voice memos',
 				width: 300,
-				render: (_: unknown, row: DiaryEntry) => <VoiceMemosCell memos={row.voiceMemos} />,
+				cell: row => <VoiceMemosCell memos={row.voiceMemos} />,
 			},
 			{
-				title: 'Summary',
 				key: 'summary',
+				header: 'Summary',
 				width: 360,
-				render: (_: unknown, row: DiaryEntry) => (
-					<MarkdownBlock emptyText='No summary yet'>{row.summary}</MarkdownBlock>
-				),
+				cell: row => <MarkdownBlock emptyText='No summary yet'>{row.summary}</MarkdownBlock>,
 			},
 			{
-				title: '',
 				key: 'actions',
+				header: '',
 				width: 72,
 				align: 'right',
-				render: (_: unknown, row: DiaryEntry) => (
-					<Popconfirm
-						title='Delete diary entry?'
-						description='This removes the entry, transcript, and attached voice memos.'
-						okText='Delete'
-						okButtonProps={{ danger: true }}
-						onConfirm={() => handleDeleteEntry(row.id)}
+				cell: row => (
+					<Button
+						size='$2'
+						chromeless
+						icon={<DeleteOutlined />}
 						disabled={deleteEntryMutation.isPending}
+						onPress={() => {
+							if (
+								window.confirm(
+									'Delete diary entry?\n\nThis removes the entry, transcript, and attached voice memos.',
+								)
+							) {
+								handleDeleteEntry(row.id);
+							}
+						}}
 					>
-						<Button
-							size='small'
-							type='text'
-							danger
-							icon={<DeleteOutlined />}
-							loading={deleteEntryMutation.isPending && deletingEntryId === row.id}
-							disabled={deleteEntryMutation.isPending}
-						/>
-					</Popconfirm>
+						{deleteEntryMutation.isPending && deletingEntryId === row.id ? '...' : null}
+					</Button>
 				),
 			},
 		];
 	}
 }
 
+function SectionCard(props: { title: string; extra?: ReactNode; children: ReactNode }) {
+	return (
+		<Card bg='$bgContainer' borderColor='$borderSubtle' borderWidth={1}>
+			<XStack
+				alignItems='center'
+				justifyContent='space-between'
+				gap={12}
+				padding={12}
+				borderBottomWidth={1}
+				borderBottomColor='$borderSubtle'
+			>
+				<Text fontWeight='700'>{props.title}</Text>
+				{props.extra}
+			</XStack>
+			<YStack padding={16}>{props.children}</YStack>
+		</Card>
+	);
+}
+
+function InlineAlert(props: {
+	kind: 'error' | 'warning' | 'info' | 'success';
+	title: ReactNode;
+	children?: ReactNode;
+	onClose?: () => void;
+}) {
+	const theme = useTheme();
+	const palette = {
+		error: [theme.errorBg?.get('web'), theme.errorBorder?.get('web'), theme.error?.get('web')],
+		warning: [
+			theme.warningBg?.get('web'),
+			theme.warningBorder?.get('web'),
+			theme.warning?.get('web'),
+		],
+		info: [theme.infoBg?.get('web'), theme.infoBorder?.get('web'), theme.infoText?.get('web')],
+		success: [
+			theme.successBg?.get('web'),
+			theme.successBorder?.get('web'),
+			theme.success?.get('web'),
+		],
+	}[props.kind];
+
+	return (
+		<XStack
+			gap={10}
+			padding={12}
+			borderWidth={1}
+			borderRadius={8}
+			style={{ background: palette[0], borderColor: palette[1] }}
+		>
+			<Text fontWeight='700' style={{ color: palette[2] }}>
+				●
+			</Text>
+			<YStack flex={1} minWidth={0}>
+				<Text fontWeight='700'>{props.title}</Text>
+				{props.children}
+			</YStack>
+			{props.onClose ? (
+				<Button size='$2' chromeless onPress={props.onClose}>
+					×
+				</Button>
+			) : null}
+		</XStack>
+	);
+}
+
 function LocationCell(props: { location: DiaryEntry['location'] }) {
 	const { location } = props;
 
 	return (
-		<Typography.Link href={mapsUrl(location)} target='_blank' rel='noreferrer'>
+		<Anchor href={mapsUrl(location)} target='_blank' rel='noreferrer' color='$primary'>
 			{location.name}
-		</Typography.Link>
+		</Anchor>
 	);
 }
 
@@ -1194,9 +1215,9 @@ function PendingLocationCell(props: { location: DiaryPendingVoiceMemo['location'
 	const name = location.name ?? `${location.latitude}, ${location.longitude}`;
 
 	return (
-		<Typography.Link href={mapsUrl(location)} target='_blank' rel='noreferrer'>
+		<Anchor href={mapsUrl(location)} target='_blank' rel='noreferrer' color='$primary'>
 			{name}
-		</Typography.Link>
+		</Anchor>
 	);
 }
 
@@ -1220,29 +1241,21 @@ function TagAddControl(props: {
 	}
 
 	return (
-		<Space.Compact>
-			<Select
-				size='small'
-				mode='tags'
+		<XStack gap={6} className='diary-tag-add-control'>
+			<TagInput
 				value={selectedTagNames}
 				options={props.tagOptions}
 				placeholder='Tags'
-				loading={props.loading}
-				disabled={props.disabled}
-				tokenSeparators={[',']}
-				maxTagCount={0}
-				maxTagPlaceholder={`${selectedTagNames.length} tags`}
-				style={{ width: 112 }}
+				disabled={props.disabled || props.loading}
 				onChange={setSelectedTagNames}
 			/>
 			<Button
-				size='small'
+				size='$2'
 				icon={<PlusOutlined />}
-				loading={props.loading}
 				disabled={props.disabled || selectedTagNames.length === 0}
-				onClick={() => addTags()}
+				onPress={() => addTags()}
 			/>
-		</Space.Compact>
+		</XStack>
 	);
 }
 
@@ -1250,33 +1263,29 @@ function TranscriptPreview(props: { entry: DiaryEntry; onClick: () => void }) {
 	const transcript = getEntryTranscriptText(props.entry);
 
 	if (!transcript) {
-		return <Typography.Text type='secondary'>No transcript</Typography.Text>;
+		return <Text color='$textMuted'>No transcript</Text>;
 	}
 
 	return (
-		<Typography.Paragraph
-			className='diary-transcript-preview'
-			ellipsis={{ rows: 2 }}
-			onClick={props.onClick}
-		>
+		<Paragraph className='diary-transcript-preview' numberOfLines={2} onPress={props.onClick}>
 			{transcript}
-		</Typography.Paragraph>
+		</Paragraph>
 	);
 }
 
 function VoiceMemosCell(props: { memos: DiaryVoiceMemo[] }) {
 	if (props.memos.length === 0) {
-		return <Typography.Text type='secondary'>None</Typography.Text>;
+		return <Text color='$textMuted'>None</Text>;
 	}
 
 	return (
-		<Space direction='vertical' size={8} style={{ width: '100%' }}>
+		<YStack gap={8} width='100%'>
 			{props.memos.map(memo => (
 				<div key={memo.id} className='diary-voice-memo'>
 					<audio controls src={`/api/diary/voice-memos/${memo.id}/audio`} className='diary-audio' />
 				</div>
 			))}
-		</Space>
+		</YStack>
 	);
 }
 
@@ -1284,10 +1293,10 @@ function TranscriptPanel(props: { entry: DiaryEntry }) {
 	const transcript = getEntryTranscriptText(props.entry);
 
 	return (
-		<Space direction='vertical' size={8} style={{ width: '100%' }}>
-			<Typography.Text type='secondary'>{formatDiaryTime(props.entry.createdAt)}</Typography.Text>
+		<YStack gap={8} width='100%'>
+			<Text color='$textMuted'>{formatDiaryTime(props.entry.createdAt)}</Text>
 			<MarkdownBlock>{transcript}</MarkdownBlock>
-		</Space>
+		</YStack>
 	);
 }
 
@@ -1307,7 +1316,7 @@ function MarkdownBlock(props: { children?: string | null; emptyText?: string }) 
 	const value = props.children?.trim();
 
 	if (!value) {
-		return <Typography.Text type='secondary'>{props.emptyText ?? 'Empty'}</Typography.Text>;
+		return <Text color='$textMuted'>{props.emptyText ?? 'Empty'}</Text>;
 	}
 
 	return (

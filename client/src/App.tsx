@@ -1,12 +1,12 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { TamaguiProvider } from 'tamagui';
+import { Toaster } from '@tamagui/toast/v2';
 import { useState } from 'react';
 
 import tamaguiConfig from './tamagui.config';
 import { TRPCProvider, createBrowserTrpcClient, createQueryClient } from './utils/trpc';
 import { AutofillGuard } from './components/AutofillGuard';
-import { MessageViewport } from './components/ui';
 import { AppContextProvider } from './hooks/useAppContext';
 import useAppContext from './hooks/useAppContext';
 import { routeTree } from './routeTree.gen';
@@ -47,7 +47,7 @@ function ThemedApp({
 			<QueryClientProvider client={queryClient}>
 				<TRPCProvider queryClient={queryClient} trpcClient={trpcClient}>
 					<AutofillGuard />
-					<MessageViewport />
+					<Toaster position='bottom-right' closeButton />
 					<RouterProvider router={router} />
 				</TRPCProvider>
 			</QueryClientProvider>

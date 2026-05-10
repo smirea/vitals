@@ -4,50 +4,39 @@ import {
 	Copy as CopyOutlined,
 	PencilSimple as EditOutlined,
 	Plus as PlusOutlined,
-	Tag as TagOutlined,
 	Trash as DeleteOutlined,
 	UploadSimple as UploadOutlined,
+	WarningCircle,
 } from '@phosphor-icons/react';
+import { toast } from '@tamagui/toast/v2';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
+import { formatDistanceToNow, parseISO } from 'date-fns';
+import dayjs from 'dayjs';
+import type { CSSProperties, Key, ReactNode } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import {
-	Alert,
-	AutoComplete,
-	Badge,
 	Button,
 	Card,
 	Checkbox,
-	DatePicker,
-	Divider,
-	Drawer,
-	Form,
-	Image,
+	H3,
 	Input,
-	InputNumber,
-	Popconfirm,
-	Popover,
-	Select,
-	Space,
-	Spin,
-	Switch,
-	Tag,
-	Table,
-	Typography,
-	Upload,
-	message,
-	theme as uiTheme,
-	type FormInstance,
-	type TableColumnsType,
-	type UploadChangeParam,
-	type UploadFile,
-	type UploadProps,
-} from '../components/ui';
-import { formatDistanceToNow, parseISO } from 'date-fns';
-import dayjs from 'dayjs';
-import type { Key } from 'react';
-import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
+	Paragraph,
+	Spinner,
+	Text,
+	XStack,
+	YStack,
+	useTheme,
+} from 'tamagui';
 import { z } from 'zod';
 
+import { AutoResizeTextArea } from '../components/AutoResizeTextArea';
+import { type DataColumn, DataTable } from '../components/DataTable';
+import { FileDropzone } from '../components/FileDropzone';
+import { FormField } from '../components/FormField';
+import { PageNav } from '../components/PageNav';
+import { TagChip } from '../components/TagChip';
+import { TagInput } from '../components/TagInput';
 import type {
 	PillComponent,
 	PillExtractionResult,
@@ -55,7 +44,6 @@ import type {
 	PillPeriod,
 	PillRecord,
 } from '../utils/api';
-import { PageNav } from '../components/PageNav';
 import { useTRPC } from '../utils/trpc';
 
 const pillsSearchSchema = z.object({
@@ -64,8 +52,6 @@ const pillsSearchSchema = z.object({
 
 const DATE_FORMAT = 'YYYY-MM-DD';
 const IMAGE_TILE_SIZE = 104;
-const { Dragger } = Upload;
-const { RangePicker } = DatePicker;
 
 export const Route = createFileRoute('/pills')({
 	validateSearch: search => pillsSearchSchema.parse(search),
@@ -173,27 +159,25 @@ function PillsRouteComponent() {
 	const search = Route.useSearch();
 	const navigate = Route.useNavigate();
 	const editPillId = search.edit ?? null;
-	const onEditPillChange = (nextEditPillId: number | null) =>
-		navigate({
-			search: nextEditPillId ? { edit: nextEditPillId } : {},
-		});
+	const onEditPillChange = useCallback(
+		(nextEditPillId: number | null) =>
+			navigate({
+				search: nextEditPillId ? { edit: nextEditPillId } : {},
+			}),
+		[navigate],
+	);
 
-	const { token } = uiTheme.useToken();
+	const token = getPillsThemeToken(useTheme());
 	const trpc = useTRPC();
 	const queryClient = useQueryClient();
-	const [form] = Form.useForm<PillFormValues>();
+	const [formValues, setFormValues] = useState(createEmptyFormValues);
 	const [isCreateDrawerOpen, setIsCreateDrawerOpen] = useState(false);
 	const [pillQuery, setPillQuery] = useState('');
 	const [hydratedEditPillId, setHydratedEditPillId] = useState<number | null>(null);
 	const [deletingPeriodId, setDeletingPeriodId] = useState<number | null>(null);
-	const [isSaveDisabled, setIsSaveDisabled] = useState(true);
 	const [expandedComponentRowKeys, setExpandedComponentRowKeys] = useState<string[]>([]);
 	const [imageError, setImageError] = useState<PillImageErrorDetails | null>(null);
-	const [openPeriodTagEditorKey, setOpenPeriodTagEditorKey] = useState<string | null>(null);
 	const deferredPillQuery = useDeferredValue(pillQuery);
-	const watchedFormValues = Form.useWatch([], form) as PillFormValues | undefined;
-	const watchedImages = (Form.useWatch('images', form) ?? []) as PillImageFormValue[];
-	const watchedPeriods = (Form.useWatch('periods', form) ?? []) as PillPeriodFormValue[];
 	const isEditMode = editPillId !== null;
 	const isDrawerRequestedOpen = isCreateDrawerOpen || isEditMode;
 
@@ -212,20 +196,23 @@ function PillsRouteComponent() {
 		onSuccess: extraction => {
 			setImageError(null);
 			if (!extraction.detected) {
-				message.info(
+				toast.info(
 					extraction.extractionNotes ??
 						'No pill or supplement label was confidently detected in the uploaded images.',
 				);
 				return;
 			}
 
-			form.setFieldsValue(extractionToFormPatch(extraction));
-			message.success(`Filled pill details from images using ${extraction.model}.`);
+			setFormValues(current => ({
+				...current,
+				...extractionToFormPatch(extraction),
+			}));
+			toast.success(`Filled pill details from images using ${extraction.model}.`);
 		},
 		onError: error => {
 			const errorDetails = formatPillImageError(error, 'Image parsing failed.');
 			setImageError(errorDetails);
-			message.error(errorDetails.message);
+			toast.error(errorDetails.message);
 		},
 	});
 	const isParsingImages = extractionMutation.isPending;
@@ -236,12 +223,12 @@ function PillsRouteComponent() {
 			void queryClient.invalidateQueries({ queryKey: [['pills']] });
 			void queryClient.invalidateQueries({ queryKey: [['tags']] });
 			setIsCreateDrawerOpen(false);
-			setOpenPeriodTagEditorKey(null);
 			onEditPillChange(null);
-			message.success('Pill saved.');
+			resetPillForm();
+			toast.success('Pill saved.');
 		},
 		onError: error => {
-			message.error(error.message);
+			toast.error(error.message);
 		},
 	});
 
@@ -251,12 +238,12 @@ function PillsRouteComponent() {
 			void queryClient.invalidateQueries({ queryKey: [['pills']] });
 			void queryClient.invalidateQueries({ queryKey: [['tags']] });
 			setIsCreateDrawerOpen(false);
-			setOpenPeriodTagEditorKey(null);
 			onEditPillChange(null);
-			message.success('Pill removed.');
+			resetPillForm();
+			toast.success('Pill removed.');
 		},
 		onError: error => {
-			message.error(error.message);
+			toast.error(error.message);
 		},
 	});
 
@@ -264,9 +251,6 @@ function PillsRouteComponent() {
 		...trpc.table.pillPeriods.deleteMany.mutationOptions(),
 		onSuccess: async () => {
 			await queryClient.invalidateQueries({ queryKey: [['pills']] });
-		},
-		onError: error => {
-			message.error(error.message);
 		},
 		onSettled: () => {
 			setDeletingPeriodId(null);
@@ -276,21 +260,12 @@ function PillsRouteComponent() {
 	const dashboard = dashboardQuery.data;
 	const availableTags = tagsQuery.data ?? [];
 	const searchResults = (searchQuery.data ?? []) as PillRecord[];
-
-	const autocompleteOptions = useMemo(
-		() =>
-			searchResults.map(result => ({
-				label: result.name,
-				value: result.name,
-				pill: result,
-			})),
-		[searchResults],
-	);
-	const tagAutocompleteOptions = useMemo(
+	const tagOptions = useMemo(
 		() =>
 			availableTags.map(tag => ({
 				label: tag.name,
 				value: tag.name,
+				color: tag.color ?? undefined,
 			})),
 		[availableTags],
 	);
@@ -348,46 +323,33 @@ function PillsRouteComponent() {
 		() => allPills.filter(pill => pill.periods.length === 0).map(pill => ({ pill })),
 		[allPills],
 	);
+	const isSaveDisabled =
+		upsertMutation.isPending ||
+		!formValues.name.trim() ||
+		!formValues.value.trim() ||
+		!formValues.unit.trim() ||
+		formValues.periods.some(period => !period.startDate || !normalizePeriodCount(period.count));
+
+	const resetPillForm = useCallback(() => {
+		setImageError(null);
+		setFormValues({
+			...createEmptyFormValues(),
+			id: undefined,
+		});
+	}, []);
 
 	useEffect(() => {
-		if (!isDrawerRequestedOpen) {
-			return;
-		}
-
-		let isCancelled = false;
-
-		const syncSaveDisabledState = async () => {
-			const hasErrors = await hasFormErrors(form);
-			if (!isCancelled) {
-				setIsSaveDisabled(hasErrors);
-			}
-		};
-
-		void syncSaveDisabledState();
-
-		return () => {
-			isCancelled = true;
-		};
-	}, [form, isDrawerRequestedOpen, watchedFormValues]);
-
-	useEffect(() => {
-		if (!isDrawerRequestedOpen || watchedPeriods.length === 0) {
-			return;
-		}
-
-		const nextPeriods = watchedPeriods.map(period => ({
-			...period,
-			count: normalizePeriodCount(period.count),
-		}));
-
-		const hasChanged = nextPeriods.some(
-			(period, index) => period.count !== watchedPeriods[index]?.count,
-		);
-
-		if (hasChanged) {
-			form.setFieldValue('periods', nextPeriods);
-		}
-	}, [form, isDrawerRequestedOpen, watchedPeriods]);
+		setFormValues(current => {
+			const nextPeriods = current.periods.map(period => ({
+				...period,
+				count: normalizePeriodCount(period.count),
+			}));
+			const hasChanged = nextPeriods.some(
+				(period, index) => period.count !== current.periods[index]?.count,
+			);
+			return hasChanged ? { ...current, periods: nextPeriods } : current;
+		});
+	}, [formValues.periods]);
 
 	useEffect(() => {
 		if (!isDrawerOpen) {
@@ -398,7 +360,7 @@ function PillsRouteComponent() {
 			const pastedText = event.clipboardData?.getData('text')?.trim() ?? '';
 			if (isValidPastedUrl(pastedText)) {
 				event.preventDefault();
-				form.setFieldValue('url', pastedText);
+				patchFormValues({ url: pastedText });
 				return;
 			}
 
@@ -409,21 +371,12 @@ function PillsRouteComponent() {
 
 			event.preventDefault();
 
-			void (async () => {
-				try {
-					setImageError(null);
-					const nextImages = await filesToFormImages(pastedFiles);
-					const currentImages = (form.getFieldValue('images') ?? []) as PillImageFormValue[];
-					form.setFieldValue('images', [...currentImages, ...nextImages]);
-					message.success(
-						pastedFiles.length === 1 ? 'Pasted 1 image.' : `Pasted ${pastedFiles.length} images.`,
-					);
-				} catch (error) {
-					const errorDetails = formatPillImageError(error, 'Unable to process pasted images.');
-					setImageError(errorDetails);
-					message.error(errorDetails.message);
-				}
-			})();
+			void addImages(pastedFiles, {
+				successText:
+					pastedFiles.length === 1 ? 'Pasted 1 image.' : `Pasted ${pastedFiles.length} images.`,
+				errorText: 'Unable to process pasted images.',
+				pasted: true,
+			});
 		};
 
 		window.addEventListener('paste', onPaste);
@@ -431,16 +384,7 @@ function PillsRouteComponent() {
 		return () => {
 			window.removeEventListener('paste', onPaste);
 		};
-	}, [form, isDrawerOpen]);
-
-	function resetPillForm() {
-		setImageError(null);
-		form.resetFields();
-		form.setFieldsValue({
-			...createEmptyFormValues(),
-			id: undefined,
-		});
-	}
+	}, [isDrawerOpen]);
 
 	useEffect(() => {
 		if (editPillId === null) {
@@ -465,22 +409,25 @@ function PillsRouteComponent() {
 		}
 
 		setPillQuery(editedPill.name);
-		form.setFieldsValue(pillToFormValues(editedPill));
+		setFormValues(pillToFormValues(editedPill));
 		setHydratedEditPillId(editPillId);
 	}, [
 		dashboardQuery.isLoading,
 		editPillId,
 		editedPill,
-		form,
 		hydratedEditPillId,
 		onEditPillChange,
+		resetPillForm,
 	]);
+
+	function patchFormValues(patch: Partial<PillFormValues>) {
+		setFormValues(current => ({ ...current, ...patch }));
+	}
 
 	function openNewPillDrawer() {
 		setIsCreateDrawerOpen(true);
 		setHydratedEditPillId(null);
 		setPillQuery('');
-		setOpenPeriodTagEditorKey(null);
 		onEditPillChange(null);
 		resetPillForm();
 	}
@@ -490,7 +437,6 @@ function PillsRouteComponent() {
 			setIsCreateDrawerOpen(false);
 			setHydratedEditPillId(null);
 			setImageError(null);
-			setOpenPeriodTagEditorKey(null);
 			onEditPillChange(pill.id);
 		},
 		[onEditPillChange],
@@ -499,8 +445,10 @@ function PillsRouteComponent() {
 	function handleCloseDrawer() {
 		setIsCreateDrawerOpen(false);
 		setImageError(null);
-		setOpenPeriodTagEditorKey(null);
 		onEditPillChange(null);
+		setPillQuery('');
+		setHydratedEditPillId(null);
+		resetPillForm();
 	}
 
 	const toggleExpandedComponentsRow = useCallback((rowKey: string) => {
@@ -520,95 +468,78 @@ function PillsRouteComponent() {
 				pastRows,
 			});
 			await copyTextToClipboard(JSON.stringify(exportPayload, null, '\t'));
-			message.success('Pills export copied to clipboard.');
+			toast.success('Pills export copied to clipboard.');
 		} catch (error) {
-			message.error(error instanceof Error ? error.message : 'Unable to export pills.');
+			toast.error(getErrorMessage(error, 'Unable to export pills.'));
 		}
 	}
 
-	function handleAutocompleteSelect(_: string, option: { pill?: PillRecord }) {
-		if (!option.pill || isEditMode) {
-			return;
+	function handleNameChange(value: string) {
+		setPillQuery(value);
+
+		if (!isEditMode) {
+			const selectedPill = searchResults.find(result => result.name === value);
+			if (selectedPill) {
+				setFormValues(pillToFormValues(selectedPill, { appendNewPeriod: true }));
+				return;
+			}
 		}
 
-		form.setFieldsValue(
-			pillToFormValues(option.pill, {
-				appendNewPeriod: true,
-			}),
-		);
+		setFormValues(current => ({
+			...current,
+			id: isEditMode ? current.id : undefined,
+			name: value,
+		}));
 	}
 
-	async function syncImagesFromUpload(event: UploadChangeParam<UploadFile<any>>) {
+	async function addImages(
+		files: File[],
+		options?: { successText?: string; errorText?: string; pasted?: boolean },
+	) {
 		try {
 			setImageError(null);
-			const nextImages = await Promise.all(
-				event.fileList.map(async file => {
-					if (typeof file.url === 'string' && !file.originFileObj) {
-						return {
-							uid: file.uid,
+			const nextImages = options?.pasted
+				? await filesToFormImages(files)
+				: await Promise.all(
+						files.map(async (file, index) => ({
+							uid: `upload-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 10)}`,
 							fileName: file.name,
-							dataUrl: file.url,
-						} satisfies PillImageFormValue;
-					}
-
-					const originalFile = file.originFileObj;
-					if (!originalFile) {
-						throw new Error(`Unable to process ${file.name}.`);
-					}
-
-					return {
-						uid: file.uid,
-						fileName: originalFile.name,
-						dataUrl: await readFileAsDataUrl(originalFile),
-						id:
-							typeof file.uid === 'string' && file.uid.startsWith('saved-')
-								? Number(file.uid.replace('saved-', '')) || undefined
-								: undefined,
-					} satisfies PillImageFormValue;
-				}),
-			);
-
-			form.setFieldValue('images', nextImages);
+							dataUrl: await readFileAsDataUrl(file),
+						})),
+					);
+			setFormValues(current => ({ ...current, images: [...current.images, ...nextImages] }));
+			if (options?.successText) {
+				toast.success(options.successText);
+			}
 		} catch (error) {
-			const errorDetails = formatPillImageError(error, 'Unable to process uploaded images.');
+			const errorDetails = formatPillImageError(
+				error,
+				options?.errorText ?? 'Unable to process uploaded images.',
+			);
 			setImageError(errorDetails);
-			message.error(errorDetails.message);
+			toast.error(errorDetails.message);
 		}
+	}
+
+	function removeImage(uid: string) {
+		setImageError(null);
+		setFormValues(current => ({ ...current, images: removeImageByUid(current.images, uid) }));
 	}
 
 	function handleParseImages() {
-		if (watchedImages.length === 0) {
+		if (formValues.images.length === 0) {
 			return;
 		}
 
 		setImageError(null);
 		extractionMutation.mutate({
-			images: getImagePayload(watchedImages),
+			images: getImagePayload(formValues.images),
 		});
 	}
 
-	const uploadProps: UploadProps = {
-		accept: 'image/*',
-		beforeUpload: () => false,
-		disabled: isParsingImages,
-		multiple: true,
-		fileList: buildUploadFileList(watchedImages),
-		showUploadList: false,
-		onChange: info => {
-			void syncImagesFromUpload(info);
-		},
-		onRemove: file => {
-			setImageError(null);
-			form.setFieldValue('images', removeImageByUid(watchedImages, file.uid));
-			return true;
-		},
-	};
-
 	async function handleSubmit(values: PillFormValues) {
 		const isNewPill = values.id == null;
-		const submittedPeriods = (
-			(form.getFieldValue('periods') ?? values.periods) as PillPeriodFormValue[]
-		).map(period => ({
+		const submittedPeriods = values.periods.map(period => ({
 			...period,
 			id: isNewPill ? undefined : period.id,
 			count: normalizePeriodCount(period.count),
@@ -630,12 +561,7 @@ function PillsRouteComponent() {
 		});
 	}
 
-	async function handleDeleteSavedPeriod(
-		periodId: number,
-		fieldIndex: number,
-		remove: (index: number | number[]) => void,
-	) {
-		setOpenPeriodTagEditorKey(null);
+	async function handleDeleteSavedPeriod(periodId: number, index: number) {
 		setDeletingPeriodId(periodId);
 
 		try {
@@ -649,134 +575,78 @@ function PillsRouteComponent() {
 				],
 			});
 
-			remove(fieldIndex);
-
-			message.success(
+			removePeriod(index);
+			toast.success(
 				result.deletedCount === 1
 					? 'Date range deleted.'
 					: `${result.deletedCount} date ranges deleted.`,
 			);
-		} catch {}
+		} catch (error) {
+			toast.error(getErrorMessage(error, 'Unable to delete date range.'));
+		}
 	}
 
-	function handlePeriodTagNamesChange(fieldIndex: number, values: string[]) {
-		form.setFieldValue(['periods', fieldIndex, 'tagNames'], normalizeTagNames(values));
+	function updatePeriod(index: number, patch: Partial<PillPeriodFormValue>) {
+		setFormValues(current => ({
+			...current,
+			periods: current.periods.map((period, periodIndex) =>
+				periodIndex === index ? { ...period, ...patch } : period,
+			),
+		}));
 	}
 
-	function handlePeriodDailyChange(fieldIndex: number, isDaily: boolean) {
-		const rowValue = watchedPeriods[fieldIndex];
-		form.setFieldValue(
-			['periods', fieldIndex, 'daysOfWeek'],
-			isDaily ? [] : [getDefaultWeekdayForPeriod(rowValue)],
-		);
+	function removePeriod(index: number) {
+		setFormValues(current => ({
+			...current,
+			periods: current.periods.filter((_, periodIndex) => periodIndex !== index),
+		}));
 	}
 
-	function handlePeriodWeekdaysChange(fieldIndex: number, values: unknown[]) {
-		form.setFieldValue(
-			['periods', fieldIndex, 'daysOfWeek'],
-			normalizeWeekdaySelection(values.filter(isPillWeekday)),
-		);
+	function handlePeriodDailyChange(index: number, isDaily: boolean) {
+		const rowValue = formValues.periods[index];
+		updatePeriod(index, {
+			daysOfWeek: isDaily ? [] : [getDefaultWeekdayForPeriod(rowValue)],
+		});
 	}
 
-	function renderPeriodFrequencyEditor(fieldIndex: number) {
-		const rowValue = watchedPeriods[fieldIndex];
-		const selectedDays = normalizeWeekdaySelection(rowValue?.daysOfWeek ?? []);
-		const isDaily = selectedDays.length === 0;
-
-		return (
-			<div className='pills-frequency-control'>
-				<Form.Item
-					name={[fieldIndex, 'daysOfWeek']}
-					hidden
-					style={{ marginBottom: 0 }}
-					getValueProps={value => ({
-						value: value ?? [],
-					})}
-				>
-					<Select mode='multiple' />
-				</Form.Item>
-
-				<div className='pills-frequency-daily'>
-					<Switch
-						size='small'
-						checked={isDaily}
-						onChange={checked => handlePeriodDailyChange(fieldIndex, checked)}
-					/>
-					<Typography.Text>Daily</Typography.Text>
-				</div>
-
-				{isDaily ? null : (
-					<Checkbox.Group
-						className='pills-weekday-selector'
-						options={weekdayOptions}
-						value={selectedDays}
-						onChange={values => handlePeriodWeekdaysChange(fieldIndex, values)}
-					/>
-				)}
-			</div>
-		);
+	function handlePeriodWeekdayToggle(index: number, weekday: PillWeekday, checked: boolean) {
+		const selectedDays = normalizeWeekdaySelection(formValues.periods[index]?.daysOfWeek ?? []);
+		const nextSet = new Set(selectedDays);
+		if (checked) {
+			nextSet.add(weekday);
+		} else {
+			nextSet.delete(weekday);
+		}
+		updatePeriod(index, {
+			daysOfWeek: normalizeWeekdaySelection([...nextSet]),
+		});
 	}
 
-	function renderPeriodTagEditor(fieldIndex: number) {
-		const rowValue = watchedPeriods[fieldIndex];
-		const currentTagNames = rowValue?.tagNames ?? [];
-		const editorKey = getPeriodTagEditorKey(fieldIndex, rowValue);
+	function updateComponent(index: number, patch: Partial<PillComponentFormValue>) {
+		setFormValues(current => ({
+			...current,
+			components: current.components.map((component, componentIndex) =>
+				componentIndex === index ? { ...component, ...patch } : component,
+			),
+		}));
+	}
 
-		return (
-			<Popover
-				trigger='click'
-				open={openPeriodTagEditorKey === editorKey}
-				onOpenChange={open => {
-					setOpenPeriodTagEditorKey(open ? editorKey : null);
-				}}
-				placement='leftTop'
-				destroyOnHidden
-				content={
-					<Space direction='vertical' size={8} style={{ width: 280 }}>
-						<Typography.Text strong>Tags</Typography.Text>
-						<Select
-							mode='tags'
-							value={currentTagNames}
-							options={tagAutocompleteOptions}
-							placeholder='Type to attach or create tags'
-							style={{ width: '100%' }}
-							getPopupContainer={trigger => trigger.parentElement ?? document.body}
-							onChange={values => {
-								handlePeriodTagNamesChange(fieldIndex, values);
-							}}
-							tokenSeparators={[',']}
-						/>
-						<div>
-							{currentTagNames.length > 0 ? (
-								<Space size={[4, 4]} wrap>
-									{currentTagNames.map(tagName => {
-										const tagRecord = availableTags.find(tag => tag.name === tagName);
+	function insertComponent(index: number) {
+		setFormValues(current => ({
+			...current,
+			components: [
+				...current.components.slice(0, index),
+				getComponentInsertValue(),
+				...current.components.slice(index),
+			],
+		}));
+	}
 
-										return (
-											<Tag key={tagName} color={tagRecord?.color}>
-												{tagName}
-											</Tag>
-										);
-									})}
-								</Space>
-							) : (
-								<Typography.Text type='secondary'>
-									No tags attached to this date range yet.
-								</Typography.Text>
-							)}
-						</div>
-					</Space>
-				}
-			>
-				<Badge count={currentTagNames.length} size='small' offset={[-2, 2]}>
-					<Button
-						icon={<TagOutlined />}
-						aria-label='Edit date range tags'
-						title={formatPeriodTagButtonTitle(currentTagNames)}
-					/>
-				</Badge>
-			</Popover>
-		);
+	function removeComponent(index: number) {
+		setFormValues(current => ({
+			...current,
+			components: current.components.filter((_, componentIndex) => componentIndex !== index),
+		}));
 	}
 
 	function getMergedTagNames(pill: PillRecord, periodTagNames: string[]) {
@@ -796,255 +666,216 @@ function PillsRouteComponent() {
 		const tagNames = getMergedTagNames(pill, periodTagNames);
 
 		return (
-			<Space size={[4, 4]} wrap align='center'>
+			<XStack gap={6} flexWrap='wrap' alignItems='center'>
 				<Button
-					type='link'
-					size='small'
-					className='pills-link-button'
+					chromeless
+					padding={0}
+					height='auto'
 					icon={<EditOutlined />}
-					onClick={() => openExistingPillDrawer(pill)}
+					onPress={() => openExistingPillDrawer(pill)}
 				>
-					{pill.name}
+					<Text fontWeight='700'>{pill.name}</Text>
 				</Button>
 
 				{tagNames.map(tagName => {
 					const tagRecord = availableTags.find(tag => tag.name === tagName);
-
 					return (
-						<Tag
-							key={`${pill.id}-${tagName}`}
-							color={tagRecord?.color}
-							style={{ marginInlineEnd: 0 }}
-						>
+						<TagChip key={`${pill.id}-${tagName}`} color={tagRecord?.color ?? undefined}>
 							{tagName}
-						</Tag>
+						</TagChip>
 					);
 				})}
-			</Space>
+			</XStack>
 		);
 	}
 
-	const activeColumns: TableColumnsType<ActivePillRow> = useMemo(
+	const activeColumns = useMemo<Array<DataColumn<ActivePillRow>>>(
 		() => [
 			{
-				title: 'Pill',
 				key: 'name',
+				header: 'Pill',
 				width: 360,
-				render: (_: unknown, row: ActivePillRow) =>
+				cell: row =>
 					renderPillNameCell(
 						row.pill,
 						row.activePeriod.tags.map(tag => tag.name),
 					),
 			},
 			{
-				title: 'Amount',
 				key: 'amount',
-				render: (_: unknown, row: ActivePillRow) => (
-					<Typography.Text>
-						{formatServing(
-							multiplyServingValue(row.pill.value, row.activePeriod.count),
-							row.pill.unit,
-						)}
-					</Typography.Text>
-				),
+				header: 'Amount',
+				cell: row =>
+					formatServing(
+						multiplyServingValue(row.pill.value, row.activePeriod.count),
+						row.pill.unit,
+					),
 			},
 			{
-				title: 'Frequency',
 				key: 'frequency',
-				render: (_: unknown, row: ActivePillRow) => (
-					<Typography.Text>{formatPillSchedule(row.activePeriod)}</Typography.Text>
-				),
+				header: 'Frequency',
+				cell: row => formatPillSchedule(row.activePeriod),
 			},
 			{
-				title: 'Started',
 				key: 'started',
-				render: (_: unknown, row: ActivePillRow) => (
-					<Typography.Text>{formatRelativeDate(row.activePeriod.startDate)}</Typography.Text>
-				),
+				header: 'Started',
+				cell: row => formatRelativeDate(row.activePeriod.startDate),
 			},
 			{
-				title: 'Components',
 				key: 'components',
-				render: (_: unknown, row: ActivePillRow) =>
-					renderComponents(row.pill.components, row.activePeriod.count),
-				onCell: row =>
+				header: 'Components',
+				cell: row => renderComponents(row.pill.components, row.activePeriod.count),
+				getCellProps: row =>
 					row.pill.components.length > 0
 						? {
-								onClick: () => {
-									toggleExpandedComponentsRow(String(row.pill.id));
-								},
+								onClick: () => toggleExpandedComponentsRow(String(row.pill.id)),
 								style: { cursor: 'pointer' },
 							}
 						: {},
 			},
 			{
-				title: 'Images',
 				key: 'images',
-				render: (_: unknown, row: ActivePillRow) => renderImages(row.pill.images),
+				header: 'Images',
+				cell: row => renderImages(row.pill.images),
 			},
 		],
 		[availableTags, openExistingPillDrawer, toggleExpandedComponentsRow],
 	);
 
-	const futureColumns: TableColumnsType<FuturePillRow> = useMemo(
+	const futureColumns = useMemo<Array<DataColumn<FuturePillRow>>>(
 		() => [
 			{
-				title: 'Pill',
 				key: 'name',
+				header: 'Pill',
 				width: 360,
-				render: (_: unknown, row: FuturePillRow) =>
+				cell: row =>
 					renderPillNameCell(
 						row.pill,
 						row.futurePeriod.tags.map(tag => tag.name),
 					),
 			},
 			{
-				title: 'Amount',
 				key: 'amount',
-				render: (_: unknown, row: FuturePillRow) => (
-					<Typography.Text>
-						{formatServing(
-							multiplyServingValue(row.pill.value, row.futurePeriod.count),
-							row.pill.unit,
-						)}
-					</Typography.Text>
-				),
+				header: 'Amount',
+				cell: row =>
+					formatServing(
+						multiplyServingValue(row.pill.value, row.futurePeriod.count),
+						row.pill.unit,
+					),
 			},
 			{
-				title: 'Frequency',
 				key: 'frequency',
-				render: (_: unknown, row: FuturePillRow) => (
-					<Typography.Text>{formatPillSchedule(row.futurePeriod)}</Typography.Text>
-				),
+				header: 'Frequency',
+				cell: row => formatPillSchedule(row.futurePeriod),
 			},
 			{
-				title: 'Starts',
 				key: 'starts',
-				render: (_: unknown, row: FuturePillRow) => (
-					<Typography.Text>{formatRelativeDate(row.futurePeriod.startDate)}</Typography.Text>
-				),
+				header: 'Starts',
+				cell: row => formatRelativeDate(row.futurePeriod.startDate),
 			},
 			{
-				title: 'Components',
 				key: 'components',
-				render: (_: unknown, row: FuturePillRow) =>
-					renderComponents(row.pill.components, row.futurePeriod.count),
-				onCell: row =>
+				header: 'Components',
+				cell: row => renderComponents(row.pill.components, row.futurePeriod.count),
+				getCellProps: row =>
 					row.pill.components.length > 0
 						? {
-								onClick: () => {
-									toggleExpandedComponentsRow(`future-${row.pill.id}`);
-								},
+								onClick: () => toggleExpandedComponentsRow(`future-${row.pill.id}`),
 								style: { cursor: 'pointer' },
 							}
 						: {},
 			},
 			{
-				title: 'Images',
 				key: 'images',
-				render: (_: unknown, row: FuturePillRow) => renderImages(row.pill.images),
+				header: 'Images',
+				cell: row => renderImages(row.pill.images),
 			},
 		],
 		[availableTags, openExistingPillDrawer, toggleExpandedComponentsRow],
 	);
 
-	const pastColumns: TableColumnsType<PastPillRow> = useMemo(
+	const pastColumns = useMemo<Array<DataColumn<PastPillRow>>>(
 		() => [
 			{
-				title: 'Pill',
 				key: 'name',
+				header: 'Pill',
 				width: 360,
-				render: (_: unknown, row: PastPillRow) =>
+				cell: row =>
 					renderPillNameCell(
 						row.pill,
 						row.period.tags.map(tag => tag.name),
 					),
 			},
 			{
-				title: 'Amount',
 				key: 'amount',
-				render: (_: unknown, row: PastPillRow) => (
-					<Typography.Text>
-						{formatServing(multiplyServingValue(row.pill.value, row.period.count), row.pill.unit)}
-					</Typography.Text>
-				),
+				header: 'Amount',
+				cell: row =>
+					formatServing(multiplyServingValue(row.pill.value, row.period.count), row.pill.unit),
 			},
 			{
-				title: 'Frequency',
 				key: 'frequency',
-				render: (_: unknown, row: PastPillRow) => (
-					<Typography.Text>{formatPillSchedule(row.period)}</Typography.Text>
-				),
+				header: 'Frequency',
+				cell: row => formatPillSchedule(row.period),
 			},
 			{
-				title: 'Period',
 				key: 'period',
-				render: (_: unknown, row: PastPillRow) => (
-					<Typography.Text>{formatPeriodRange(row.period)}</Typography.Text>
-				),
+				header: 'Period',
+				cell: row => formatPeriodRange(row.period),
 			},
 			{
-				title: 'Components',
 				key: 'components',
-				render: (_: unknown, row: PastPillRow) =>
-					renderComponents(row.pill.components, row.period.count),
-				onCell: row =>
+				header: 'Components',
+				cell: row => renderComponents(row.pill.components, row.period.count),
+				getCellProps: row =>
 					row.pill.components.length > 0
 						? {
-								onClick: () => {
-									toggleExpandedComponentsRow(row.key);
-								},
+								onClick: () => toggleExpandedComponentsRow(row.key),
 								style: { cursor: 'pointer' },
 							}
 						: {},
 			},
 			{
-				title: 'Images',
 				key: 'images',
-				render: (_: unknown, row: PastPillRow) => renderImages(row.pill.images),
+				header: 'Images',
+				cell: row => renderImages(row.pill.images),
 			},
 		],
 		[availableTags, openExistingPillDrawer, toggleExpandedComponentsRow],
 	);
 
-	const notTrackedColumns: TableColumnsType<NotTrackedPillRow> = useMemo(
+	const notTrackedColumns = useMemo<Array<DataColumn<NotTrackedPillRow>>>(
 		() => [
 			{
-				title: 'Pill',
 				key: 'name',
+				header: 'Pill',
 				width: 360,
-				render: (_: unknown, row: NotTrackedPillRow) => renderPillNameCell(row.pill, []),
+				cell: row => renderPillNameCell(row.pill, []),
 			},
 			{
-				title: 'Amount',
 				key: 'amount',
-				render: (_: unknown, row: NotTrackedPillRow) => (
-					<Typography.Text>{formatServing(row.pill.value, row.pill.unit)}</Typography.Text>
-				),
+				header: 'Amount',
+				cell: row => formatServing(row.pill.value, row.pill.unit),
 			},
 			{
-				title: 'Frequency',
 				key: 'frequency',
-				render: () => <Typography.Text />,
+				header: 'Frequency',
+				cell: () => null,
 			},
 			{
-				title: 'Components',
 				key: 'components',
-				render: (_: unknown, row: NotTrackedPillRow) => renderComponents(row.pill.components),
-				onCell: row =>
+				header: 'Components',
+				cell: row => renderComponents(row.pill.components),
+				getCellProps: row =>
 					row.pill.components.length > 0
 						? {
-								onClick: () => {
-									toggleExpandedComponentsRow(String(row.pill.id));
-								},
+								onClick: () => toggleExpandedComponentsRow(String(row.pill.id)),
 								style: { cursor: 'pointer' },
 							}
 						: {},
 			},
 			{
-				title: 'Images',
 				key: 'images',
-				render: (_: unknown, row: NotTrackedPillRow) => renderImages(row.pill.images),
+				header: 'Images',
+				cell: row => renderImages(row.pill.images),
 			},
 		],
 		[availableTags, openExistingPillDrawer, toggleExpandedComponentsRow],
@@ -1054,337 +885,434 @@ function PillsRouteComponent() {
 		setExpandedComponentRowKeys(keys.map(key => String(key)));
 	}, []);
 
-	const activeTableExpandable = useMemo(
-		() => ({
-			expandedRowKeys: expandedComponentRowKeys,
-			expandedRowRender: (row: ActivePillRow) =>
-				renderExpandedComponents(row.pill.components, row.activePeriod.count),
-			onExpandedRowsChange,
-			rowExpandable: (row: ActivePillRow) => row.pill.components.length > 0,
-			showExpandColumn: false,
-		}),
-		[expandedComponentRowKeys, onExpandedRowsChange],
+	const periodRows = formValues.periods.map((period, index) => ({
+		key: period.id ? `period-${period.id}` : `draft-${index}`,
+		period,
+		index,
+	}));
+	const periodColumns = useMemo<Array<DataColumn<(typeof periodRows)[number]>>>(
+		() => [
+			{
+				key: 'period',
+				header: 'Period',
+				width: 250,
+				cell: row => (
+					<XStack gap={6} flexWrap='wrap'>
+						<Input
+							type='date'
+							value={row.period.startDate ?? ''}
+							onChange={event => updatePeriod(row.index, { startDate: event.target.value })}
+						/>
+						<Input
+							type='date'
+							value={row.period.endDate ?? ''}
+							onChange={event => updatePeriod(row.index, { endDate: event.target.value })}
+						/>
+					</XStack>
+				),
+			},
+			{
+				key: 'count',
+				header: 'Count',
+				width: 100,
+				cell: row => (
+					<Input
+						type='number'
+						min={0.01}
+						step={0.5}
+						value={String(row.period.count ?? '')}
+						onChange={event =>
+							updatePeriod(row.index, {
+								count: Number(event.target.value),
+							})
+						}
+					/>
+				),
+			},
+			{
+				key: 'frequency',
+				header: 'Frequency',
+				width: 220,
+				cell: row => <PeriodFrequencyEditor row={row.period} index={row.index} />,
+			},
+			{
+				key: 'timing',
+				header: 'Timing',
+				width: 150,
+				cell: row => (
+					<NativeSelect
+						value={row.period.timing ?? ''}
+						options={[{ label: 'Optional', value: '' }, ...timingOptions]}
+						onChange={value =>
+							updatePeriod(row.index, {
+								timing: value ? (value as PillTiming) : undefined,
+							})
+						}
+					/>
+				),
+			},
+			{
+				key: 'tags',
+				header: 'Tags',
+				width: 250,
+				cell: row => (
+					<TagInput
+						value={row.period.tagNames ?? []}
+						options={tagOptions}
+						placeholder='Tags'
+						onChange={tagNames =>
+							updatePeriod(row.index, { tagNames: normalizeTagNames(tagNames) })
+						}
+					/>
+				),
+			},
+			{
+				key: 'actions',
+				header: '',
+				width: 70,
+				align: 'right',
+				cell: row => {
+					const isSavedRow = Boolean(row.period.id);
+					return (
+						<Button
+							icon={
+								isSavedRow && deletingPeriodId === row.period.id ? (
+									<Spinner size='small' />
+								) : (
+									<DeleteOutlined />
+								)
+							}
+							disabled={isSavedRow && deletingPeriodId === row.period.id}
+							onPress={() => {
+								if (isSavedRow && row.period.id) {
+									void handleDeleteSavedPeriod(row.period.id, row.index);
+									return;
+								}
+								removePeriod(row.index);
+							}}
+						/>
+					);
+				},
+			},
+		],
+		[deletingPeriodId, tagOptions],
 	);
 
-	const futureTableExpandable = useMemo(
-		() => ({
-			expandedRowKeys: expandedComponentRowKeys,
-			expandedRowRender: (row: FuturePillRow) =>
-				renderExpandedComponents(row.pill.components, row.futurePeriod.count),
-			onExpandedRowsChange,
-			rowExpandable: (row: FuturePillRow) => row.pill.components.length > 0,
-			showExpandColumn: false,
-		}),
-		[expandedComponentRowKeys, onExpandedRowsChange],
+	const componentRows = formValues.components.map((component, index) => ({
+		key: `component-${index}`,
+		component,
+		index,
+	}));
+	const componentColumns = useMemo<Array<DataColumn<(typeof componentRows)[number]>>>(
+		() => [
+			{
+				key: 'name',
+				header: 'Name',
+				cell: row => (
+					<Input
+						value={row.component.name}
+						placeholder='Vitamin D3'
+						onChange={event => updateComponent(row.index, { name: event.target.value })}
+					/>
+				),
+			},
+			{
+				key: 'value',
+				header: 'Value',
+				width: 130,
+				cell: row => (
+					<Input
+						value={row.component.value}
+						placeholder='125'
+						onChange={event => updateComponent(row.index, { value: event.target.value })}
+					/>
+				),
+			},
+			{
+				key: 'unit',
+				header: 'Unit',
+				width: 140,
+				cell: row => (
+					<Input
+						value={row.component.unit}
+						placeholder='mcg'
+						onChange={event => updateComponent(row.index, { unit: event.target.value })}
+					/>
+				),
+			},
+			{
+				key: 'actions',
+				header: 'Action',
+				width: 140,
+				cell: row => (
+					<XStack gap={4}>
+						<Button
+							icon={<ArrowUpOutlined />}
+							aria-label='Insert component before'
+							onPress={() => insertComponent(row.index)}
+						/>
+						<Button
+							icon={<ArrowDownOutlined />}
+							aria-label='Insert component after'
+							onPress={() => insertComponent(row.index + 1)}
+						/>
+						<Button
+							icon={<DeleteOutlined />}
+							aria-label='Delete component'
+							onPress={() => removeComponent(row.index)}
+						/>
+					</XStack>
+				),
+			},
+		],
+		[],
 	);
 
-	const pastTableExpandable = useMemo(
-		() => ({
-			expandedRowKeys: expandedComponentRowKeys,
-			expandedRowRender: (row: PastPillRow) =>
-				renderExpandedComponents(row.pill.components, row.period.count),
-			onExpandedRowsChange,
-			rowExpandable: (row: PastPillRow) => row.pill.components.length > 0,
-			showExpandColumn: false,
-		}),
-		[expandedComponentRowKeys, onExpandedRowsChange],
-	);
+	function PeriodFrequencyEditor(props: { row: PillPeriodFormValue; index: number }) {
+		const selectedDays = normalizeWeekdaySelection(props.row.daysOfWeek ?? []);
+		const isDaily = selectedDays.length === 0;
 
-	const notTrackedTableExpandable = useMemo(
-		() => ({
-			expandedRowKeys: expandedComponentRowKeys,
-			expandedRowRender: (row: NotTrackedPillRow) => renderExpandedComponents(row.pill.components),
-			onExpandedRowsChange,
-			rowExpandable: (row: NotTrackedPillRow) => row.pill.components.length > 0,
-			showExpandColumn: false,
-		}),
-		[expandedComponentRowKeys, onExpandedRowsChange],
-	);
+		return (
+			<div className='pills-frequency-control'>
+				<CheckControl
+					checked={isDaily}
+					onCheckedChange={checked => handlePeriodDailyChange(props.index, checked)}
+				>
+					Daily
+				</CheckControl>
+
+				{isDaily ? null : (
+					<div className='pills-weekday-selector'>
+						{weekdayOptions.map(option => (
+							<CheckControl
+								key={option.value}
+								checked={selectedDays.includes(option.value)}
+								onCheckedChange={checked =>
+									handlePeriodWeekdayToggle(props.index, option.value, checked)
+								}
+							>
+								{option.label}
+							</CheckControl>
+						))}
+					</div>
+				)}
+			</div>
+		);
+	}
 
 	return (
 		<main className='pills-page' style={{ background: token.colorBgLayout }}>
 			<PageNav
 				title='Pills'
 				actions={
-					<Space>
+					<XStack gap={8}>
 						<Button
-							size='large'
 							icon={<CopyOutlined />}
-							onClick={() => {
+							onPress={() => {
 								void handleExport();
 							}}
 							disabled={dashboardQuery.isLoading}
 						>
 							Export
 						</Button>
-						<Button type='primary' size='large' icon={<PlusOutlined />} onClick={openNewPillDrawer}>
+						<Button
+							backgroundColor='$primary'
+							style={{ color: 'white' }}
+							icon={<PlusOutlined />}
+							onPress={openNewPillDrawer}
+						>
 							Log pill
 						</Button>
-					</Space>
+					</XStack>
 				}
 			/>
 
 			<div className='pills-page-inner'>
 				{futureRows.length > 0 ? (
-					<Card
+					<PillTableSection
 						title='Future pills'
-						extra={<Typography.Text type='secondary'>{futureRows.length} rows</Typography.Text>}
-					>
-						<Table
-							rowKey={row => String(row.pill.id)}
-							size='small'
-							columns={futureColumns}
-							dataSource={futureRows}
-							loading={dashboardQuery.isLoading}
-							pagination={false}
-							expandable={futureTableExpandable}
-						/>
-					</Card>
+						rowCount={futureRows.length}
+						rows={futureRows}
+						columns={futureColumns}
+						loading={dashboardQuery.isLoading}
+						getRowKey={row => `future-${row.pill.id}`}
+						expandedRowKeys={expandedComponentRowKeys}
+						onExpandedRowKeysChange={onExpandedRowsChange}
+						renderExpandedRow={row =>
+							renderExpandedComponents(row.pill.components, row.futurePeriod.count)
+						}
+						canExpandRow={row => row.pill.components.length > 0}
+					/>
 				) : null}
 
 				{activeRows.length > 0 ? (
-					<Card
+					<PillTableSection
 						title='Active pills'
-						extra={<Typography.Text type='secondary'>{activePills.length} rows</Typography.Text>}
-					>
-						<Table
-							rowKey={row => String(row.pill.id)}
-							size='small'
-							columns={activeColumns}
-							dataSource={activeRows}
-							loading={dashboardQuery.isLoading}
-							pagination={false}
-							expandable={activeTableExpandable}
-						/>
-					</Card>
+						rowCount={activePills.length}
+						rows={activeRows}
+						columns={activeColumns}
+						loading={dashboardQuery.isLoading}
+						getRowKey={row => String(row.pill.id)}
+						expandedRowKeys={expandedComponentRowKeys}
+						onExpandedRowKeysChange={onExpandedRowsChange}
+						renderExpandedRow={row =>
+							renderExpandedComponents(row.pill.components, row.activePeriod.count)
+						}
+						canExpandRow={row => row.pill.components.length > 0}
+					/>
 				) : null}
 
 				{notTrackedRows.length > 0 ? (
-					<Card
+					<PillTableSection
 						title='Not tracked yet'
-						extra={<Typography.Text type='secondary'>{notTrackedRows.length} rows</Typography.Text>}
-					>
-						<Table
-							rowKey={row => String(row.pill.id)}
-							size='small'
-							columns={notTrackedColumns}
-							dataSource={notTrackedRows}
-							loading={dashboardQuery.isLoading}
-							pagination={false}
-							expandable={notTrackedTableExpandable}
-						/>
-					</Card>
+						rowCount={notTrackedRows.length}
+						rows={notTrackedRows}
+						columns={notTrackedColumns}
+						loading={dashboardQuery.isLoading}
+						getRowKey={row => `not-${row.pill.id}`}
+						expandedRowKeys={expandedComponentRowKeys}
+						onExpandedRowKeysChange={onExpandedRowsChange}
+						renderExpandedRow={row => renderExpandedComponents(row.pill.components)}
+						canExpandRow={row => row.pill.components.length > 0}
+					/>
 				) : null}
 
 				{pastRows.length > 0 ? (
-					<Card
+					<PillTableSection
 						title='Past pills'
-						extra={<Typography.Text type='secondary'>{pastRows.length} rows</Typography.Text>}
-					>
-						<Table
-							rowKey='key'
-							size='small'
-							columns={pastColumns}
-							dataSource={pastRows}
-							loading={dashboardQuery.isLoading}
-							pagination={false}
-							expandable={pastTableExpandable}
-						/>
-					</Card>
+						rowCount={pastRows.length}
+						rows={pastRows}
+						columns={pastColumns}
+						loading={dashboardQuery.isLoading}
+						getRowKey={row => row.key}
+						expandedRowKeys={expandedComponentRowKeys}
+						onExpandedRowKeysChange={onExpandedRowsChange}
+						renderExpandedRow={row =>
+							renderExpandedComponents(row.pill.components, row.period.count)
+						}
+						canExpandRow={row => row.pill.components.length > 0}
+					/>
 				) : null}
 			</div>
 
-			<Drawer
-				title={isEditMode ? 'Edit pill' : 'Log pill'}
-				placement='right'
-				width={920}
-				open={isDrawerOpen}
-				onClose={handleCloseDrawer}
-				afterOpenChange={open => {
-					if (open) {
-						return;
+			{isDrawerOpen ? (
+				<DrawerOverlay
+					title={isEditMode ? 'Edit pill' : 'Log pill'}
+					onClose={handleCloseDrawer}
+					actions={
+						<XStack gap={8} flexWrap='wrap'>
+							{isEditMode && editPillId !== null ? (
+								<Button
+									disabled={deletePillMutation.isPending}
+									onPress={() => {
+										if (
+											window.confirm(
+												'Remove this pill? This removes the pill and all its date ranges, components, and images.',
+											)
+										) {
+											deletePillMutation.mutate({
+												where: [{ column: 'id', operator: 'eq', value: editPillId }],
+											});
+										}
+									}}
+								>
+									{deletePillMutation.isPending ? 'Removing...' : 'Remove'}
+								</Button>
+							) : null}
+							<Button onPress={handleCloseDrawer}>Cancel</Button>
+							<Button
+								backgroundColor='$primary'
+								style={{ color: 'white' }}
+								disabled={isSaveDisabled}
+								onPress={() => {
+									void handleSubmit(formValues);
+								}}
+							>
+								{upsertMutation.isPending ? 'Saving...' : 'Save'}
+							</Button>
+						</XStack>
 					}
+				>
+					<YStack gap={14}>
+						<div className='pills-primary-fields'>
+							<FormField label='Pill name' required>
+								<Input
+									value={formValues.name}
+									list='pill-search-options'
+									placeholder='Start typing to reuse a canonical pill'
+									onChange={event => handleNameChange(event.target.value)}
+								/>
+								<datalist id='pill-search-options'>
+									{searchResults.map(result => (
+										<option key={result.id} value={result.name} />
+									))}
+								</datalist>
+							</FormField>
 
-					setPillQuery('');
-					setHydratedEditPillId(null);
-					setOpenPeriodTagEditorKey(null);
-					resetPillForm();
-				}}
-				destroyOnHidden={false}
-				styles={{
-					body: {
-						padding: 16,
-					},
-				}}
-				extra={
-					<Space>
-						{isEditMode && editPillId !== null && (
-							<Popconfirm
-								title='Remove this pill?'
-								description='This removes the pill and all its date ranges, components, and images.'
-								okText='Remove'
-								okButtonProps={{ danger: true }}
-								onConfirm={() =>
-									deletePillMutation.mutate({
-										where: [{ column: 'id', operator: 'eq', value: editPillId }],
+							<FormField label='Value' required>
+								<Input
+									value={formValues.value}
+									placeholder='e.g. 2'
+									onChange={event => patchFormValues({ value: event.target.value })}
+								/>
+							</FormField>
+
+							<FormField label='Unit' required>
+								<Input
+									value={formValues.unit}
+									placeholder='e.g. capsules'
+									onChange={event => patchFormValues({ unit: event.target.value })}
+								/>
+							</FormField>
+						</div>
+
+						<FormField label='URL'>
+							<Input
+								value={formValues.url}
+								placeholder='Optional product URL'
+								onChange={event => patchFormValues({ url: event.target.value })}
+							/>
+						</FormField>
+
+						<FormField label='Tags'>
+							<TagInput
+								value={formValues.tagNames}
+								options={tagOptions}
+								placeholder='Type to attach or create tags'
+								onChange={tagNames => patchFormValues({ tagNames: normalizeTagNames(tagNames) })}
+							/>
+						</FormField>
+
+						<FormField label='Note'>
+							<AutoResizeTextArea
+								value={formValues.note}
+								placeholder='Optional note'
+								minRows={1}
+								maxRows={6}
+								onChange={event =>
+									patchFormValues({
+										note: (event.target as unknown as HTMLTextAreaElement).value,
 									})
 								}
-							>
-								<Button danger loading={deletePillMutation.isPending}>
-									Remove
-								</Button>
-							</Popconfirm>
-						)}
-						<Button onClick={handleCloseDrawer}>Cancel</Button>
-						<Button
-							type='primary'
-							loading={upsertMutation.isPending}
-							disabled={isSaveDisabled}
-							onClick={() => void form.submit()}
-						>
-							Save
-						</Button>
-					</Space>
-				}
-			>
-				<Form<PillFormValues>
-					form={form}
-					layout='vertical'
-					initialValues={createEmptyFormValues()}
-					onFinish={values => {
-						void handleSubmit(values);
-					}}
-				>
-					<Form.Item name='id' hidden>
-						<Input />
-					</Form.Item>
-
-					<div className='pills-primary-fields'>
-						<Form.Item
-							label='Pill name'
-							name='name'
-							rules={[{ required: true, message: 'Enter a pill name.' }]}
-							style={{ marginBottom: 8 }}
-						>
-							<AutoComplete
-								options={autocompleteOptions}
-								onSearch={value => setPillQuery(value)}
-								onSelect={handleAutocompleteSelect}
-								onChange={value => {
-									setPillQuery(value);
-
-									if (value !== form.getFieldValue('name')) {
-										form.setFieldValue('name', value);
-									}
-
-									if (!isEditMode) {
-										const currentId = form.getFieldValue('id');
-										const selectedPill = searchResults.find(result => result.id === currentId);
-										if (selectedPill && selectedPill.name !== value) {
-											form.setFieldValue('id', undefined);
-										}
-									}
-								}}
-								placeholder='Start typing to reuse a canonical pill'
-								filterOption={false}
 							/>
-						</Form.Item>
+						</FormField>
 
-						<Form.Item
-							label='Value'
-							name='value'
-							rules={[{ required: true, message: 'Enter the default pill value.' }]}
-							style={{ marginBottom: 8 }}
-						>
-							<Input placeholder='e.g. 2' />
-						</Form.Item>
+						<div className='pills-images-header'>
+							<H3 className='pills-images-divider'>Images</H3>
 
-						<Form.Item
-							label='Unit'
-							name='unit'
-							rules={[{ required: true, message: 'Enter the default pill unit.' }]}
-							style={{ marginBottom: 8 }}
-						>
-							<Input placeholder='e.g. capsules' />
-						</Form.Item>
-					</div>
+							{formValues.images.length > 0 ? (
+								<Button
+									disabled={isParsingImages}
+									onPress={handleParseImages}
+									icon={isParsingImages ? <Spinner size='small' /> : undefined}
+								>
+									{isParsingImages ? 'Parsing...' : 'Parse images'}
+								</Button>
+							) : null}
+						</div>
 
-					<Form.Item
-						label='URL'
-						name='url'
-						layout='horizontal'
-						labelCol={{ flex: '50px' }}
-						wrapperCol={{ flex: 'auto' }}
-						labelAlign='left'
-						style={{ marginBottom: 8 }}
-					>
-						<Input placeholder='Optional product URL' />
-					</Form.Item>
-
-					<Form.Item
-						label='Tags'
-						name='tagNames'
-						layout='horizontal'
-						labelCol={{ flex: '50px' }}
-						wrapperCol={{ flex: 'auto' }}
-						labelAlign='left'
-						style={{ marginBottom: 8 }}
-					>
-						<Select
-							mode='tags'
-							options={tagAutocompleteOptions}
-							placeholder='Type to attach or create tags'
-							tokenSeparators={[',']}
-							tagRender={props => {
-								const tagRecord = availableTags.find(tag => tag.name === props.value);
-								return (
-									<Tag
-										color={tagRecord?.color}
-										closable={props.closable}
-										onClose={props.onClose}
-										style={{ marginInlineEnd: 4 }}
-									>
-										{props.label}
-									</Tag>
-								);
-							}}
-						/>
-					</Form.Item>
-
-					<Form.Item
-						label='Note'
-						name='note'
-						layout='horizontal'
-						labelCol={{ flex: '50px' }}
-						wrapperCol={{ flex: 'auto' }}
-						labelAlign='left'
-						style={{ marginBottom: 8 }}
-					>
-						<Input.TextArea autoSize={{ minRows: 1, maxRows: 6 }} placeholder='Optional note' />
-					</Form.Item>
-
-					<div className='pills-images-header'>
-						<Divider className='pills-images-divider'>Images</Divider>
-
-						{watchedImages.length > 0 ? (
-							<Button
-								size='small'
-								loading={isParsingImages}
-								disabled={isParsingImages}
-								onClick={handleParseImages}
-							>
-								Parse images
-							</Button>
-						) : null}
-					</div>
-
-					<Form.Item name='images' hidden>
-						<Input />
-					</Form.Item>
-
-					<Image.PreviewGroup>
 						<div className='pills-images-grid'>
-							{watchedImages.map(image => (
+							{formValues.images.map(image => (
 								<div
 									key={image.uid}
 									className='pills-image-tile'
@@ -1393,7 +1321,7 @@ function PillsRouteComponent() {
 										background: token.colorBgContainer,
 									}}
 								>
-									<Image
+									<img
 										src={image.dataUrl}
 										alt={image.fileName}
 										width={IMAGE_TILE_SIZE}
@@ -1401,301 +1329,318 @@ function PillsRouteComponent() {
 										style={{ objectFit: 'cover' }}
 									/>
 									<Button
-										size='small'
-										danger
 										icon={<DeleteOutlined />}
-										onClick={() => {
-											setImageError(null);
-											form.setFieldValue('images', removeImageByUid(watchedImages, image.uid));
-										}}
+										onPress={() => removeImage(image.uid)}
 										className='pills-image-remove'
 									/>
 								</div>
 							))}
 
-							<Dragger
-								{...uploadProps}
+							<FileDropzone
+								accept='image/*'
+								multiple
+								disabled={isParsingImages}
 								className='pills-upload-tile'
 								style={{
 									width: IMAGE_TILE_SIZE,
 									height: IMAGE_TILE_SIZE,
+									border: `1px dashed ${token.colorBorderSecondary}`,
+									borderRadius: 8,
+									background: token.colorFillAlter,
+								}}
+								onFiles={files => {
+									void addImages(files);
 								}}
 							>
 								<div className='pills-upload-inner'>
-									<UploadOutlined style={{ fontSize: 20 }} />
-									<Typography.Text className='pills-upload-label' type='secondary'>
+									<UploadOutlined size={20} />
+									<Text className='pills-upload-label' color='$textMuted'>
 										Drop or upload
-									</Typography.Text>
+									</Text>
 								</div>
-							</Dragger>
+							</FileDropzone>
 						</div>
-					</Image.PreviewGroup>
 
-					{isParsingImages ? (
-						<div
-							className='pills-parsing-banner'
-							style={{
-								borderColor: token.colorInfoBorder,
-								background: token.colorInfoBg,
-								color: token.colorInfoText,
-							}}
-						>
-							<Spin size='small' />
-							<Typography.Text className='pills-parsing-banner-text'>
-								Parsing uploaded images and filling the form…
-							</Typography.Text>
-						</div>
-					) : null}
-					{imageError ? (
-						<Alert
-							type='error'
-							showIcon
-							message={imageError.message}
-							description={<pre className='pills-image-error-details'>{imageError.details}</pre>}
-							className='pills-image-error'
-						/>
-					) : null}
+						{isParsingImages ? (
+							<div
+								className='pills-parsing-banner'
+								style={{
+									borderColor: token.colorInfoBorder,
+									background: token.colorInfoBg,
+									color: token.colorInfoText,
+								}}
+							>
+								<Spinner size='small' />
+								<Text className='pills-parsing-banner-text'>
+									Parsing uploaded images and filling the form...
+								</Text>
+							</div>
+						) : null}
+						{imageError ? (
+							<InlineAlert title={imageError.message}>
+								<pre className='pills-image-error-details'>{imageError.details}</pre>
+							</InlineAlert>
+						) : null}
 
-					<Divider>Date Ranges</Divider>
+						<SectionDivider>Date Ranges</SectionDivider>
 
-					<Form.List name='periods'>
-						{(fields, { add, remove }) => (
-							<Space direction='vertical' size={8} className='pills-list-space'>
-								{fields.length > 0 && (
-									<Table
-										size='small'
-										pagination={false}
-										rowKey='key'
-										dataSource={fields}
-										tableLayout='fixed'
-										className='pills-periods-table'
-										scroll={{ x: 820 }}
-										columns={[
-											{
-												title: 'Period',
-												width: 248,
-												render: (_: unknown, field) => (
-													<div style={{ width: '100%' }}>
-														<Form.Item name={[field.name, 'id']} hidden>
-															<Input />
-														</Form.Item>
-														<Form.Item
-															name={[field.name, 'startDate']}
-															rules={[{ required: true, message: 'Required' }]}
-															hidden
-															style={{ marginBottom: 0 }}
-														>
-															<Input />
-														</Form.Item>
-														<Form.Item
-															name={[field.name, 'endDate']}
-															hidden
-															style={{ marginBottom: 0 }}
-														>
-															<Input />
-														</Form.Item>
-														<RangePicker
-															style={{ width: '100%' }}
-															format={DATE_FORMAT}
-															allowEmpty={[false, true]}
-															value={getPeriodRangePickerValue(watchedPeriods[field.name])}
-															onChange={(_, dateStrings) => {
-																const [startDate, endDate] = dateStrings;
-																form.setFieldValue(
-																	['periods', field.name, 'startDate'],
-																	startDate ?? '',
-																);
-																form.setFieldValue(
-																	['periods', field.name, 'endDate'],
-																	endDate ?? '',
-																);
-															}}
-														/>
-													</div>
-												),
-											},
-											{
-												title: 'Count',
-												width: 88,
-												render: (_: unknown, field) => (
-													<Form.Item
-														name={[field.name, 'count']}
-														rules={[{ required: true, message: 'Required' }]}
-														style={{ marginBottom: 0 }}
-													>
-														<InputNumber
-															min={0.01}
-															step={0.5}
-															placeholder='Count'
-															style={{ width: '100%' }}
-														/>
-													</Form.Item>
-												),
-											},
-											{
-												title: 'Frequency',
-												width: 190,
-												render: (_: unknown, field) => renderPeriodFrequencyEditor(field.name),
-											},
-											{
-												title: 'Timing',
-												width: 128,
-												render: (_: unknown, field) => (
-													<Form.Item name={[field.name, 'timing']} style={{ marginBottom: 0 }}>
-														<Select
-															allowClear
-															placeholder='Optional'
-															options={
-																timingOptions as unknown as { label: string; value: string }[]
-															}
-														/>
-													</Form.Item>
-												),
-											},
-											{
-												width: 84,
-												align: 'right',
-												render: (_: unknown, field) => {
-													const rowValue = watchedPeriods[field.name] as
-														| PillPeriodFormValue
-														| undefined;
-													const isSavedRow = Boolean(rowValue?.id);
-
-													return (
-														<Space size={4} align='center' className='pills-period-actions'>
-															<Form.Item
-																name={[field.name, 'tagNames']}
-																hidden
-																style={{ marginBottom: 0 }}
-																getValueProps={value => ({
-																	value: value ?? [],
-																})}
-															>
-																<Select mode='multiple' />
-															</Form.Item>
-
-															{renderPeriodTagEditor(field.name)}
-
-															<Button
-																size='small'
-																danger
-																icon={<DeleteOutlined />}
-																loading={isSavedRow && deletingPeriodId === rowValue?.id}
-																onClick={() => {
-																	if (isSavedRow && rowValue?.id) {
-																		void handleDeleteSavedPeriod(rowValue.id, field.name, remove);
-																		return;
-																	}
-
-																	remove(field.name);
-																	setOpenPeriodTagEditorKey(null);
-																}}
-															/>
-														</Space>
-													);
-												},
-											},
-										]}
-									/>
-								)}
-
-								<Button
-									size='small'
-									icon={<PlusOutlined />}
-									onClick={() => add(createBlankPeriod())}
-								>
-									Add {fields.length > 0 ? 'another' : 'a'} range
-								</Button>
-							</Space>
-						)}
-					</Form.List>
-
-					<Divider>
-						{formatSupplementFactsTitle(watchedFormValues?.value, watchedFormValues?.unit)}
-					</Divider>
-
-					<Form.List name='components'>
-						{(fields, { add, remove }) => (
-							<Space direction='vertical' size={8} className='pills-list-space'>
-								<Table
-									size='small'
-									pagination={false}
-									rowKey='key'
-									dataSource={fields}
-									scroll={{ x: 760 }}
-									columns={[
-										{
-											title: 'Name',
-											render: (_: unknown, field) => (
-												<Form.Item name={[field.name, 'name']} style={{ marginBottom: 0 }}>
-													<Input placeholder='Vitamin D3' />
-												</Form.Item>
-											),
-										},
-										{
-											title: 'Value',
-											width: 130,
-											render: (_: unknown, field) => (
-												<Form.Item name={[field.name, 'value']} style={{ marginBottom: 0 }}>
-													<Input placeholder='125' />
-												</Form.Item>
-											),
-										},
-										{
-											title: 'Unit',
-											width: 140,
-											render: (_: unknown, field) => (
-												<Form.Item name={[field.name, 'unit']} style={{ marginBottom: 0 }}>
-													<Input placeholder='mcg' />
-												</Form.Item>
-											),
-										},
-										{
-											title: 'Action',
-											width: 124,
-											render: (_: unknown, field) => (
-												<Space size='small'>
-													<Button
-														size='small'
-														icon={<ArrowUpOutlined />}
-														onClick={() => add(getComponentInsertValue(), field.name)}
-														aria-label='Insert component before'
-														title='Insert component before'
-													/>
-													<Button
-														size='small'
-														icon={<ArrowDownOutlined />}
-														onClick={() => add(getComponentInsertValue(), field.name + 1)}
-														aria-label='Insert component after'
-														title='Insert component after'
-													/>
-													<Button
-														size='small'
-														danger
-														icon={<DeleteOutlined />}
-														onClick={() => remove(field.name)}
-														aria-label='Delete component'
-														title='Delete component'
-													/>
-												</Space>
-											),
-										},
-									]}
+						<YStack gap={8} className='pills-list-space'>
+							{periodRows.length > 0 ? (
+								<DataTable
+									rows={periodRows}
+									columns={periodColumns}
+									getRowKey={row => row.key}
+									minWidth={1040}
+									className='pills-periods-table'
 								/>
+							) : null}
 
-								<Button
-									size='small'
-									icon={<PlusOutlined />}
-									onClick={() => add(getComponentInsertValue())}
-								>
-									Add component
-								</Button>
-							</Space>
-						)}
-					</Form.List>
-				</Form>
-			</Drawer>
+							<Button
+								icon={<PlusOutlined />}
+								onPress={() =>
+									setFormValues(current => ({
+										...current,
+										periods: [...current.periods, createBlankPeriod()],
+									}))
+								}
+							>
+								Add {periodRows.length > 0 ? 'another' : 'a'} range
+							</Button>
+						</YStack>
+
+						<SectionDivider>
+							{formatSupplementFactsTitle(formValues.value, formValues.unit)}
+						</SectionDivider>
+
+						<YStack gap={8} className='pills-list-space'>
+							<DataTable
+								rows={componentRows}
+								columns={componentColumns}
+								getRowKey={row => row.key}
+								minWidth={760}
+							/>
+
+							<Button
+								icon={<PlusOutlined />}
+								onPress={() =>
+									setFormValues(current => ({
+										...current,
+										components: [...current.components, getComponentInsertValue()],
+									}))
+								}
+							>
+								Add component
+							</Button>
+						</YStack>
+					</YStack>
+				</DrawerOverlay>
+			) : null}
 		</main>
+	);
+}
+
+function PillTableSection<T>(props: {
+	title: string;
+	rowCount: number;
+	rows: T[];
+	columns: Array<DataColumn<T>>;
+	loading: boolean;
+	getRowKey: (row: T, index: number) => Key;
+	expandedRowKeys: readonly Key[];
+	onExpandedRowKeysChange: (keys: Key[]) => void;
+	renderExpandedRow: (row: T) => ReactNode;
+	canExpandRow: (row: T) => boolean;
+}) {
+	return (
+		<SectionCard
+			title={props.title}
+			actions={<Text color='$textMuted'>{props.rowCount} rows</Text>}
+		>
+			<DataTable
+				rows={props.rows}
+				columns={props.columns}
+				getRowKey={props.getRowKey}
+				loading={props.loading}
+				expandedRowKeys={props.expandedRowKeys}
+				onExpandedRowKeysChange={props.onExpandedRowKeysChange}
+				renderExpandedRow={props.renderExpandedRow}
+				canExpandRow={props.canExpandRow}
+				showExpandColumn={false}
+			/>
+		</SectionCard>
+	);
+}
+
+function themeValue(theme: ReturnType<typeof useTheme>, name: string) {
+	const token = (theme as any)[name];
+	if (!token?.get) {
+		throw new Error(`Missing Tamagui theme token: ${name}`);
+	}
+	return token.get('web') as string;
+}
+
+function getPillsThemeToken(theme: ReturnType<typeof useTheme>) {
+	return {
+		colorBgLayout: themeValue(theme, 'bgLayout'),
+		colorBgContainer: themeValue(theme, 'bgContainer'),
+		colorBorderSecondary: themeValue(theme, 'borderSubtle'),
+		colorFillAlter: themeValue(theme, 'fill'),
+		colorTextSecondary: themeValue(theme, 'textMuted'),
+		colorError: themeValue(theme, 'error'),
+		colorErrorBg: themeValue(theme, 'errorBg'),
+		colorErrorBorder: themeValue(theme, 'errorBorder'),
+		colorInfoBg: themeValue(theme, 'infoBg'),
+		colorInfoBorder: themeValue(theme, 'infoBorder'),
+		colorInfoText: themeValue(theme, 'infoText'),
+	};
+}
+
+function SectionCard(props: { title: ReactNode; actions?: ReactNode; children: ReactNode }) {
+	const token = getPillsThemeToken(useTheme());
+
+	return (
+		<Card
+			borderWidth={1}
+			borderColor='$borderSubtle'
+			backgroundColor='$bgContainer'
+			borderRadius={8}
+			overflow='hidden'
+		>
+			<XStack
+				justifyContent='space-between'
+				alignItems='center'
+				gap={12}
+				flexWrap='wrap'
+				paddingHorizontal={16}
+				paddingVertical={12}
+				style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}
+			>
+				{typeof props.title === 'string' ? <H3>{props.title}</H3> : props.title}
+				{props.actions}
+			</XStack>
+			<div style={{ padding: 16 }}>{props.children}</div>
+		</Card>
+	);
+}
+
+function SectionDivider(props: { children: ReactNode }) {
+	const token = getPillsThemeToken(useTheme());
+
+	return (
+		<XStack alignItems='center' gap={12}>
+			<div style={{ height: 1, flex: 1, background: token.colorBorderSecondary }} />
+			<Text fontWeight='700'>{props.children}</Text>
+			<div style={{ height: 1, flex: 1, background: token.colorBorderSecondary }} />
+		</XStack>
+	);
+}
+
+function DrawerOverlay(props: {
+	title: ReactNode;
+	actions: ReactNode;
+	children: ReactNode;
+	onClose: () => void;
+}) {
+	const token = getPillsThemeToken(useTheme());
+	const panelStyle: CSSProperties = {
+		width: 920,
+		maxWidth: 'calc(100vw - 32px)',
+		height: 'calc(100vh - 32px)',
+		background: token.colorBgContainer,
+		border: `1px solid ${token.colorBorderSecondary}`,
+		borderRadius: 10,
+		boxShadow: '0 18px 48px rgba(15, 23, 42, 0.24)',
+		overflow: 'hidden',
+	};
+
+	return (
+		<div
+			style={{
+				position: 'fixed',
+				inset: 0,
+				zIndex: 80,
+				display: 'flex',
+				justifyContent: 'flex-end',
+				padding: 16,
+				background: 'rgba(15, 23, 42, 0.38)',
+			}}
+		>
+			<div style={panelStyle}>
+				<XStack
+					justifyContent='space-between'
+					alignItems='center'
+					gap={12}
+					paddingHorizontal={16}
+					paddingVertical={12}
+					style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}
+				>
+					<H3>{props.title}</H3>
+					{props.actions}
+				</XStack>
+				<div style={{ height: 'calc(100% - 61px)', overflowY: 'auto', padding: 16 }}>
+					{props.children}
+				</div>
+			</div>
+		</div>
+	);
+}
+
+function InlineAlert(props: { title: ReactNode; children: ReactNode }) {
+	const token = getPillsThemeToken(useTheme());
+
+	return (
+		<XStack
+			gap={10}
+			padding={12}
+			borderWidth={1}
+			borderRadius={8}
+			className='pills-image-error'
+			style={{ background: token.colorErrorBg, borderColor: token.colorErrorBorder }}
+		>
+			<WarningCircle size={18} weight='fill' color={token.colorError} />
+			<YStack flex={1} minWidth={0}>
+				<Text fontWeight='700'>{props.title}</Text>
+				<Paragraph color='$textMuted'>{props.children}</Paragraph>
+			</YStack>
+		</XStack>
+	);
+}
+
+function CheckControl(props: {
+	checked: boolean;
+	children: ReactNode;
+	onCheckedChange: (checked: boolean) => void;
+}) {
+	return (
+		<XStack alignItems='center' gap={6}>
+			<Checkbox
+				checked={props.checked}
+				onCheckedChange={value => props.onCheckedChange(Boolean(value))}
+			>
+				<Checkbox.Indicator />
+			</Checkbox>
+			<Text>{props.children}</Text>
+		</XStack>
+	);
+}
+
+function NativeSelect(props: {
+	value: string;
+	options: Array<{ label: ReactNode; value: string }>;
+	onChange: (value: string) => void;
+}) {
+	return (
+		<select
+			className='native-select'
+			value={props.value}
+			onChange={event => props.onChange(event.target.value)}
+		>
+			{props.options.map(option => (
+				<option key={option.value || 'empty'} value={option.value}>
+					{option.label}
+				</option>
+			))}
+		</select>
 	);
 }
 
@@ -1739,17 +1684,6 @@ function createEmptyFormValues(): PillFormValues {
 	};
 }
 
-function getPeriodTagEditorKey(fieldIndex: number, period: PillPeriodFormValue | undefined) {
-	return period?.id ? `period-${period.id}` : `draft-${fieldIndex}`;
-}
-
-function getPeriodRangePickerValue(period: PillPeriodFormValue | undefined) {
-	return [
-		period?.startDate ? dayjs(period.startDate, DATE_FORMAT) : null,
-		period?.endDate ? dayjs(period.endDate, DATE_FORMAT) : null,
-	] as [dayjs.Dayjs | null, dayjs.Dayjs | null];
-}
-
 function normalizeTagNames(values: string[]) {
 	const namesByKey = new Map<string, string>();
 
@@ -1766,14 +1700,6 @@ function normalizeTagNames(values: string[]) {
 	}
 
 	return [...namesByKey.values()];
-}
-
-function formatPeriodTagButtonTitle(tagNames: string[]) {
-	if (tagNames.length === 0) {
-		return 'Edit date range tags';
-	}
-
-	return `Tags: ${tagNames.join(', ')}`;
 }
 
 function formatServing(value?: string | null, unit?: string | null) {
@@ -1806,7 +1732,7 @@ function multiplyServingValue(value: string | null | undefined, count: number | 
 	if (!Number.isFinite(numericValue)) {
 		return normalizedCount === 1
 			? trimmedValue
-			: `${formatNumericValue(normalizedCount)} × ${trimmedValue}`;
+			: `${formatNumericValue(normalizedCount)} x ${trimmedValue}`;
 	}
 
 	return formatNumericValue(numericValue * normalizedCount);
@@ -1845,7 +1771,7 @@ function isPillWeekday(value: unknown): value is PillWeekday {
 }
 
 function normalizeWeekdaySelection(values: readonly PillWeekday[]) {
-	const selectedValues = new Set(values);
+	const selectedValues = new Set(values.filter(isPillWeekday));
 	const orderedValues = pillWeekdayValues.filter(value => selectedValues.has(value));
 	return orderedValues.length === pillWeekdayValues.length ? [] : orderedValues;
 }
@@ -1958,15 +1884,6 @@ function extractionToFormPatch(extraction: PillExtractionResult) {
 	} satisfies Partial<PillFormValues>;
 }
 
-function buildUploadFileList(images: PillImageFormValue[]): UploadFile[] {
-	return images.map(image => ({
-		uid: image.uid,
-		name: image.fileName,
-		status: 'done',
-		url: image.dataUrl,
-	}));
-}
-
 function getImagePayload(images: PillImageFormValue[]) {
 	return images.map(image => ({
 		id: image.id,
@@ -1981,18 +1898,6 @@ function removeImageByUid(images: PillImageFormValue[], uid: string) {
 
 function getComponentInsertValue() {
 	return { name: '', value: '', unit: '' };
-}
-
-async function hasFormErrors(form: FormInstance<PillFormValues>) {
-	try {
-		await form.validateFields({
-			validateOnly: true,
-			recursive: true,
-		});
-		return false;
-	} catch {
-		return true;
-	}
 }
 
 function readFileAsDataUrl(file: File) {
@@ -2180,69 +2085,68 @@ function getDebugJsonReplacer() {
 
 function renderComponents(components: PillComponent[], count = 1) {
 	if (components.length === 0) {
-		return <Typography.Text type='secondary'>No components</Typography.Text>;
+		return <Text color='$textMuted'>No components</Text>;
 	}
 
 	const [firstComponent, ...remainingComponents] = components;
 
 	return (
-		<Space direction='vertical' size={0}>
-			<Typography.Text>
+		<YStack gap={0}>
+			<Text>
 				{firstComponent.name}:{' '}
 				{formatServing(multiplyServingValue(firstComponent.value, count), firstComponent.unit)}
-			</Typography.Text>
+			</Text>
 			{remainingComponents.length > 0 ? (
-				<Typography.Text type='secondary'>+{remainingComponents.length} more</Typography.Text>
+				<Text color='$textMuted'>+{remainingComponents.length} more</Text>
 			) : null}
-		</Space>
+		</YStack>
 	);
 }
 
 function renderExpandedComponents(components: PillComponent[], count = 1) {
+	const columns: Array<DataColumn<PillComponent>> = [
+		{
+			key: 'name',
+			header: 'Name',
+			cell: component => component.name,
+		},
+		{
+			key: 'value',
+			header: 'Value',
+			width: 180,
+			cell: component =>
+				formatServing(multiplyServingValue(component.value, count), component.unit),
+		},
+	];
+
 	return (
-		<Table
-			size='small'
-			pagination={false}
-			rowKey='id'
-			dataSource={components}
-			columns={[
-				{
-					title: 'Name',
-					dataIndex: 'name',
-					key: 'name',
-				},
-				{
-					title: 'Value',
-					key: 'value',
-					width: 180,
-					render: (_: unknown, component: PillComponent) =>
-						formatServing(multiplyServingValue(component.value, count), component.unit),
-				},
-			]}
+		<DataTable
+			rows={components}
+			columns={columns}
+			getRowKey={component => component.id}
+			minWidth={420}
 		/>
 	);
 }
 
 function renderImages(images: PillImage[]) {
 	if (images.length === 0) {
-		return <Typography.Text type='secondary'>No images</Typography.Text>;
+		return <Text color='$textMuted'>No images</Text>;
 	}
 
 	return (
-		<Image.PreviewGroup>
-			<div className='pills-image-list'>
-				{images.map(image => (
-					<Image
-						key={image.id}
-						src={image.dataUrl}
-						alt={image.fileName}
-						width={44}
-						height={44}
-						className='pills-image-preview'
-					/>
-				))}
-			</div>
-		</Image.PreviewGroup>
+		<div className='pills-image-list'>
+			{images.map(image => (
+				<img
+					key={image.id}
+					src={image.dataUrl}
+					alt={image.fileName}
+					width={44}
+					height={44}
+					className='pills-image-preview'
+				/>
+			))}
+		</div>
 	);
 }
 
@@ -2412,4 +2316,11 @@ function formatRelativeDate(value: string) {
 	} catch {
 		return value;
 	}
+}
+
+function getErrorMessage(error: unknown, fallback = 'Something went wrong.') {
+	if (error instanceof Error) {
+		return error.message || fallback;
+	}
+	return String(error || fallback);
 }

@@ -1,25 +1,23 @@
 import { ChartLineUp, UploadSimple, WarningCircle } from '@phosphor-icons/react';
+import { toast } from '@tamagui/toast/v2';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
 import {
-	Alert,
 	Button,
 	Card,
 	Checkbox,
-	Drawer,
-	Empty,
-	Flex,
-	Popconfirm,
-	Splitter,
-	Spin,
-	Tag,
-	Tabs,
-	Typography,
-	message,
-	theme as uiTheme,
-} from '../components/ui';
+	H3,
+	Paragraph,
+	Spinner,
+	Text,
+	XStack,
+	YStack,
+	useTheme,
+} from 'tamagui';
 import {
+	type CSSProperties,
 	type ChangeEvent,
+	type ReactNode,
 	useCallback,
 	useDeferredValue,
 	useEffect,
@@ -115,8 +113,7 @@ function LabsPage() {
 	const isMobileViewport = viewport.width < 900;
 	const trpc = useTRPC();
 	const queryClient = useQueryClient();
-	const { token } = uiTheme.useToken();
-	const [messageApi, messageContextHolder] = message.useMessage();
+	const token = getLabsPageToken(useTheme());
 	const importInputRef = useRef<HTMLInputElement | null>(null);
 
 	const [measurementFilter, setMeasurementFilter] = useState('');
@@ -159,22 +156,22 @@ function LabsPage() {
 			if (deduplicatedCount > 0) {
 				parts.push(`${deduplicatedCount} duplicate${deduplicatedCount === 1 ? '' : 's'} skipped.`);
 			}
-			messageApi.success(parts.join(' '));
+			toast.success(parts.join(' '));
 		},
 		onError: error => {
-			messageApi.error(error.message);
+			toast.error(error.message);
 		},
 	});
 	const deleteDocumentMutation = useMutation({
 		...trpc.table.labDocuments.deleteMany.mutationOptions(),
 		onSuccess: async data => {
 			await queryClient.invalidateQueries({ queryKey: [['labs']] });
-			messageApi.success(
+			toast.success(
 				data.deletedCount === 1 ? 'Document deleted.' : `${data.deletedCount} documents deleted.`,
 			);
 		},
 		onError: error => {
-			messageApi.error(error.message);
+			toast.error(error.message);
 		},
 		onSettled: () => {
 			setDeletingDocumentId(null);
@@ -184,33 +181,33 @@ function LabsPage() {
 		...trpc.table.labDocuments.updateMany.mutationOptions(),
 		onSuccess: async data => {
 			await queryClient.invalidateQueries({ queryKey: [['labs']] });
-			messageApi.success(
+			toast.success(
 				data.updatedCount === 1 ? '1 document updated.' : `${data.updatedCount} documents updated.`,
 			);
 			setSelectedImportDocumentIds([]);
 		},
 		onError: error => {
-			messageApi.error(error.message);
+			toast.error(error.message);
 		},
 	});
 	const retryDocumentMutation = useMutation({
 		...trpc.labs.retryDocument.mutationOptions(),
 		onSuccess: async () => {
 			await queryClient.invalidateQueries({ queryKey: [['labs']] });
-			messageApi.success('Document queued for retry.');
+			toast.success('Document queued for retry.');
 		},
 		onError: error => {
-			messageApi.error(error.message);
+			toast.error(error.message);
 		},
 	});
 	const reprocessDocumentMutation = useMutation({
 		...trpc.labs.reprocessDocument.mutationOptions(),
 		onSuccess: async () => {
 			await queryClient.invalidateQueries({ queryKey: [['labs']] });
-			messageApi.success('Document queued for reprocess.');
+			toast.success('Document queued for reprocess.');
 		},
 		onError: error => {
-			messageApi.error(error.message);
+			toast.error(error.message);
 		},
 	});
 	const dashboard = dashboardQuery.data;
@@ -888,11 +885,11 @@ function LabsPage() {
 	);
 
 	const importPanel = (
-		<Card
-			size='small'
+		<SectionCard
 			title='Documents'
-			extra={
-				<Flex align='center' gap={8} wrap>
+			bodyPadding={0}
+			actions={
+				<XStack alignItems='center' gap={8} flexWrap='wrap'>
 					<input
 						ref={importInputRef}
 						type='file'
@@ -904,18 +901,15 @@ function LabsPage() {
 						}}
 					/>
 					<Button
-						type='default'
-						onClick={() => {
+						onPress={() => {
 							void onGroupDocuments();
 						}}
 						disabled={selectedGroupableDocuments.length < 2 || updateDocumentsMutation.isPending}
-						loading={updateDocumentsMutation.isPending}
 					>
-						Group documents
+						{updateDocumentsMutation.isPending ? 'Grouping...' : 'Group documents'}
 					</Button>
 					<Button
-						type='default'
-						onClick={() => {
+						onPress={() => {
 							void onClearDocumentGroup();
 						}}
 						disabled={!hasSelectedDocumentGroup || updateDocumentsMutation.isPending}
@@ -923,32 +917,36 @@ function LabsPage() {
 						Clear group
 					</Button>
 					<Button
-						type='default'
-						icon={<UploadSimple size={16} />}
-						onClick={onOpenImportPicker}
-						loading={uploadDocumentsMutation.isPending}
+						icon={
+							uploadDocumentsMutation.isPending ? (
+								<Spinner size='small' />
+							) : (
+								<UploadSimple size={16} />
+							)
+						}
+						onPress={onOpenImportPicker}
+						disabled={uploadDocumentsMutation.isPending}
 					>
 						Import File
 					</Button>
-				</Flex>
+				</XStack>
 			}
-			styles={{ body: { padding: 0 } }}
 		>
 			{importDocuments.length === 0 ? (
 				<div style={{ padding: 16 }}>
-					<Empty description='No imported documents yet.' image={Empty.PRESENTED_IMAGE_SIMPLE} />
+					<EmptyState>No imported documents yet.</EmptyState>
 				</div>
 			) : (
 				<div>
 					{importDocuments.map((item, index) => {
-						const statusColor =
+						const tone =
 							item.status === 'completed'
 								? 'success'
 								: item.status === 'failed'
 									? 'error'
 									: item.status === 'processing'
-										? 'processing'
-										: 'default';
+										? 'info'
+										: 'neutral';
 						const previousItem = importDocuments[index - 1];
 						const nextItem = importDocuments[index + 1];
 						const hasGroup = Boolean(item.group);
@@ -969,15 +967,24 @@ function LabsPage() {
 											: 0,
 								}}
 							>
-								<Flex vertical style={{ width: '100%' }} gap={4}>
-									<Flex justify='space-between' align='center' gap={12} wrap>
-										<Flex align='center' gap={8} wrap>
+								<YStack width='100%' gap={4}>
+									<XStack
+										justifyContent='space-between'
+										alignItems='center'
+										gap={12}
+										flexWrap='wrap'
+									>
+										<XStack alignItems='center' gap={8} flexWrap='wrap'>
 											<Checkbox
 												checked={effectiveSelectedImportDocumentIds.includes(item.id)}
-												onChange={event => onToggleImportDocument(item.id, event.target.checked)}
+												onCheckedChange={checked =>
+													onToggleImportDocument(item.id, Boolean(checked))
+												}
 												disabled={updateDocumentsMutation.isPending}
-											/>
-											<Tag color={statusColor}>
+											>
+												<Checkbox.Indicator />
+											</Checkbox>
+											<StatusBadge tone={tone}>
 												{item.status}
 												{(item.status === 'pending' || item.status === 'processing') &&
 												item.statusUpdatedAt ? (
@@ -986,109 +993,88 @@ function LabsPage() {
 														<ElapsedTime since={item.statusUpdatedAt} />
 													</>
 												) : null}
-											</Tag>
+											</StatusBadge>
 											<Button
-												type='link'
-												style={{ padding: 0, height: 'auto', fontWeight: 600 }}
-												onClick={() => onOpenDocumentPreview(item.id)}
+												chromeless
+												padding={0}
+												height='auto'
+												onPress={() => onOpenDocumentPreview(item.id)}
 											>
-												{item.fileName}
+												<Text fontWeight='700'>{item.fileName}</Text>
 											</Button>
-											{item.group ? <Tag>{'Grouped'}</Tag> : null}
-											{item.statusText ? (
-												<Typography.Text type='secondary'>{item.statusText}</Typography.Text>
-											) : null}
-										</Flex>
-										<Flex align='center' gap={12} wrap>
-											<Typography.Text type='secondary'>
+											{item.group ? <StatusBadge tone='neutral'>Grouped</StatusBadge> : null}
+											{item.statusText ? <Text color='$textMuted'>{item.statusText}</Text> : null}
+										</XStack>
+										<XStack alignItems='center' gap={12} flexWrap='wrap'>
+											<Text color='$textMuted'>
 												{item.date ?? item.queuedAt.slice(0, 10)}
 												{item.labName ? ` · ${item.labName}` : ''}
-											</Typography.Text>
+											</Text>
 											{item.status === 'completed' ? (
-												<Popconfirm
-													title='Reprocess imported file?'
-													description='This clears all derived data for the document and imports it again from the PDF.'
-													okText='Reprocess'
-													onConfirm={() => onReprocessDocument(item.id)}
+												<ConfirmButton
+													message='Reprocess imported file? This clears all derived data for the document and imports it again from the PDF.'
 													disabled={reprocessDocumentMutation.isPending}
+													color={token.colorWarning}
+													onConfirm={() => onReprocessDocument(item.id)}
 												>
-													<Button
-														size='small'
-														type='text'
-														style={{ color: token.colorWarning }}
-														loading={reprocessDocumentMutation.isPending}
-														disabled={reprocessDocumentMutation.isPending}
-													>
-														Reprocess
-													</Button>
-												</Popconfirm>
+													{reprocessDocumentMutation.isPending ? 'Reprocessing...' : 'Reprocess'}
+												</ConfirmButton>
 											) : null}
 											{item.status === 'failed' ? (
 												<Button
-													size='small'
-													type='text'
-													onClick={() => {
+													chromeless
+													onPress={() => {
 														void onRetryDocument(item.id);
 													}}
-													loading={retryDocumentMutation.isPending}
 													disabled={retryDocumentMutation.isPending}
 												>
-													Retry
+													{retryDocumentMutation.isPending ? 'Retrying...' : 'Retry'}
 												</Button>
 											) : null}
-											<Popconfirm
-												title='Delete imported file?'
-												description='This removes the document and every result derived from it.'
-												okText='Delete'
-												okButtonProps={{ danger: true }}
-												onConfirm={() => onDeleteDocument(item.id)}
+											<ConfirmButton
+												message='Delete imported file? This removes the document and every result derived from it.'
 												disabled={item.status === 'processing' || deleteDocumentMutation.isPending}
+												color={token.colorError}
+												onConfirm={() => onDeleteDocument(item.id)}
 											>
-												<Button
-													size='small'
-													type='text'
-													danger
-													disabled={
-														item.status === 'processing' || deleteDocumentMutation.isPending
-													}
-													loading={
-														deleteDocumentMutation.isPending && deletingDocumentId === item.id
-													}
-												>
-													Delete
-												</Button>
-											</Popconfirm>
-										</Flex>
-									</Flex>
+												{deleteDocumentMutation.isPending && deletingDocumentId === item.id
+													? 'Deleting...'
+													: 'Delete'}
+											</ConfirmButton>
+										</XStack>
+									</XStack>
 									{item.status === 'failed' && item.lastError ? (
 										<div style={{ maxHeight: '10rem', overflow: 'auto' }}>
-											<Typography.Text
-												type='danger'
-												style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: 12 }}
+											<Text
+												style={{
+													color: token.colorError,
+													whiteSpace: 'pre-wrap',
+													fontFamily: 'monospace',
+													fontSize: 12,
+												}}
 											>
 												{item.lastError}
-											</Typography.Text>
+											</Text>
 										</div>
 									) : null}
-								</Flex>
+								</YStack>
 							</div>
 						);
 					})}
 				</div>
 			)}
-		</Card>
+		</SectionCard>
 	);
 
 	const chartCard = (
-		<Card
-			size='small'
+		<SectionCard
 			title={
-				<Flex align='center' gap={8}>
+				<XStack alignItems='center' gap={8}>
 					<ChartLineUp size={18} weight='duotone' />
-					<span>Trend view</span>
-				</Flex>
+					<Text fontWeight='700'>Trend view</Text>
+				</XStack>
 			}
-			styles={{ body: { padding: 12 } }}
+			bodyPadding={12}
 		>
 			{chartSeries.length > 0 ? (
 				<TrendChart
@@ -1097,9 +1083,9 @@ function LabsPage() {
 					isMobile={isMobileViewport}
 				/>
 			) : (
-				<Empty description='No numeric values in the selected rows for this date range.' />
+				<EmptyState>No numeric values in the selected rows for this date range.</EmptyState>
 			)}
-		</Card>
+		</SectionCard>
 	);
 
 	const tablePanel = (
@@ -1138,35 +1124,29 @@ function LabsPage() {
 		</div>
 	);
 	const overviewPanel = !hasAnyData ? (
-		<Card styles={{ body: { padding: 24 } }}>
-			<Flex justify='center' align='center' style={{ minHeight: '40vh' }}>
-				<Empty description='No lab data found yet.' />
-			</Flex>
-		</Card>
+		<SectionCard bodyPadding={24}>
+			<XStack justifyContent='center' alignItems='center' minHeight='40vh'>
+				<EmptyState>No lab data found yet.</EmptyState>
+			</XStack>
+		</SectionCard>
 	) : showSplitLayout ? (
-		<Splitter
-			style={{ height: Math.max(viewport.height - 96, 680) }}
-			styles={{
-				root: { height: Math.max(viewport.height - 96, 680) },
-				panel: { overflow: 'hidden' },
-				dragger: {
-					default: { background: token.colorFillSecondary },
-					active: { background: token.colorPrimary },
-				},
+		<div
+			style={{
+				display: 'grid',
+				gridTemplateColumns: `minmax(560px, 1fr) minmax(${MIN_CHART_PANE_WIDTH}px, 0.48fr)`,
+				gap: 16,
+				height: Math.max(viewport.height - 96, 680),
+				overflow: 'hidden',
 			}}
 		>
-			<Splitter.Panel defaultSize='68%' min={560}>
-				<div style={{ height: '100%', overflowY: 'auto', paddingRight: 12 }}>{tablePanel}</div>
-			</Splitter.Panel>
-			<Splitter.Panel min={MIN_CHART_PANE_WIDTH}>
-				<div style={{ height: '100%', overflowY: 'auto', paddingLeft: 12 }}>{chartCard}</div>
-			</Splitter.Panel>
-		</Splitter>
+			<div style={{ height: '100%', overflowY: 'auto' }}>{tablePanel}</div>
+			<div style={{ height: '100%', overflowY: 'auto' }}>{chartCard}</div>
+		</div>
 	) : (
-		<Flex vertical gap={16}>
+		<YStack gap={16}>
 			{tablePanel}
 			{hasSelectedRows ? chartCard : null}
-		</Flex>
+		</YStack>
 	);
 
 	return (
@@ -1177,48 +1157,34 @@ function LabsPage() {
 				background: token.colorBgLayout,
 			}}
 		>
-			{messageContextHolder}
 			{dashboardQuery.isLoading ? (
-				<Card styles={{ body: { padding: 24 } }}>
-					<Flex justify='center' align='center' style={{ minHeight: '50vh' }}>
-						<Spin size='large' />
-					</Flex>
-				</Card>
+				<SectionCard bodyPadding={24}>
+					<XStack justifyContent='center' alignItems='center' minHeight='50vh'>
+						<Spinner size='large' />
+					</XStack>
+				</SectionCard>
 			) : dashboardQuery.error ? (
-				<Alert
-					type='error'
-					showIcon
-					message='Unable to load lab data'
-					description={dashboardQuery.error.message}
-				/>
+				<InlineAlert title='Unable to load lab data'>{dashboardQuery.error.message}</InlineAlert>
 			) : (
-				<Tabs
-					activeKey={activeTab}
-					onChange={onTabChange}
-					items={[
-						{
-							key: 'overview',
-							label: 'Overview',
-							children: overviewPanel,
-						},
-						{
-							key: 'documents',
-							label: 'Documents',
-							children: importPanel,
-						},
-					]}
-				/>
+				<YStack gap={12}>
+					<SegmentTabs
+						activeKey={activeTab}
+						onChange={onTabChange}
+						items={[
+							{ key: 'overview', label: 'Overview' },
+							{ key: 'documents', label: 'Documents' },
+						]}
+					/>
+					{activeTab === 'documents' ? importPanel : overviewPanel}
+				</YStack>
 			)}
-			<Drawer
-				title={previewDocument?.fileName ?? 'Document preview'}
-				open={previewDocumentId !== null}
-				onClose={onCloseDocumentPreview}
-				width={Math.min(viewport.width - 32, 1080)}
-				destroyOnHidden
-				styles={{ body: { padding: 0 } }}
-			>
-				{previewDocumentId !== null ? (
-					<Flex
+			{previewDocumentId !== null ? (
+				<DocumentPreviewOverlay
+					title={previewDocument?.fileName ?? 'Document preview'}
+					width={Math.min(viewport.width - 32, 1080)}
+					onClose={onCloseDocumentPreview}
+				>
+					<XStack
 						style={{
 							height: PREVIEW_DRAWER_CONTENT_HEIGHT,
 							minHeight: PREVIEW_DRAWER_CONTENT_HEIGHT,
@@ -1241,29 +1207,28 @@ function LabsPage() {
 									borderBottom: `1px solid ${token.colorBorderSecondary}`,
 								}}
 							>
-								<Flex justify='space-between' align='center' gap={12}>
-									<Typography.Text strong>
-										Parsed Values ({visiblePreviewRows.length})
-									</Typography.Text>
-									<Checkbox
-										checked={showFlaggedPreviewRowsOnly}
-										onChange={event => setShowFlaggedPreviewRowsOnly(event.target.checked)}
-									>
-										Flagged ({flaggedPreviewRowCount})
-									</Checkbox>
-								</Flex>
+								<XStack justifyContent='space-between' alignItems='center' gap={12}>
+									<Text fontWeight='700'>Parsed Values ({visiblePreviewRows.length})</Text>
+									<XStack alignItems='center' gap={6}>
+										<Checkbox
+											checked={showFlaggedPreviewRowsOnly}
+											onCheckedChange={checked => setShowFlaggedPreviewRowsOnly(Boolean(checked))}
+										>
+											<Checkbox.Indicator />
+										</Checkbox>
+										<Text>Flagged ({flaggedPreviewRowCount})</Text>
+									</XStack>
+								</XStack>
 							</div>
 							<div style={{ overflowY: 'auto', minHeight: 0, flex: 1 }}>
 								{visiblePreviewRows.length === 0 ? (
-									<Empty
-										image={Empty.PRESENTED_IMAGE_SIMPLE}
-										description={
-											previewRows.length === 0
+									<div style={{ marginTop: 24 }}>
+										<EmptyState>
+											{previewRows.length === 0
 												? 'No processed values for this document'
-												: 'No flagged values for this document'
-										}
-										style={{ marginTop: 24 }}
-									/>
+												: 'No flagged values for this document'}
+										</EmptyState>
+									</div>
 								) : (
 									<div>
 										{visiblePreviewRows.map(row => {
@@ -1278,11 +1243,11 @@ function LabsPage() {
 														background: isHighlighted ? token.colorPrimaryBg : undefined,
 													}}
 												>
-													<Flex justify='space-between' align='flex-start' gap={10}>
+													<XStack justifyContent='space-between' alignItems='flex-start' gap={10}>
 														<div style={{ minWidth: 0, flex: 1 }}>
-															<Flex align='flex-start' gap={6}>
-																<Typography.Text
-																	strong
+															<XStack alignItems='flex-start' gap={6}>
+																<Text
+																	fontWeight='700'
 																	style={{
 																		display: 'block',
 																		lineHeight: 1.25,
@@ -1290,7 +1255,7 @@ function LabsPage() {
 																	}}
 																>
 																	{row.name}
-																</Typography.Text>
+																</Text>
 																{row.issueLabel ? (
 																	<WarningCircle
 																		size={15}
@@ -1300,7 +1265,7 @@ function LabsPage() {
 																		aria-label={row.issueLabel}
 																	/>
 																) : null}
-															</Flex>
+															</XStack>
 														</div>
 														<div
 															style={{
@@ -1309,17 +1274,17 @@ function LabsPage() {
 																maxWidth: 138,
 															}}
 														>
-															<Typography.Text
+															<Text
 																style={{
 																	display: 'block',
 																	overflowWrap: 'anywhere',
 																}}
 															>
 																{row.valueText}
-															</Typography.Text>
+															</Text>
 															{row.rangeText ? (
-																<Typography.Text
-																	type='secondary'
+																<Text
+																	color='$textMuted'
 																	style={{
 																		display: 'block',
 																		marginTop: 2,
@@ -1328,17 +1293,17 @@ function LabsPage() {
 																	}}
 																>
 																	ref {row.rangeText}
-																</Typography.Text>
+																</Text>
 															) : null}
 														</div>
-													</Flex>
+													</XStack>
 													{row.note ? (
-														<Typography.Text
-															type='secondary'
+														<Text
+															color='$textMuted'
 															style={{ display: 'block', marginTop: 3, fontSize: 12 }}
 														>
 															{row.note}
-														</Typography.Text>
+														</Text>
 													) : null}
 												</div>
 											);
@@ -1354,10 +1319,230 @@ function LabsPage() {
 								style={{ width: '100%', height: '100%', border: 0 }}
 							/>
 						</div>
-					</Flex>
-				) : null}
-			</Drawer>
+					</XStack>
+				</DocumentPreviewOverlay>
+			) : null}
 		</main>
+	);
+}
+
+function themeValue(theme: ReturnType<typeof useTheme>, name: string) {
+	const token = (theme as any)[name];
+	if (!token?.get) {
+		throw new Error(`Missing Tamagui theme token: ${name}`);
+	}
+	return token.get('web') as string;
+}
+
+function getLabsPageToken(theme: ReturnType<typeof useTheme>) {
+	return {
+		colorBgLayout: themeValue(theme, 'bgLayout'),
+		colorBgContainer: themeValue(theme, 'bgContainer'),
+		colorBorder: themeValue(theme, 'borderColor'),
+		colorBorderSecondary: themeValue(theme, 'borderSubtle'),
+		colorText: themeValue(theme, 'color'),
+		colorTextSecondary: themeValue(theme, 'textMuted'),
+		colorTextTertiary: themeValue(theme, 'textSubtle'),
+		colorFillAlter: themeValue(theme, 'fill'),
+		colorFillSecondary: themeValue(theme, 'fillStrong'),
+		colorFillTertiary: themeValue(theme, 'fillSoft'),
+		colorPrimary: themeValue(theme, 'primary'),
+		colorPrimaryBg: themeValue(theme, 'primaryBg'),
+		colorWarning: themeValue(theme, 'warning'),
+		colorError: themeValue(theme, 'error'),
+		colorErrorBg: themeValue(theme, 'errorBg'),
+		colorErrorBorder: themeValue(theme, 'errorBorder'),
+		colorSuccess: themeValue(theme, 'success'),
+		colorSuccessBg: themeValue(theme, 'successBg'),
+		colorSuccessBorder: themeValue(theme, 'successBorder'),
+		colorInfoBg: themeValue(theme, 'infoBg'),
+		colorInfoBorder: themeValue(theme, 'infoBorder'),
+		colorInfoText: themeValue(theme, 'infoText'),
+	};
+}
+
+function SectionCard(props: {
+	title?: ReactNode;
+	actions?: ReactNode;
+	children: ReactNode;
+	bodyPadding?: number;
+}) {
+	const token = getLabsPageToken(useTheme());
+
+	return (
+		<Card
+			borderWidth={1}
+			borderColor='$borderSubtle'
+			backgroundColor='$bgContainer'
+			borderRadius={8}
+			overflow='hidden'
+		>
+			{props.title || props.actions ? (
+				<XStack
+					justifyContent='space-between'
+					alignItems='center'
+					gap={12}
+					flexWrap='wrap'
+					paddingHorizontal={16}
+					paddingVertical={12}
+					style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}
+				>
+					{typeof props.title === 'string' ? <H3>{props.title}</H3> : props.title}
+					{props.actions}
+				</XStack>
+			) : null}
+			<div style={{ padding: props.bodyPadding ?? 16 }}>{props.children}</div>
+		</Card>
+	);
+}
+
+function EmptyState(props: { children: ReactNode }) {
+	return (
+		<XStack justifyContent='center' alignItems='center' padding={24}>
+			<Text color='$textMuted'>{props.children}</Text>
+		</XStack>
+	);
+}
+
+function InlineAlert(props: { title: ReactNode; children: ReactNode }) {
+	const token = getLabsPageToken(useTheme());
+
+	return (
+		<XStack
+			gap={10}
+			padding={14}
+			borderWidth={1}
+			borderRadius={8}
+			style={{
+				background: token.colorErrorBg,
+				borderColor: token.colorErrorBorder,
+			}}
+		>
+			<WarningCircle size={18} weight='fill' color={token.colorError} />
+			<YStack flex={1} minWidth={0}>
+				<Text fontWeight='700'>{props.title}</Text>
+				<Paragraph color='$textMuted'>{props.children}</Paragraph>
+			</YStack>
+		</XStack>
+	);
+}
+
+function StatusBadge(props: {
+	tone: 'success' | 'error' | 'info' | 'neutral';
+	children: ReactNode;
+}) {
+	const token = getLabsPageToken(useTheme());
+	const palette = {
+		success: [token.colorSuccessBg, token.colorSuccessBorder, token.colorSuccess],
+		error: [token.colorErrorBg, token.colorErrorBorder, token.colorError],
+		info: [token.colorInfoBg, token.colorInfoBorder, token.colorInfoText],
+		neutral: [token.colorFillAlter, token.colorBorderSecondary, token.colorTextSecondary],
+	}[props.tone];
+
+	return (
+		<XStack
+			alignItems='center'
+			borderWidth={1}
+			borderRadius={999}
+			paddingHorizontal={8}
+			paddingVertical={2}
+			style={{ background: palette[0], borderColor: palette[1] }}
+		>
+			<Text fontSize={12} fontWeight='700' style={{ color: palette[2] }}>
+				{props.children}
+			</Text>
+		</XStack>
+	);
+}
+
+function ConfirmButton(props: {
+	children: ReactNode;
+	message: string;
+	disabled?: boolean;
+	color?: string;
+	onConfirm: () => void | Promise<void>;
+}) {
+	return (
+		<Button
+			chromeless
+			disabled={props.disabled}
+			onPress={() => {
+				if (window.confirm(props.message)) {
+					void props.onConfirm();
+				}
+			}}
+		>
+			<Text style={{ color: props.color }}>{props.children}</Text>
+		</Button>
+	);
+}
+
+function SegmentTabs(props: {
+	activeKey: string;
+	items: Array<{ key: string; label: ReactNode }>;
+	onChange: (key: string) => void;
+}) {
+	return (
+		<div className='segmented-control' style={{ margin: 12, width: 'fit-content' }}>
+			{props.items.map(item => (
+				<button
+					type='button'
+					key={item.key}
+					className={item.key === props.activeKey ? 'segmented-control-active' : ''}
+					onClick={() => props.onChange(item.key)}
+				>
+					{item.label}
+				</button>
+			))}
+		</div>
+	);
+}
+
+function DocumentPreviewOverlay(props: {
+	title: ReactNode;
+	width: number;
+	onClose: () => void;
+	children: ReactNode;
+}) {
+	const token = getLabsPageToken(useTheme());
+	const panelStyle: CSSProperties = {
+		width: props.width,
+		maxWidth: 'calc(100vw - 32px)',
+		maxHeight: 'calc(100vh - 32px)',
+		background: token.colorBgContainer,
+		border: `1px solid ${token.colorBorderSecondary}`,
+		borderRadius: 10,
+		boxShadow: '0 18px 48px rgba(15, 23, 42, 0.24)',
+		overflow: 'hidden',
+	};
+
+	return (
+		<div
+			style={{
+				position: 'fixed',
+				inset: 0,
+				zIndex: 80,
+				display: 'grid',
+				placeItems: 'center',
+				padding: 16,
+				background: 'rgba(15, 23, 42, 0.38)',
+			}}
+		>
+			<div style={panelStyle}>
+				<XStack
+					justifyContent='space-between'
+					alignItems='center'
+					gap={12}
+					paddingHorizontal={16}
+					paddingVertical={12}
+					style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}
+				>
+					<Text fontWeight='700'>{props.title}</Text>
+					<Button onPress={props.onClose}>Close</Button>
+				</XStack>
+				{props.children}
+			</div>
+		</div>
 	);
 }
 

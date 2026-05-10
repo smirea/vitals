@@ -27,6 +27,7 @@ import {
 	type CSSProperties,
 	type ChangeEvent,
 } from 'react';
+import { useTheme } from 'tamagui';
 
 import type {
 	CategoryOverviewItem,
@@ -52,10 +53,11 @@ import {
 	OVERVIEW_COLUMN_WIDTH,
 	SELECTION_COLUMN_WIDTH,
 	SOURCE_COLUMN_WIDTH,
+	clamp,
 } from './_labs';
-import { Empty, Slider, theme as uiTheme } from '../../components/ui';
 
 type ThemeVarsStyle = CSSProperties & Record<string, string>;
+type LabsThemeToken = ReturnType<typeof getLabsThemeToken>;
 
 const vitalsScopeCss = `
 	.vitals-category-overview {
@@ -379,6 +381,17 @@ const vitalsScopeCss = `
 		gap: 12px;
 		font-size: 12px;
 		color: var(--vitals-text-secondary);
+	}
+
+	.vitals-controls-range-inputs {
+		display: grid;
+		gap: 2px;
+	}
+
+	.vitals-controls-range-inputs input {
+		width: 100%;
+		margin: 0;
+		accent-color: var(--vitals-text);
 	}
 
 	.trend-chart-table-shell {
@@ -779,7 +792,51 @@ type SelectionCheckboxProps = {
 	ariaLabel?: string;
 };
 
-function getThemeVars(token: ReturnType<typeof uiTheme.useToken>['token']): ThemeVarsStyle {
+function themeValue(theme: ReturnType<typeof useTheme>, name: string) {
+	const token = (theme as any)[name];
+	if (!token?.get) {
+		throw new Error(`Missing Tamagui theme token: ${name}`);
+	}
+	return token.get('web') as string;
+}
+
+function getLabsThemeToken(theme: ReturnType<typeof useTheme>) {
+	return {
+		colorBgLayout: themeValue(theme, 'bgLayout'),
+		colorBgContainer: themeValue(theme, 'bgContainer'),
+		colorBorder: themeValue(theme, 'borderColor'),
+		colorBorderSecondary: themeValue(theme, 'borderSubtle'),
+		colorText: themeValue(theme, 'color'),
+		colorTextSecondary: themeValue(theme, 'textMuted'),
+		colorTextTertiary: themeValue(theme, 'textSubtle'),
+		colorFillAlter: themeValue(theme, 'fill'),
+		colorFillSecondary: themeValue(theme, 'fillStrong'),
+		colorFillTertiary: themeValue(theme, 'fillSoft'),
+		colorFillQuaternary: themeValue(theme, 'fillFaint'),
+		colorPrimary: themeValue(theme, 'primary'),
+		colorPrimaryBg: themeValue(theme, 'primaryBg'),
+		colorPrimaryBgHover: themeValue(theme, 'primaryBgHover'),
+		colorPrimaryBorder: themeValue(theme, 'primaryBorder'),
+		colorSuccess: themeValue(theme, 'success'),
+		colorSuccessBg: themeValue(theme, 'successBg'),
+		colorSuccessBorder: themeValue(theme, 'successBorder'),
+		colorError: themeValue(theme, 'error'),
+		colorErrorBg: themeValue(theme, 'errorBg'),
+		colorErrorBgHover: themeValue(theme, 'errorBgHover'),
+		colorErrorBorder: themeValue(theme, 'errorBorder'),
+		colorWarning: themeValue(theme, 'warning'),
+		colorWarningBg: themeValue(theme, 'warningBg'),
+		colorWarningBorder: themeValue(theme, 'warningBorder'),
+		colorWhite: themeValue(theme, 'white'),
+		boxShadowSecondary: themeValue(theme, 'shadowStrong'),
+	};
+}
+
+function useLabsToken() {
+	return getLabsThemeToken(useTheme());
+}
+
+function getThemeVars(token: LabsThemeToken): ThemeVarsStyle {
 	return {
 		['--vitals-bg-layout' as string]: token.colorBgLayout,
 		['--vitals-bg-container' as string]: token.colorBgContainer,
@@ -813,7 +870,7 @@ function getThemeVars(token: ReturnType<typeof uiTheme.useToken>['token']): Them
 }
 
 function ScopedVitals(props: { children: React.ReactNode }) {
-	const { token } = uiTheme.useToken();
+	const token = useLabsToken();
 
 	return <VitalsScope style={getThemeVars(token)}>{props.children}</VitalsScope>;
 }
@@ -990,7 +1047,7 @@ export const TrendChart = memo(function TrendChart({
 	orderedSources,
 	isMobile,
 }: TrendChartProps) {
-	const { token } = uiTheme.useToken();
+	const token = useLabsToken();
 
 	const visibleSeries = useMemo(
 		() =>
@@ -1286,7 +1343,9 @@ export const TrendChart = memo(function TrendChart({
 						</ResponsiveContainer>
 					) : (
 						<div style={{ display: 'grid', height: '100%', placeItems: 'center' }}>
-							<Empty description='No numeric values in the selected rows for this date range.' />
+							<span style={{ color: token.colorTextSecondary }}>
+								No numeric values in the selected rows for this date range.
+							</span>
 						</div>
 					)}
 				</div>
@@ -1383,7 +1442,7 @@ export const VitalsControls = memo(function VitalsControls({
 	onDownloadCsv,
 	isDownloadCsvDisabled,
 }: VitalsControlsProps) {
-	const { token } = uiTheme.useToken();
+	const token = useLabsToken();
 	const sliderDates = [...availableDates].reverse();
 	const maxIndex = Math.max(availableDates.length - 1, 0);
 	const startIndex = Math.min(maxIndex, Math.max(0, dateRangeValue[0] ?? 0));
@@ -1408,26 +1467,13 @@ export const VitalsControls = memo(function VitalsControls({
 						<span>{startDateLabel}</span>
 						<span>{endDateLabel}</span>
 					</div>
-					<Slider
-						range
+					<RangeSlider
 						min={0}
 						max={maxIndex}
-						step={1}
 						value={dateRangeValue}
 						disabled={availableDates.length <= 1}
 						onChange={value => {
-							if (!Array.isArray(value) || value.length !== 2) return;
 							onDateRangeSliderChange([value[0], value[1]]);
-						}}
-						tooltip={{
-							formatter: (value: number | undefined) =>
-								value === undefined ? '' : formatPrettyDate(sliderDates[value] ?? ''),
-						}}
-						style={{ margin: 0, width: '100%' }}
-						styles={{
-							rail: { background: token.colorBorderSecondary },
-							track: { background: token.colorText },
-							handle: { borderColor: token.colorText, background: token.colorText },
 						}}
 					/>
 				</div>
@@ -1455,6 +1501,44 @@ export const VitalsControls = memo(function VitalsControls({
 	);
 });
 
+function RangeSlider(props: {
+	min: number;
+	max: number;
+	value: [number, number];
+	disabled: boolean;
+	onChange: (value: [number, number]) => void;
+}) {
+	function updateHandle(index: 0 | 1, rawValue: string) {
+		const nextValue = clamp(Number(rawValue), props.min, props.max);
+		const next: [number, number] = [...props.value] as [number, number];
+		next[index] = nextValue;
+		props.onChange(next[0] <= next[1] ? next : [next[1], next[0]]);
+	}
+
+	return (
+		<div className='vitals-controls-range-inputs'>
+			<input
+				type='range'
+				min={props.min}
+				max={props.max}
+				step={1}
+				value={props.value[0]}
+				disabled={props.disabled}
+				onChange={event => updateHandle(0, event.target.value)}
+			/>
+			<input
+				type='range'
+				min={props.min}
+				max={props.max}
+				step={1}
+				value={props.value[1]}
+				disabled={props.disabled}
+				onChange={event => updateHandle(1, event.target.value)}
+			/>
+		</div>
+	);
+}
+
 const SelectionCheckbox = memo(function SelectionCheckbox({
 	checked,
 	indeterminate = false,
@@ -1462,7 +1546,7 @@ const SelectionCheckbox = memo(function SelectionCheckbox({
 	onChange,
 	ariaLabel,
 }: SelectionCheckboxProps) {
-	const { token } = uiTheme.useToken();
+	const token = useLabsToken();
 	const ref = useRef<HTMLInputElement | null>(null);
 
 	useEffect(() => {
@@ -1485,7 +1569,7 @@ const SelectionCheckbox = memo(function SelectionCheckbox({
 
 const MeasurementValueCell = memo(
 	function MeasurementValueCell({ cell }: { cell: MeasurementCell | undefined }) {
-		const { token } = uiTheme.useToken();
+		const token = useLabsToken();
 
 		if (!cell) {
 			return <span style={{ color: token.colorTextTertiary }}>--</span>;
@@ -1575,7 +1659,7 @@ const MeasurementRow = memo(
 		onToggleStar,
 		onOpenSourceDocument,
 	}: MeasurementRowProps) {
-		const { token } = uiTheme.useToken();
+		const token = useLabsToken();
 		const hasAnyCounter = overview.inRange > 0 || overview.outOfRange > 0;
 		const referenceCaption =
 			row.valuesBySourceIndex.find(cell => cell?.rangeCaption)?.rangeCaption ?? null;
@@ -1712,7 +1796,7 @@ const CategoryRow = memo(
 		selection,
 		onToggleCategory,
 	}: CategoryRowProps) {
-		const { token } = uiTheme.useToken();
+		const token = useLabsToken();
 
 		return (
 			<tr className='vitals-category-row'>

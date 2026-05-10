@@ -5,31 +5,29 @@ import {
 	PlayCircle as PlayCircleOutlined,
 	Warning as WarningOutlined,
 } from '@phosphor-icons/react';
+import { toast } from '@tamagui/toast/v2';
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
-import {
-	Alert,
-	Button,
-	Checkbox,
-	DatePicker,
-	Empty,
-	Flex,
-	Input,
-	Segmented,
-	Select,
-	Space,
-	Spin,
-	Tag,
-	Tooltip,
-	Typography,
-	message,
-	theme as uiTheme,
-} from '../components/ui';
-import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
+import {
+	Button,
+	Checkbox,
+	H2,
+	H3,
+	Input,
+	Paragraph,
+	Spinner,
+	Text,
+	XStack,
+	YStack,
+	useTheme,
+} from 'tamagui';
 
+import { AutoResizeTextArea } from '../components/AutoResizeTextArea';
+import { TagChip } from '../components/TagChip';
+import { TagInput } from '../components/TagInput';
 import type { SensorRunResult } from '../utils/api';
 import { useTRPC, useTRPCClient } from '../utils/trpc';
 
@@ -73,10 +71,9 @@ const defaultRunState = Object.fromEntries(
 ) as Record<SensorKey, RunState>;
 
 function SensorsPage() {
-	const { token } = uiTheme.useToken();
+	const theme = useTheme();
 	const trpc = useTRPC();
 	const trpcClient = useTRPCClient();
-	const [messageApi, messageContextHolder] = message.useMessage();
 	const [defaultStartDate, setDefaultStartDate] = useState(getDateDaysAgo(7));
 	const [selectedKeys, setSelectedKeys] = useState(
 		Object.fromEntries(sensorKeys.map(key => [key, true])) as Record<SensorKey, boolean>,
@@ -209,28 +206,28 @@ function SensorsPage() {
 
 	async function runKeys(keys: SensorKey[]) {
 		if (keys.length === 0) {
-			messageApi.warning('Select at least one sensor.');
+			toast.warning('Select at least one sensor.');
 			return;
 		}
 
 		const settled = await Promise.allSettled(keys.map(key => runSensor(key)));
 		const failedCount = settled.filter(result => result.status === 'rejected').length;
 		if (failedCount > 0) {
-			messageApi.error(`${failedCount} sensor${failedCount === 1 ? '' : 's'} failed.`);
+			toast.error(`${failedCount} sensor${failedCount === 1 ? '' : 's'} failed.`);
 			return;
 		}
-		messageApi.success(`Finished ${keys.length} sensor${keys.length === 1 ? '' : 's'}.`);
+		toast.success(`Finished ${keys.length} sensor${keys.length === 1 ? '' : 's'}.`);
 	}
 
 	function copyText(value: string) {
 		void navigator.clipboard.writeText(value);
-		messageApi.success('Copied.');
+		toast.success('Copied.');
 	}
 
 	function downloadOutput() {
 		if (outputMode === 'csv') {
 			if (csvFiles.length === 0) {
-				messageApi.warning('Run at least one CSV sensor first.');
+				toast.warning('Run at least one CSV sensor first.');
 				return;
 			}
 			downloadCsvFiles(csvFiles);
@@ -246,17 +243,14 @@ function SensorsPage() {
 
 	function renderDatePicker(key: DependentSensorKey) {
 		return (
-			<DatePicker
-				value={toDayjs(startDates[key])}
-				format={DATE_FORMAT}
-				allowClear={false}
-				onChange={value => {
-					if (!value) {
-						return;
-					}
+			<Input
+				type='date'
+				value={startDates[key]}
+				onChange={event => {
+					const value = event.target.value;
 					setStartDates(previous => ({
 						...previous,
-						[key]: value.format(DATE_FORMAT),
+						[key]: value,
 					}));
 				}}
 			/>
@@ -264,62 +258,57 @@ function SensorsPage() {
 	}
 
 	return (
-		<main className='sensors-page' style={{ background: token.colorBgLayout }}>
-			{messageContextHolder}
+		<main className='sensors-page' style={{ background: theme.bgLayout?.get('web') }}>
 			<div className='sensors-page-inner'>
 				<section
 					className='sensors-toolbar'
 					style={{
-						background: token.colorBgContainer,
-						borderColor: token.colorBorderSecondary,
+						background: theme.bgContainer?.get('web'),
+						borderColor: theme.borderSubtle?.get('web'),
 					}}
 				>
 					<div className='sensors-toolbar-title'>
-						<Typography.Title level={2}>Sensors</Typography.Title>
-						<Typography.Text type='secondary'>Data extraction</Typography.Text>
+						<H2>Sensors</H2>
+						<Text color='$textMuted'>Data extraction</Text>
 					</div>
 
-					<Space wrap>
-						<DatePicker
-							value={toDayjs(defaultStartDate)}
-							format={DATE_FORMAT}
-							allowClear={false}
-							onChange={value => {
-								if (value) {
-									updateDefaultStartDate(value.format(DATE_FORMAT));
-								}
-							}}
+					<XStack gap={8} flexWrap='wrap'>
+						<Input
+							type='date'
+							value={defaultStartDate}
+							onChange={event => updateDefaultStartDate(event.target.value)}
 						/>
-						<Button onClick={() => updateDefaultStartDate(getDateDaysAgo(7))}>7 days</Button>
+						<Button onPress={() => updateDefaultStartDate(getDateDaysAgo(7))}>7 days</Button>
 						<Button
-							onClick={() =>
+							onPress={() =>
 								updateDefaultStartDate(dayjs().subtract(1, 'month').format(DATE_FORMAT))
 							}
 						>
 							1 month
 						</Button>
 						<Button
-							onClick={() =>
+							onPress={() =>
 								updateDefaultStartDate(dayjs().subtract(3, 'month').format(DATE_FORMAT))
 							}
 						>
 							3 month
 						</Button>
 						<Button
-							type='primary'
 							icon={<PlayCircleOutlined />}
-							loading={isAnySelectedRunning}
-							onClick={() => void runKeys(selectedRunKeys)}
+							disabled={isAnySelectedRunning}
+							backgroundColor='$primary'
+							style={{ color: 'white' }}
+							onPress={() => void runKeys(selectedRunKeys)}
 						>
-							Run selected
+							{isAnySelectedRunning ? 'Running...' : 'Run selected'}
 						</Button>
-					</Space>
+					</XStack>
 				</section>
 
 				<section className='sensors-section'>
 					<div className='sensors-section-header'>
-						<Typography.Title level={3}>Extractors</Typography.Title>
-						<Typography.Text type='secondary'>{selectedRunKeys.length} selected</Typography.Text>
+						<H3>Extractors</H3>
+						<Text color='$textMuted'>{selectedRunKeys.length} selected</Text>
 					</div>
 
 					<div className='sensors-list'>
@@ -344,27 +333,28 @@ function SensorsPage() {
 											onChange={setLabsConfig}
 										/>
 									) : key === 'voiceMemos' ? (
-										<Space wrap>
+										<XStack gap={8} flexWrap='wrap'>
 											{renderDatePicker(key)}
-											<Select
+											<NativeSelect
 												value={voiceMemosConfig.content}
-												style={{ width: 128 }}
 												options={[...voiceMemoContentOptions]}
-												onChange={content => setVoiceMemosConfig({ content })}
+												onChange={content => {
+													if (content) {
+														setVoiceMemosConfig({ content });
+													}
+												}}
 											/>
-										</Space>
+										</XStack>
 									) : key === 'macrofactor' ? (
-										<Space wrap>
+										<XStack gap={8} flexWrap='wrap' alignItems='center'>
 											{renderDatePicker(key)}
-											<Checkbox
+											<CheckControl
 												checked={macrofactorConfig.recipeDetails}
-												onChange={event =>
-													setMacrofactorConfig({ recipeDetails: event.target.checked })
-												}
+												onCheckedChange={recipeDetails => setMacrofactorConfig({ recipeDetails })}
 											>
 												Recipe details
-											</Checkbox>
-										</Space>
+											</CheckControl>
+										</XStack>
 									) : (
 										renderDatePicker(key as DependentSensorKey)
 									)
@@ -376,9 +366,9 @@ function SensorsPage() {
 
 				<section className='sensors-section'>
 					<div className='sensors-section-header'>
-						<Typography.Title level={3}>Export</Typography.Title>
-						<Space>
-							<Segmented
+						<H3>Export</H3>
+						<XStack gap={8} flexWrap='wrap'>
+							<SegmentedControl
 								value={outputMode}
 								options={[
 									{ label: 'Text', value: 'text' },
@@ -388,23 +378,24 @@ function SensorsPage() {
 								onChange={value => setOutputMode(value as OutputMode)}
 							/>
 							<Button
-								type='primary'
 								icon={<PlayCircleOutlined />}
-								loading={isAnySelectedRunning}
-								onClick={() => void runKeys(selectedRunKeys)}
+								disabled={isAnySelectedRunning}
+								backgroundColor='$primary'
+								style={{ color: 'white' }}
+								onPress={() => void runKeys(selectedRunKeys)}
 							>
-								Start
+								{isAnySelectedRunning ? 'Running...' : 'Start'}
 							</Button>
 							<Button
 								icon={<DownloadOutlined />}
 								disabled={
 									outputMode === 'csv' ? csvFiles.length === 0 : outputText.trim().length === 0
 								}
-								onClick={downloadOutput}
+								onPress={downloadOutput}
 							>
 								Download
 							</Button>
-						</Space>
+						</XStack>
 					</div>
 
 					{outputMode === 'csv' ? (
@@ -432,53 +423,147 @@ function SensorRow(props: {
 	onSelectedChange: (checked: boolean) => void;
 	onRun: () => void;
 }) {
-	const { token } = uiTheme.useToken();
+	const theme = useTheme();
 
 	return (
 		<div
 			className='sensors-row'
 			style={{
-				background: token.colorBgContainer,
-				borderColor: token.colorBorderSecondary,
+				background: theme.bgContainer?.get('web'),
+				borderColor: theme.borderSubtle?.get('web'),
 			}}
 		>
-			<Flex align='center' justify='space-between' gap={16} wrap>
-				<Space size={12}>
-					<Checkbox
-						checked={props.selected}
-						onChange={event => props.onSelectedChange(event.target.checked)}
-					>
-						<Typography.Text strong>{props.label}</Typography.Text>
-					</Checkbox>
+			<XStack alignItems='center' justifyContent='space-between' gap={16} flexWrap='wrap'>
+				<XStack gap={12} alignItems='center'>
+					<CheckControl checked={props.selected} onCheckedChange={props.onSelectedChange}>
+						<Text fontWeight='700'>{props.label}</Text>
+					</CheckControl>
 					<RunStateTag state={props.runState} />
-				</Space>
+				</XStack>
 
-				<Space wrap>
+				<XStack gap={8} flexWrap='wrap'>
 					{props.config}
 					<Button
 						icon={<PlayCircleOutlined />}
-						loading={props.runState.status === 'running'}
-						onClick={props.onRun}
+						disabled={props.runState.status === 'running'}
+						onPress={props.onRun}
 					>
-						Run
+						{props.runState.status === 'running' ? 'Running...' : 'Run'}
 					</Button>
-				</Space>
-			</Flex>
+				</XStack>
+			</XStack>
 
 			{props.runState.error ? (
-				<Alert
-					type='error'
-					showIcon
-					className='sensors-row-error'
-					message={`${props.label} failed`}
-					description={
-						<Typography.Paragraph copyable className='sensors-error-text'>
-							{props.runState.error}
-						</Typography.Paragraph>
-					}
-				/>
+				<InlineAlert className='sensors-row-error' kind='error' title={`${props.label} failed`}>
+					<Paragraph className='sensors-error-text'>{props.runState.error}</Paragraph>
+				</InlineAlert>
 			) : null}
 		</div>
+	);
+}
+
+function CheckControl(props: {
+	checked: boolean;
+	children: ReactNode;
+	onCheckedChange: (checked: boolean) => void;
+}) {
+	return (
+		<XStack alignItems='center' gap={7}>
+			<Checkbox
+				checked={props.checked}
+				onCheckedChange={value => props.onCheckedChange(Boolean(value))}
+			>
+				<Checkbox.Indicator />
+			</Checkbox>
+			<Text>{props.children}</Text>
+		</XStack>
+	);
+}
+
+function NativeSelect<Value extends string>(props: {
+	value?: Value;
+	placeholder?: string;
+	disabled?: boolean;
+	options: Array<{ label: ReactNode; value: Value }>;
+	onChange: (value: Value | undefined) => void;
+}) {
+	return (
+		<select
+			className='native-select'
+			disabled={props.disabled}
+			value={props.value ?? ''}
+			onChange={event => props.onChange((event.target.value || undefined) as Value | undefined)}
+		>
+			<option value=''>{props.placeholder ?? 'Select'}</option>
+			{props.options.map(option => (
+				<option key={option.value} value={option.value}>
+					{option.label}
+				</option>
+			))}
+		</select>
+	);
+}
+
+function SegmentedControl<Value extends string>(props: {
+	value: Value;
+	options: Array<{ label: ReactNode; value: Value }>;
+	onChange: (value: Value) => void;
+}) {
+	return (
+		<div className='segmented-control'>
+			{props.options.map(option => (
+				<button
+					type='button'
+					key={option.value}
+					className={option.value === props.value ? 'segmented-control-active' : ''}
+					onClick={() => props.onChange(option.value)}
+				>
+					{option.label}
+				</button>
+			))}
+		</div>
+	);
+}
+
+function InlineAlert(props: {
+	kind: 'error' | 'warning' | 'info' | 'success';
+	title: ReactNode;
+	children?: ReactNode;
+	className?: string;
+}) {
+	const theme = useTheme();
+	const palette = {
+		error: [theme.errorBg?.get('web'), theme.errorBorder?.get('web'), theme.error?.get('web')],
+		warning: [
+			theme.warningBg?.get('web'),
+			theme.warningBorder?.get('web'),
+			theme.warning?.get('web'),
+		],
+		info: [theme.infoBg?.get('web'), theme.infoBorder?.get('web'), theme.infoText?.get('web')],
+		success: [
+			theme.successBg?.get('web'),
+			theme.successBorder?.get('web'),
+			theme.success?.get('web'),
+		],
+	}[props.kind];
+
+	return (
+		<XStack
+			className={props.className}
+			gap={10}
+			padding={12}
+			borderWidth={1}
+			borderRadius={8}
+			style={{ background: palette[0], borderColor: palette[1] }}
+		>
+			<Text fontWeight='700' style={{ color: palette[2] }}>
+				●
+			</Text>
+			<YStack flex={1} minWidth={0}>
+				<Text fontWeight='700'>{props.title}</Text>
+				{props.children}
+			</YStack>
+		</XStack>
 	);
 }
 
@@ -503,66 +588,60 @@ function LabsConfig(props: {
 	}) => void;
 }) {
 	return (
-		<Space wrap>
+		<XStack gap={8} flexWrap='wrap' alignItems='center'>
 			<Input
 				value={props.config.textFilter}
 				placeholder='text filter'
 				style={{ width: 220 }}
 				onChange={event => props.onChange({ ...props.config, textFilter: event.target.value })}
 			/>
-			<Select
-				mode='multiple'
+			<TagInput
 				value={props.config.categories}
 				placeholder='categories'
-				loading={props.isLoading}
-				style={{ minWidth: 240 }}
-				maxTagCount='responsive'
 				options={props.labCategories.map(category => ({
 					label: `${category.category} (${category.count})`,
 					value: category.category,
 				}))}
+				disabled={props.isLoading}
 				onChange={categories => props.onChange({ ...props.config, categories })}
 			/>
-			<Select
+			<NativeSelect
 				value={props.config.startDate ?? undefined}
 				placeholder='start date'
-				loading={props.isLoading}
-				style={{ width: 160 }}
+				disabled={props.isLoading}
 				options={props.labDates.map(date => ({ label: date, value: date }))}
 				onChange={startDate => props.onChange({ ...props.config, startDate: startDate ?? null })}
 			/>
-			<Tooltip title='Only the latest value for each measurement, if it was in the selected period. When off, returns all measurements taken in that period.'>
-				<Checkbox
-					checked={props.config.onlyLatest}
-					onChange={event => props.onChange({ ...props.config, onlyLatest: event.target.checked })}
-				>
-					Only latest
-				</Checkbox>
-			</Tooltip>
-		</Space>
+			<CheckControl
+				checked={props.config.onlyLatest}
+				onCheckedChange={onlyLatest => props.onChange({ ...props.config, onlyLatest })}
+			>
+				Only latest
+			</CheckControl>
+		</XStack>
 	);
 }
 
 function RunStateTag({ state }: { state: RunState }) {
 	if (state.status === 'running') {
 		return (
-			<Tag icon={<Spin size='small' />} color='processing'>
+			<TagChip icon={<Spinner size='small' />} color='processing'>
 				Running
-			</Tag>
+			</TagChip>
 		);
 	}
 	if (state.status === 'success') {
 		return (
-			<Tag icon={<CheckCircleOutlined />} color='success'>
+			<TagChip icon={<CheckCircleOutlined />} color='success'>
 				Done
-			</Tag>
+			</TagChip>
 		);
 	}
 	if (state.status === 'error') {
 		return (
-			<Tag icon={<WarningOutlined />} color='error'>
+			<TagChip icon={<WarningOutlined />} color='error'>
 				Error
-			</Tag>
+			</TagChip>
 		);
 	}
 	return null;
@@ -577,18 +656,19 @@ function TextOutput(props: {
 	return (
 		<div className='sensors-output-shell'>
 			<div className='sensors-output-actions'>
-				{props.isRunning ? <Spin size='small' /> : null}
+				{props.isRunning ? <Spinner size='small' /> : null}
 				<Button
 					icon={<CopyOutlined />}
 					disabled={props.value.trim().length === 0}
-					onClick={() => props.onCopy(props.value)}
+					onPress={() => props.onCopy(props.value)}
 				/>
 			</div>
-			<Input.TextArea
+			<AutoResizeTextArea
 				readOnly
 				value={props.value}
 				placeholder={props.mode === 'json' ? '{}' : ''}
-				autoSize={{ minRows: 18, maxRows: 36 }}
+				minRows={18}
+				maxRows={36}
 				className='sensors-output-textarea'
 			/>
 		</div>
@@ -603,7 +683,7 @@ function CsvOutput(props: {
 	if (props.files.length === 0) {
 		return (
 			<div className='sensors-empty-output'>
-				{props.isRunning ? <Spin /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+				{props.isRunning ? <Spinner /> : <Text color='$textMuted'>No output yet</Text>}
 			</div>
 		);
 	}
@@ -612,24 +692,21 @@ function CsvOutput(props: {
 		<div className='sensors-csv-list'>
 			{props.files.map(file => (
 				<div className='sensors-csv-file' key={file.fileName}>
-					<Flex align='center' justify='space-between' gap={12}>
-						<Typography.Text strong>{file.fileName}</Typography.Text>
-						<Button icon={<CopyOutlined />} onClick={() => props.onCopy(file.content)} />
-					</Flex>
-					<Input.TextArea
+					<XStack alignItems='center' justifyContent='space-between' gap={12}>
+						<Text fontWeight='700'>{file.fileName}</Text>
+						<Button icon={<CopyOutlined />} onPress={() => props.onCopy(file.content)} />
+					</XStack>
+					<AutoResizeTextArea
 						readOnly
 						value={file.content}
-						autoSize={{ minRows: 8, maxRows: 20 }}
+						minRows={8}
+						maxRows={20}
 						className='sensors-output-textarea'
 					/>
 				</div>
 			))}
 		</div>
 	);
-}
-
-function toDayjs(value: string): Dayjs {
-	return dayjs(value, DATE_FORMAT);
 }
 
 function getDateDaysAgo(days: number) {

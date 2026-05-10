@@ -20,6 +20,7 @@
 		"@phosphor-icons/react": "^2.1.10",
 		"@tamagui/shorthands": "^2.0.0-rc.42",
 		"@tamagui/themes": "^2.0.0-rc.42",
+		"@tamagui/toast": "^2.0.0-rc.42",
 		"@tanstack/react-query": "5.91.2",
 		"@tanstack/react-router": "^1.159.5",
 		"@tanstack/router-plugin": "^1.159.5",

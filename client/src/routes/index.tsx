@@ -1,40 +1,36 @@
 import { House } from '@phosphor-icons/react';
 import { createFileRoute } from '@tanstack/react-router';
-
-import { Card, Typography, theme as uiTheme } from '../components/ui';
+import { Card, H2, Paragraph, useTheme } from 'tamagui';
 
 export const Route = createFileRoute('/')({
 	component: HomePage,
 });
 
 function HomePage() {
-	const { token } = uiTheme.useToken();
+	const theme = useTheme();
 
 	return (
-		<main className='home-page' style={{ background: token.colorBgLayout }}>
-			<Card className='home-card'>
+		<main className='home-page' style={{ background: theme.bgLayout?.get('web') }}>
+			<Card className='home-card' bg='$bgContainer' borderColor='$borderSubtle' borderWidth={1}>
 				<div className='home-card-content'>
 					<div
 						className='home-icon-shell'
 						style={{
-							background: token.colorFillTertiary,
-							color: token.colorTextSecondary,
+							background: theme.fillSoft?.get('web'),
+							color: theme.textMuted?.get('web'),
 						}}
 					>
 						<House className='home-icon' />
 					</div>
 
 					<div className='home-copy'>
-						<Typography.Title level={2} className='home-copy-title'>
+						<H2 className='home-copy-title' m={0}>
 							Home
-						</Typography.Title>
-						<Typography.Paragraph
-							className='home-copy-body'
-							style={{ color: token.colorTextSecondary, fontSize: 16 }}
-						>
+						</H2>
+						<Paragraph className='home-copy-body' color='$textMuted' fontSize={16}>
 							This is a stub page for the routed app shell. Labs now lives under the dedicated
 							`/labs` page.
-						</Typography.Paragraph>
+						</Paragraph>
 					</div>
 				</div>
 			</Card>
