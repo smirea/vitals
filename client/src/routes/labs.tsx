@@ -16,8 +16,8 @@ import {
 	Tabs,
 	Typography,
 	message,
-	theme as antdTheme,
-} from 'antd';
+	theme as uiTheme,
+} from '../components/ui';
 import {
 	type ChangeEvent,
 	useCallback,
@@ -115,7 +115,7 @@ function LabsPage() {
 	const isMobileViewport = viewport.width < 900;
 	const trpc = useTRPC();
 	const queryClient = useQueryClient();
-	const { token } = antdTheme.useToken();
+	const { token } = uiTheme.useToken();
 	const [messageApi, messageContextHolder] = message.useMessage();
 	const importInputRef = useRef<HTMLInputElement | null>(null);
 

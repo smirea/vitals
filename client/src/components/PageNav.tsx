@@ -1,5 +1,6 @@
-import { Typography, theme as antdTheme } from 'antd';
 import type { CSSProperties, ReactNode } from 'react';
+
+import { Typography, theme as uiTheme } from './ui';
 
 type PageNavProps = {
 	title: ReactNode;
@@ -9,7 +10,7 @@ type PageNavProps = {
 };
 
 export function PageNav({ title, actions, className, style }: PageNavProps) {
-	const { token } = antdTheme.useToken();
+	const { token } = uiTheme.useToken();
 
 	return (
 		<div

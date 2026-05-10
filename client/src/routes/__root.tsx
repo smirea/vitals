@@ -1,31 +1,27 @@
-import { Layout, theme as antdTheme } from 'antd';
 import { Outlet, createRootRoute } from '@tanstack/react-router';
 
 import { AppNavigation } from '../components/AppNavigation';
-import useAppContext from '../hooks/useAppContext';
+import { theme as uiTheme } from '../components/ui';
 
 export const Route = createRootRoute({
 	component: function RootComponent() {
-		const { theme } = useAppContext();
-		const { token } = antdTheme.useToken();
+		const { token } = uiTheme.useToken();
 
 		return (
-			<Layout className='app-shell' style={{ background: token.colorBgLayout }}>
-				<Layout.Sider
+			<div className='app-shell' style={{ background: token.colorBgLayout }}>
+				<aside
 					className='app-shell-sider'
-					width={240}
-					theme={theme}
-					style={{ borderRight: `1px solid ${token.colorBorderSecondary}` }}
+					style={{ width: 240, borderRight: `1px solid ${token.colorBorderSecondary}` }}
 				>
 					<AppNavigation />
-				</Layout.Sider>
+				</aside>
 
-				<Layout className='app-main-layout' style={{ background: token.colorBgLayout }}>
-					<Layout.Content className='app-main-content'>
+				<div className='app-main-layout' style={{ background: token.colorBgLayout }}>
+					<main className='app-main-content'>
 						<Outlet />
-					</Layout.Content>
-				</Layout>
-			</Layout>
+					</main>
+				</div>
+			</div>
 		);
 	},
 });

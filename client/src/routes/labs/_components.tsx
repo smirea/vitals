@@ -1,4 +1,3 @@
-import styled from '@emotion/styled';
 import {
 	CheckCircle,
 	DownloadSimple,
@@ -7,7 +6,6 @@ import {
 	Star,
 	WarningCircle,
 } from '@phosphor-icons/react';
-import { Empty, Slider, theme as antdTheme } from 'antd';
 import {
 	CartesianGrid,
 	Legend,
@@ -55,10 +53,11 @@ import {
 	SELECTION_COLUMN_WIDTH,
 	SOURCE_COLUMN_WIDTH,
 } from './_labs';
+import { Empty, Slider, theme as uiTheme } from '../../components/ui';
 
 type ThemeVarsStyle = CSSProperties & Record<string, string>;
 
-const VitalsScope = styled.div`
+const vitalsScopeCss = `
 	.vitals-category-overview {
 		--vitals-overview-section-min-width: 16px;
 		--vitals-overview-pill-min-width: 10px;
@@ -718,6 +717,15 @@ const VitalsScope = styled.div`
 	}
 `;
 
+function VitalsScope(props: { children: React.ReactNode; style: CSSProperties }) {
+	return (
+		<div className='vitals-scope' style={props.style}>
+			<style>{vitalsScopeCss}</style>
+			{props.children}
+		</div>
+	);
+}
+
 type CategoriesOverviewProps = {
 	items: CategoryOverviewItem[];
 };
@@ -771,7 +779,7 @@ type SelectionCheckboxProps = {
 	ariaLabel?: string;
 };
 
-function getThemeVars(token: ReturnType<typeof antdTheme.useToken>['token']): ThemeVarsStyle {
+function getThemeVars(token: ReturnType<typeof uiTheme.useToken>['token']): ThemeVarsStyle {
 	return {
 		['--vitals-bg-layout' as string]: token.colorBgLayout,
 		['--vitals-bg-container' as string]: token.colorBgContainer,
@@ -805,7 +813,7 @@ function getThemeVars(token: ReturnType<typeof antdTheme.useToken>['token']): Th
 }
 
 function ScopedVitals(props: { children: React.ReactNode }) {
-	const { token } = antdTheme.useToken();
+	const { token } = uiTheme.useToken();
 
 	return <VitalsScope style={getThemeVars(token)}>{props.children}</VitalsScope>;
 }
@@ -982,7 +990,7 @@ export const TrendChart = memo(function TrendChart({
 	orderedSources,
 	isMobile,
 }: TrendChartProps) {
-	const { token } = antdTheme.useToken();
+	const { token } = uiTheme.useToken();
 
 	const visibleSeries = useMemo(
 		() =>
@@ -1375,7 +1383,7 @@ export const VitalsControls = memo(function VitalsControls({
 	onDownloadCsv,
 	isDownloadCsvDisabled,
 }: VitalsControlsProps) {
-	const { token } = antdTheme.useToken();
+	const { token } = uiTheme.useToken();
 	const sliderDates = [...availableDates].reverse();
 	const maxIndex = Math.max(availableDates.length - 1, 0);
 	const startIndex = Math.min(maxIndex, Math.max(0, dateRangeValue[0] ?? 0));
@@ -1412,7 +1420,7 @@ export const VitalsControls = memo(function VitalsControls({
 							onDateRangeSliderChange([value[0], value[1]]);
 						}}
 						tooltip={{
-							formatter: value =>
+							formatter: (value: number | undefined) =>
 								value === undefined ? '' : formatPrettyDate(sliderDates[value] ?? ''),
 						}}
 						style={{ margin: 0, width: '100%' }}
@@ -1454,7 +1462,7 @@ const SelectionCheckbox = memo(function SelectionCheckbox({
 	onChange,
 	ariaLabel,
 }: SelectionCheckboxProps) {
-	const { token } = antdTheme.useToken();
+	const { token } = uiTheme.useToken();
 	const ref = useRef<HTMLInputElement | null>(null);
 
 	useEffect(() => {
@@ -1477,7 +1485,7 @@ const SelectionCheckbox = memo(function SelectionCheckbox({
 
 const MeasurementValueCell = memo(
 	function MeasurementValueCell({ cell }: { cell: MeasurementCell | undefined }) {
-		const { token } = antdTheme.useToken();
+		const { token } = uiTheme.useToken();
 
 		if (!cell) {
 			return <span style={{ color: token.colorTextTertiary }}>--</span>;
@@ -1567,7 +1575,7 @@ const MeasurementRow = memo(
 		onToggleStar,
 		onOpenSourceDocument,
 	}: MeasurementRowProps) {
-		const { token } = antdTheme.useToken();
+		const { token } = uiTheme.useToken();
 		const hasAnyCounter = overview.inRange > 0 || overview.outOfRange > 0;
 		const referenceCaption =
 			row.valuesBySourceIndex.find(cell => cell?.rangeCaption)?.rangeCaption ?? null;
@@ -1704,7 +1712,7 @@ const CategoryRow = memo(
 		selection,
 		onToggleCategory,
 	}: CategoryRowProps) {
-		const { token } = antdTheme.useToken();
+		const { token } = uiTheme.useToken();
 
 		return (
 			<tr className='vitals-category-row'>

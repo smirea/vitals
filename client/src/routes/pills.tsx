@@ -1,13 +1,13 @@
 import {
-	ArrowDownOutlined,
-	ArrowUpOutlined,
-	CopyOutlined,
-	DeleteOutlined,
-	EditOutlined,
-	PlusOutlined,
-	TagOutlined,
-	UploadOutlined,
-} from '@ant-design/icons';
+	ArrowDown as ArrowDownOutlined,
+	ArrowUp as ArrowUpOutlined,
+	Copy as CopyOutlined,
+	PencilSimple as EditOutlined,
+	Plus as PlusOutlined,
+	Tag as TagOutlined,
+	Trash as DeleteOutlined,
+	UploadSimple as UploadOutlined,
+} from '@phosphor-icons/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
 import {
@@ -35,10 +35,13 @@ import {
 	Typography,
 	Upload,
 	message,
-	theme as antdTheme,
-} from 'antd';
-import type { FormInstance, TableColumnsType } from 'antd';
-import type { UploadChangeParam, UploadFile, UploadProps } from 'antd/es/upload/interface';
+	theme as uiTheme,
+	type FormInstance,
+	type TableColumnsType,
+	type UploadChangeParam,
+	type UploadFile,
+	type UploadProps,
+} from '../components/ui';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import dayjs from 'dayjs';
 import type { Key } from 'react';
@@ -175,7 +178,7 @@ function PillsRouteComponent() {
 			search: nextEditPillId ? { edit: nextEditPillId } : {},
 		});
 
-	const { token } = antdTheme.useToken();
+	const { token } = uiTheme.useToken();
 	const trpc = useTRPC();
 	const queryClient = useQueryClient();
 	const [form] = Form.useForm<PillFormValues>();
@@ -1386,8 +1389,8 @@ function PillsRouteComponent() {
 									key={image.uid}
 									className='pills-image-tile'
 									style={{
-										border: '1px solid var(--ant-color-border-secondary)',
-										background: 'var(--ant-color-bg-container)',
+										border: `1px solid ${token.colorBorderSecondary}`,
+										background: token.colorBgContainer,
 									}}
 								>
 									<Image

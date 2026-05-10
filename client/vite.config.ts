@@ -14,6 +14,12 @@ export default defineConfig(async ({ command, mode }) => {
 	const clientPort = env.CLIENT_PORT;
 
 	return {
+		define: {
+			DEV: JSON.stringify(command === 'serve'),
+			'process.env': JSON.stringify({
+				NODE_ENV: command === 'serve' ? 'development' : 'production',
+			}),
+		},
 		server:
 			command === 'serve'
 				? {

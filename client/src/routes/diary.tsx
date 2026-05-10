@@ -1,10 +1,10 @@
 import {
-	AudioOutlined,
-	DeleteOutlined,
-	PlusOutlined,
-	ReloadOutlined,
-	StopOutlined,
-} from '@ant-design/icons';
+	ArrowClockwise as ReloadOutlined,
+	Microphone as AudioOutlined,
+	Plus as PlusOutlined,
+	Stop as StopOutlined,
+	Trash as DeleteOutlined,
+} from '@phosphor-icons/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
 import {
@@ -19,8 +19,8 @@ import {
 	Tag,
 	Typography,
 	message,
-} from 'antd';
-import type { TableColumnsType } from 'antd';
+	type TableColumnsType,
+} from '../components/ui';
 import type { Key } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';

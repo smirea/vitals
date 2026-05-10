@@ -1,60 +1,51 @@
-import {
-	BulbOutlined,
-	DatabaseOutlined,
-	ExperimentOutlined,
-	FormOutlined,
-	HomeOutlined,
-	MedicineBoxOutlined,
-	MoonOutlined,
-	TagsOutlined,
-} from '@ant-design/icons';
+import { Database, House, Moon, NotePencil, Pill, Sun, Tag, TestTube } from '@phosphor-icons/react';
 import { Link, useRouterState } from '@tanstack/react-router';
-import { Menu, Switch, Typography, theme as antdTheme } from 'antd';
 
 import useAppContext from '../hooks/useAppContext';
+import { Switch, Typography, theme as uiTheme } from './ui';
 
 const navigationItems = [
 	{
 		key: '/',
 		to: '/',
 		label: 'Home',
-		icon: <HomeOutlined />,
+		icon: <House size={18} />,
 	},
 	{
 		key: '/labs',
 		to: '/labs',
 		label: 'Labs',
-		icon: <MedicineBoxOutlined />,
+		icon: <Pill size={18} />,
 	},
 	{
 		key: '/pills',
 		to: '/pills',
 		label: 'Pills',
-		icon: <ExperimentOutlined />,
+		icon: <TestTube size={18} />,
 	},
 	{
 		key: '/diary',
 		to: '/diary',
 		label: "Captain's Log",
-		icon: <FormOutlined />,
+		icon: <NotePencil size={18} />,
 	},
 	{
 		key: '/sensors',
 		to: '/sensors',
 		label: 'Sensors',
-		icon: <DatabaseOutlined />,
+		icon: <Database size={18} />,
 	},
 	{
 		key: '/tags',
 		to: '/tags',
 		label: 'Tags',
-		icon: <TagsOutlined />,
+		icon: <Tag size={18} />,
 	},
 ] as const;
 
 export function AppNavigation() {
 	const { theme, setTheme } = useAppContext();
-	const { token } = antdTheme.useToken();
+	const { token } = uiTheme.useToken();
 	const pathname = useRouterState({
 		select: state => state.location.pathname,
 	});
@@ -76,27 +67,20 @@ export function AppNavigation() {
 				<Typography.Text type='secondary'>Pages</Typography.Text>
 			</div>
 
-			<Menu
-				mode='inline'
-				theme={theme}
-				selectedKeys={[selectedKey]}
-				className='app-nav-menu'
-				style={{ background: token.colorBgContainer }}
-				items={navigationItems.map(item => ({
-					key: item.key,
-					icon: item.icon,
-					label: (
-						<Link
-							to={item.to}
-							className='app-nav-link'
-							activeProps={{ className: 'app-nav-link' }}
-							inactiveProps={{ className: 'app-nav-link' }}
-						>
-							{item.label}
-						</Link>
-					),
-				}))}
-			/>
+			<nav className='app-nav-menu' style={{ background: token.colorBgContainer }}>
+				{navigationItems.map(item => (
+					<Link
+						key={item.key}
+						to={item.to}
+						className={`app-nav-link ${selectedKey === item.key ? 'app-nav-link-active' : ''}`}
+						activeProps={{ className: 'app-nav-link app-nav-link-active' }}
+						inactiveProps={{ className: 'app-nav-link' }}
+					>
+						<span className='app-nav-link-icon'>{item.icon}</span>
+						<span>{item.label}</span>
+					</Link>
+				))}
+			</nav>
 
 			<div
 				className='app-nav-footer'
@@ -112,8 +96,8 @@ export function AppNavigation() {
 				<Switch
 					checked={theme === 'dark'}
 					onChange={checked => setTheme(checked ? 'dark' : 'light')}
-					checkedChildren={<MoonOutlined />}
-					unCheckedChildren={<BulbOutlined />}
+					checkedChildren={<Moon size={12} />}
+					unCheckedChildren={<Sun size={12} />}
 					aria-label='Toggle dark mode'
 				/>
 			</div>

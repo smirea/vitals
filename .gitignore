@@ -17,6 +17,7 @@ dist
 # caches
 .eslintcache
 .cache
+.tamagui
 *.tsbuildinfo
 
 # other

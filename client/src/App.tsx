@@ -1,10 +1,12 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
-import { ConfigProvider, theme as antdTheme } from 'antd';
+import { TamaguiProvider } from 'tamagui';
 import { useState } from 'react';
 
+import tamaguiConfig from './tamagui.config';
 import { TRPCProvider, createBrowserTrpcClient, createQueryClient } from './utils/trpc';
 import { AutofillGuard } from './components/AutofillGuard';
+import { MessageViewport } from './components/ui';
 import { AppContextProvider } from './hooks/useAppContext';
 import useAppContext from './hooks/useAppContext';
 import { routeTree } from './routeTree.gen';
@@ -41,20 +43,14 @@ function ThemedApp({
 	const { theme } = useAppContext();
 
 	return (
-		<ConfigProvider
-			theme={{
-				algorithm: theme === 'dark' ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
-				token: {
-					fontFamily: 'var(--font-body)',
-				},
-			}}
-		>
+		<TamaguiProvider config={tamaguiConfig} defaultTheme={theme}>
 			<QueryClientProvider client={queryClient}>
 				<TRPCProvider queryClient={queryClient} trpcClient={trpcClient}>
 					<AutofillGuard />
+					<MessageViewport />
 					<RouterProvider router={router} />
 				</TRPCProvider>
 			</QueryClientProvider>
-		</ConfigProvider>
+		</TamaguiProvider>
 	);
 }

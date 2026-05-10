@@ -1,13 +1,14 @@
-import { HomeOutlined } from '@ant-design/icons';
+import { House } from '@phosphor-icons/react';
 import { createFileRoute } from '@tanstack/react-router';
-import { Card, Typography, theme as antdTheme } from 'antd';
+
+import { Card, Typography, theme as uiTheme } from '../components/ui';
 
 export const Route = createFileRoute('/')({
 	component: HomePage,
 });
 
 function HomePage() {
-	const { token } = antdTheme.useToken();
+	const { token } = uiTheme.useToken();
 
 	return (
 		<main className='home-page' style={{ background: token.colorBgLayout }}>
@@ -20,7 +21,7 @@ function HomePage() {
 							color: token.colorTextSecondary,
 						}}
 					>
-						<HomeOutlined className='home-icon' />
+						<House className='home-icon' />
 					</div>
 
 					<div className='home-copy'>

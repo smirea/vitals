@@ -11,8 +11,8 @@ import {
 	Tag,
 	Typography,
 	message,
-} from 'antd';
-import type { TableColumnsType } from 'antd';
+	type TableColumnsType,
+} from '../components/ui';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { useState } from 'react';
 

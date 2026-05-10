@@ -1,10 +1,10 @@
 import {
-	CheckCircleOutlined,
-	CopyOutlined,
-	DownloadOutlined,
-	PlayCircleOutlined,
-	WarningOutlined,
-} from '@ant-design/icons';
+	CheckCircle as CheckCircleOutlined,
+	Copy as CopyOutlined,
+	DownloadSimple as DownloadOutlined,
+	PlayCircle as PlayCircleOutlined,
+	Warning as WarningOutlined,
+} from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
 import {
@@ -23,8 +23,8 @@ import {
 	Tooltip,
 	Typography,
 	message,
-	theme as antdTheme,
-} from 'antd';
+	theme as uiTheme,
+} from '../components/ui';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import type { ReactNode } from 'react';
@@ -73,7 +73,7 @@ const defaultRunState = Object.fromEntries(
 ) as Record<SensorKey, RunState>;
 
 function SensorsPage() {
-	const { token } = antdTheme.useToken();
+	const { token } = uiTheme.useToken();
 	const trpc = useTRPC();
 	const trpcClient = useTRPCClient();
 	const [messageApi, messageContextHolder] = message.useMessage();
@@ -432,7 +432,7 @@ function SensorRow(props: {
 	onSelectedChange: (checked: boolean) => void;
 	onRun: () => void;
 }) {
-	const { token } = antdTheme.useToken();
+	const { token } = uiTheme.useToken();
 
 	return (
 		<div
