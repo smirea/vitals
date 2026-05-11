@@ -1,5 +1,5 @@
-import { PendingRoute } from '@/src/components/pending-route';
+import { LabsScreen as LabsFeatureScreen } from '@/src/features/labs/labs-screen';
 
 export default function LabsScreen() {
-	return <PendingRoute title='Labs' />;
+	return <LabsFeatureScreen />;
 }
