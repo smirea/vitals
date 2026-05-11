@@ -25,6 +25,7 @@ import {
 } from 'react-native';
 
 import { API_BASE_URL, useTRPC } from '@/src/api/trpc';
+import { BottomSheet, FloatingActionButton, IconButton } from '@/src/components/mobile-ui';
 import {
 	buildCsv,
 	buildMeasurementRows,
@@ -341,9 +342,6 @@ export function LabsScreen() {
 							retryDocumentMutation.isPending ||
 							reprocessDocumentMutation.isPending
 						}
-						onImportDocuments={() => {
-							void onImportDocuments().catch(error => setNotice(error.message));
-						}}
 						onGroupDocuments={() => {
 							void onGroupDocuments();
 						}}
@@ -369,6 +367,18 @@ export function LabsScreen() {
 					/>
 				)}
 			</ScrollView>
+			<FloatingActionButton
+				icon={activeSection === 'overview' ? 'square.and.arrow.up' : 'doc.badge.plus'}
+				label={activeSection === 'overview' ? 'CSV' : 'Import'}
+				onPress={() => {
+					if (activeSection === 'overview') {
+						void onShareCsv().catch(error => setNotice(error.message));
+						return;
+					}
+					void onImportDocuments().catch(error => setNotice(error.message));
+				}}
+				loading={uploadDocumentsMutation.isPending}
+			/>
 
 			<MeasurementModal row={selectedRow} onClose={() => setSelectedRow(null)} styles={styles} />
 			<DocumentPreviewModal
@@ -544,7 +554,6 @@ function LabsDocuments({
 	selectedDocuments,
 	hasSelectedDocumentGroup,
 	isMutating,
-	onImportDocuments,
 	onGroupDocuments,
 	onClearGroup,
 	onToggleDocument,
@@ -560,7 +569,6 @@ function LabsDocuments({
 	selectedDocuments: LabsImportDocument[];
 	hasSelectedDocumentGroup: boolean;
 	isMutating: boolean;
-	onImportDocuments: () => void;
 	onGroupDocuments: () => void;
 	onClearGroup: () => void;
 	onToggleDocument: (documentId: number) => void;
@@ -571,14 +579,14 @@ function LabsDocuments({
 	onDeleteDocument: (document: LabsImportDocument) => void;
 	styles: ReturnType<typeof labStyles>;
 }) {
+	const [actionDocument, setActionDocument] = useState<LabsImportDocument | null>(null);
+
 	return (
-		<View style={styles.stack}>
-			<Card full>
-				<Card.Body>
-					<View style={styles.documentActions}>
-						<Button type='primary' size='small' onPress={onImportDocuments} loading={isMutating}>
-							Import PDF
-						</Button>
+		<>
+			<View style={styles.stack}>
+				{selectedDocuments.length > 0 ? (
+					<View style={styles.selectionBar}>
+						<Text style={styles.body}>{selectedDocuments.length} selected</Text>
 						<Button
 							size='small'
 							onPress={onGroupDocuments}
@@ -594,13 +602,11 @@ function LabsDocuments({
 							Clear group
 						</Button>
 					</View>
-				</Card.Body>
-			</Card>
+				) : null}
 
-			{documents.map(document => (
-				<Card key={document.id} full>
-					<Card.Body>
-						<View style={styles.documentRow}>
+				{documents.map(document => (
+					<View key={document.id} style={styles.documentCard}>
+						<View style={styles.documentCardRow}>
 							<Checkbox
 								checked={selectedDocumentIds.has(document.id)}
 								onChange={() => onToggleDocument(document.id)}
@@ -624,37 +630,75 @@ function LabsDocuments({
 									</Text>
 								) : null}
 							</Pressable>
+							<IconButton
+								icon='ellipsis'
+								label='Document actions'
+								onPress={() => setActionDocument(document)}
+							/>
 						</View>
-						<View style={styles.documentButtonRow}>
-							<Button size='small' onPress={() => onOpenPdf(document)}>
-								PDF
-							</Button>
-							{document.status === 'failed' ? (
-								<Button
-									size='small'
-									onPress={() => onRetryDocument(document)}
-									disabled={isMutating}
-								>
-									Retry
-								</Button>
-							) : null}
-							{document.status === 'completed' ? (
-								<Button
-									size='small'
-									onPress={() => onReprocessDocument(document)}
-									disabled={isMutating}
-								>
-									Reprocess
-								</Button>
-							) : null}
-							<Button size='small' onPress={() => onDeleteDocument(document)} disabled={isMutating}>
-								Delete
-							</Button>
+					</View>
+				))}
+			</View>
+			<BottomSheet
+				visible={Boolean(actionDocument)}
+				title='Document actions'
+				onClose={() => setActionDocument(null)}
+			>
+				{actionDocument ? (
+					<View style={styles.stack}>
+						<View style={styles.inline}>
+							<StatusTag status={actionDocument.status} />
+							{actionDocument.group ? <Tag small>Grouped</Tag> : null}
 						</View>
-					</Card.Body>
-				</Card>
-			))}
-		</View>
+						<Text style={styles.documentTitle}>{actionDocument.fileName}</Text>
+						<Text style={styles.muted}>
+							{actionDocument.date ?? actionDocument.queuedAt.slice(0, 10)}
+							{actionDocument.labName ? `, ${actionDocument.labName}` : ''}
+							{actionDocument.statusText ? `, ${actionDocument.statusText}` : ''}
+						</Text>
+						<Button
+							onPress={() => {
+								onOpenPdf(actionDocument);
+								setActionDocument(null);
+							}}
+						>
+							PDF
+						</Button>
+						{actionDocument.status === 'failed' ? (
+							<Button
+								onPress={() => {
+									onRetryDocument(actionDocument);
+									setActionDocument(null);
+								}}
+								disabled={isMutating}
+							>
+								Retry
+							</Button>
+						) : null}
+						{actionDocument.status === 'completed' ? (
+							<Button
+								onPress={() => {
+									onReprocessDocument(actionDocument);
+									setActionDocument(null);
+								}}
+								disabled={isMutating}
+							>
+								Reprocess
+							</Button>
+						) : null}
+						<Button
+							onPress={() => {
+								onDeleteDocument(actionDocument);
+								setActionDocument(null);
+							}}
+							disabled={isMutating}
+						>
+							Delete
+						</Button>
+					</View>
+				) : null}
+			</BottomSheet>
+		</>
 	);
 }
 
@@ -1109,12 +1153,25 @@ function labStyles(isDark: boolean) {
 			fontSize: 15,
 			fontWeight: '700' as const,
 		},
-		documentActions: {
+		selectionBar: {
+			alignItems: 'center' as const,
+			backgroundColor: isDark ? '#111827' : '#fff',
+			borderColor: border,
+			borderRadius: 14,
+			borderWidth: 1,
 			flexDirection: 'row' as const,
 			flexWrap: 'wrap' as const,
 			gap: 8,
+			padding: 10,
 		},
-		documentRow: {
+		documentCard: {
+			backgroundColor: isDark ? '#111827' : '#fff',
+			borderColor: border,
+			borderRadius: 14,
+			borderWidth: 1,
+			padding: 12,
+		},
+		documentCardRow: {
 			alignItems: 'flex-start' as const,
 			flexDirection: 'row' as const,
 			gap: 10,

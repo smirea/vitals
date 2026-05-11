@@ -20,6 +20,7 @@ import {
 	useColorScheme,
 } from 'react-native';
 
+import { BottomSheet, FloatingActionButton } from '@/src/components/mobile-ui';
 import { useTRPC } from '@/src/api/trpc';
 import {
 	appendTagText,
@@ -62,6 +63,7 @@ export function LogScreen() {
 	const [notice, setNotice] = useState<string | null>(null);
 	const [selectedEntry, setSelectedEntry] = useState<DiaryEntry | null>(null);
 	const [isUploadingRecording, setIsUploadingRecording] = useState(false);
+	const [composerOpen, setComposerOpen] = useState(false);
 
 	const entriesQuery = useQuery(trpc.diary.list.queryOptions());
 	const pendingVoiceMemosQuery = useQuery(trpc.diary.listPendingVoiceMemos.queryOptions());
@@ -89,6 +91,7 @@ export function LogScreen() {
 			await invalidateDiary();
 			setNotes('');
 			setTagText('');
+			setComposerOpen(false);
 			setNotice('Entry added.');
 		},
 		onError: error => setNotice(error.message),
@@ -99,6 +102,7 @@ export function LogScreen() {
 			await invalidateDiary();
 			setNotes('');
 			setTagText('');
+			setComposerOpen(false);
 			setNotice('Voice memo saved.');
 		},
 		onError: error => setNotice(error.message),
@@ -343,16 +347,6 @@ export function LogScreen() {
 				contentInsetAdjustmentBehavior='automatic'
 				contentContainerStyle={sharedStyles.page}
 			>
-				<View style={styles.headerRow}>
-					<View>
-						<Text style={styles.title}>Log</Text>
-						<Text style={styles.muted}>{locationMessage}</Text>
-					</View>
-					<Button size='small' onPress={refreshLocation}>
-						Locate
-					</Button>
-				</View>
-
 				{notice ? (
 					<Pressable onPress={() => setNotice(null)} style={styles.notice}>
 						<Text selectable style={styles.noticeText}>
@@ -360,69 +354,6 @@ export function LogScreen() {
 						</Text>
 					</Pressable>
 				) : null}
-
-				<Card full>
-					<Card.Body>
-						<View style={styles.stack}>
-							<TextInput
-								value={notes}
-								editable={!isBusy}
-								multiline
-								placeholder='What happened?'
-								placeholderTextColor={styles.placeholder.color}
-								style={[styles.input, styles.composerInput]}
-								onChangeText={setNotes}
-							/>
-							<TextInput
-								value={tagText}
-								editable={!isBusy}
-								placeholder='Tags'
-								placeholderTextColor={styles.placeholder.color}
-								style={styles.input}
-								autoCapitalize='none'
-								onChangeText={setTagText}
-							/>
-							{availableTags.length > 0 ? (
-								<ScrollView horizontal showsHorizontalScrollIndicator={false}>
-									<View style={styles.tagRow}>
-										{availableTags.map(tag => (
-											<Pressable
-												key={tag.name}
-												onPress={() => setTagText(previous => appendTagText(previous, tag.name))}
-											>
-												<Tag small>{tag.name}</Tag>
-											</Pressable>
-										))}
-									</View>
-								</ScrollView>
-							) : null}
-							<View style={styles.actionRow}>
-								<Button
-									size='small'
-									onPress={toggleRecording}
-									disabled={!canRecord}
-									loading={isUploadingRecording || uploadVoiceMemoMutation.isPending}
-								>
-									{recorderState.isRecording ? 'Stop' : 'Record'}
-								</Button>
-								{recorderState.isRecording ? (
-									<Text style={styles.recordingText}>
-										{formatRecorderDuration(recorderState.durationMillis)}
-									</Text>
-								) : null}
-								<Button
-									type='primary'
-									size='small'
-									onPress={() => void createEntry()}
-									disabled={!canCreateEntry}
-									loading={createEntryMutation.isPending}
-								>
-									Add
-								</Button>
-							</View>
-						</View>
-					</Card.Body>
-				</Card>
 
 				<View style={styles.totalsRow}>
 					<TotalCard label='Entries' value={entries.length} styles={styles} />
@@ -477,24 +408,107 @@ export function LogScreen() {
 						<EntryCard
 							key={entry.id}
 							entry={entry}
-							availableTags={availableTags}
-							tagDraft={tagDrafts[`entry-${entry.id}`] ?? ''}
-							isAddingTags={addEntryTagsMutation.isPending}
-							isDeleting={deleteEntryMutation.isPending}
 							onOpen={() => setSelectedEntry(entry)}
-							onSetTagDraft={value => setTagDraft(`entry-${entry.id}`, value)}
-							onAddTags={() => addTagsToEntry(entry.id)}
-							onDelete={() => deleteEntry(entry)}
 							styles={styles}
 						/>
 					))}
 				</View>
 			</ScrollView>
+			<FloatingActionButton
+				icon='mic.fill'
+				label={
+					recorderState.isRecording
+						? formatRecorderDuration(recorderState.durationMillis)
+						: 'Record'
+				}
+				onPress={() => setComposerOpen(true)}
+			/>
+			<BottomSheet
+				visible={composerOpen}
+				title='New entry'
+				onClose={() => setComposerOpen(false)}
+				footer={
+					<View style={styles.actionRow}>
+						<Button size='small' onPress={refreshLocation}>
+							Locate
+						</Button>
+						<Button
+							size='small'
+							onPress={toggleRecording}
+							disabled={!canRecord}
+							loading={isUploadingRecording || uploadVoiceMemoMutation.isPending}
+						>
+							{recorderState.isRecording ? 'Stop' : 'Record'}
+						</Button>
+						<Button
+							type='primary'
+							size='small'
+							onPress={() => void createEntry()}
+							disabled={!canCreateEntry}
+							loading={createEntryMutation.isPending}
+						>
+							Add
+						</Button>
+					</View>
+				}
+			>
+				<View style={styles.stack}>
+					<Text style={styles.muted}>{locationMessage}</Text>
+					<TextInput
+						value={notes}
+						editable={!isBusy}
+						multiline
+						placeholder='What happened?'
+						placeholderTextColor={styles.placeholder.color}
+						style={[styles.input, styles.composerInput]}
+						onChangeText={setNotes}
+					/>
+					<TextInput
+						value={tagText}
+						editable={!isBusy}
+						placeholder='Tags'
+						placeholderTextColor={styles.placeholder.color}
+						style={styles.input}
+						autoCapitalize='none'
+						onChangeText={setTagText}
+					/>
+					{availableTags.length > 0 ? (
+						<ScrollView horizontal showsHorizontalScrollIndicator={false}>
+							<View style={styles.tagRow}>
+								{availableTags.map(tag => (
+									<Pressable
+										key={tag.name}
+										onPress={() => setTagText(previous => appendTagText(previous, tag.name))}
+									>
+										<Tag small>{tag.name}</Tag>
+									</Pressable>
+								))}
+							</View>
+						</ScrollView>
+					) : null}
+					{recorderState.isRecording ? (
+						<Text style={styles.recordingText}>
+							Recording {formatRecorderDuration(recorderState.durationMillis)}
+						</Text>
+					) : null}
+				</View>
+			</BottomSheet>
 
 			<EntryDetailModal
 				entry={selectedEntry}
 				visible={selectedEntry !== null}
+				availableTags={availableTags}
+				tagDraft={selectedEntry ? (tagDrafts[`entry-${selectedEntry.id}`] ?? '') : ''}
+				isAddingTags={addEntryTagsMutation.isPending}
 				onClose={() => setSelectedEntry(null)}
+				onSetTagDraft={value => {
+					if (!selectedEntry) return;
+					setTagDraft(`entry-${selectedEntry.id}`, value);
+				}}
+				onAddTags={() => {
+					if (!selectedEntry) return;
+					addTagsToEntry(selectedEntry.id);
+				}}
 				onDelete={entry => deleteEntry(entry)}
 				styles={styles}
 			/>
@@ -538,25 +552,11 @@ function SectionHeader({
 
 function EntryCard({
 	entry,
-	availableTags,
-	tagDraft,
-	isAddingTags,
-	isDeleting,
 	onOpen,
-	onSetTagDraft,
-	onAddTags,
-	onDelete,
 	styles,
 }: {
 	entry: DiaryEntry;
-	availableTags: TagRecord[];
-	tagDraft: string;
-	isAddingTags: boolean;
-	isDeleting: boolean;
 	onOpen: () => void;
-	onSetTagDraft: (value: string) => void;
-	onAddTags: () => void;
-	onDelete: () => void;
 	styles: ReturnType<typeof logStyles>;
 }) {
 	const preview = getEntryPreview(entry);
@@ -593,17 +593,6 @@ function EntryCard({
 							</View>
 						) : null}
 					</Pressable>
-					<TagAddControl
-						value={tagDraft}
-						availableTags={availableTags}
-						loading={isAddingTags}
-						onChange={onSetTagDraft}
-						onAdd={onAddTags}
-						styles={styles}
-					/>
-					<Button size='small' onPress={onDelete} loading={isDeleting}>
-						Delete
-					</Button>
 				</View>
 			</Card.Body>
 		</Card>
@@ -817,13 +806,23 @@ function TagAddControl({
 function EntryDetailModal({
 	entry,
 	visible,
+	availableTags,
+	tagDraft,
+	isAddingTags,
 	onClose,
+	onSetTagDraft,
+	onAddTags,
 	onDelete,
 	styles,
 }: {
 	entry: DiaryEntry | null;
 	visible: boolean;
+	availableTags: TagRecord[];
+	tagDraft: string;
+	isAddingTags: boolean;
 	onClose: () => void;
+	onSetTagDraft: (value: string) => void;
+	onAddTags: () => void;
 	onDelete: (entry: DiaryEntry) => void;
 	styles: ReturnType<typeof logStyles>;
 }) {
@@ -854,6 +853,14 @@ function EntryDetailModal({
 							<Text style={styles.linkText}>{formatLocationLabel(entry.location)}</Text>
 						</Pressable>
 						<TagList tags={entry.tags} styles={styles} />
+						<TagAddControl
+							value={tagDraft}
+							availableTags={availableTags}
+							loading={isAddingTags}
+							onChange={onSetTagDraft}
+							onAdd={onAddTags}
+							styles={styles}
+						/>
 						<View style={styles.stack}>
 							<Text style={styles.sectionTitle}>Transcript</Text>
 							<Text style={styles.body} numberOfLines={8}>

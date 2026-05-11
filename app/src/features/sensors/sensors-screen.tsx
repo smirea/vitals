@@ -1,4 +1,4 @@
-import { ActivityIndicator, Button, Card } from '@ant-design/react-native';
+import { ActivityIndicator, Button } from '@ant-design/react-native';
 import { useQuery } from '@tanstack/react-query';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View, useColorScheme } from 'react-native';
 
 import { useTRPC, useTRPCClient } from '@/src/api/trpc';
+import { BottomSheet, FloatingActionButton, IconButton } from '@/src/components/mobile-ui';
 import {
 	buildCompiledJsonText,
 	buildCompiledText,
@@ -48,6 +49,7 @@ export function SensorsScreen() {
 	const [outputMode, setOutputMode] = useState<OutputMode>('text');
 	const [runStates, setRunStates] = useState(createDefaultRunStates);
 	const [results, setResults] = useState<Partial<Record<SensorKey, SensorRunResult>>>({});
+	const [configSensor, setConfigSensor] = useState<SensorKey | null>(null);
 	const [labsConfig, setLabsConfig] = useState<LabsConfig>({
 		textFilter: '',
 		categories: [],
@@ -223,121 +225,118 @@ export function SensorsScreen() {
 	}
 
 	return (
-		<ScrollView
-			contentInsetAdjustmentBehavior='automatic'
-			contentContainerStyle={sharedStyles.page}
-		>
-			<View style={styles.headerRow}>
-				<View>
-					<Text style={styles.title}>Sensors</Text>
-					<Text style={styles.muted}>{selectedRunKeys.length} selected</Text>
-				</View>
-				<Button
-					type='primary'
-					size='small'
-					onPress={() => void runKeys(selectedRunKeys)}
-					loading={isAnySelectedRunning}
-				>
-					Run selected
-				</Button>
-			</View>
+		<>
+			<ScrollView
+				contentInsetAdjustmentBehavior='automatic'
+				contentContainerStyle={sharedStyles.page}
+			>
+				{notice ? (
+					<Pressable onPress={() => setNotice(null)} style={styles.notice}>
+						<Text selectable style={styles.noticeText}>
+							{notice}
+						</Text>
+					</Pressable>
+				) : null}
 
-			{notice ? (
-				<Pressable onPress={() => setNotice(null)} style={styles.notice}>
-					<Text selectable style={styles.noticeText}>
-						{notice}
-					</Text>
-				</Pressable>
-			) : null}
-
-			<Card full>
-				<Card.Body>
-					<View style={styles.stack}>
-						<Text style={styles.sectionTitle}>Default start date</Text>
-						<TextInput
-							value={defaultStartDate}
-							placeholder='YYYY-MM-DD'
-							placeholderTextColor={styles.placeholder.color}
-							style={styles.input}
-							onChangeText={updateDefaultStartDate}
-						/>
-						<View style={styles.chipRow}>
-							<Chip label='7 days' onPress={() => updateDefaultStartDate(getDateDaysAgo(7))} />
-							<Chip label='1 month' onPress={() => updateDefaultStartDate(getDateMonthsAgo(1))} />
-							<Chip label='3 months' onPress={() => updateDefaultStartDate(getDateMonthsAgo(3))} />
+				<View style={styles.controlPanel}>
+					<View style={styles.rowBetween}>
+						<View>
+							<Text style={styles.statValue}>{selectedRunKeys.length}</Text>
+							<Text style={styles.muted}>selected sensors</Text>
 						</View>
-						<Text style={styles.sectionTitle}>Output</Text>
-						<View style={styles.segment}>
-							{outputModes.map(mode => (
-								<SegmentButton
-									key={mode}
-									label={mode.toUpperCase()}
-									active={outputMode === mode}
-									onPress={() => setOutputMode(mode)}
-									styles={styles}
-								/>
-							))}
-						</View>
+						<Button
+							size='small'
+							onPress={() => void shareOutput()}
+							disabled={
+								outputMode === 'csv' ? csvFiles.length === 0 : outputText.trim().length === 0
+							}
+						>
+							Share
+						</Button>
 					</View>
-				</Card.Body>
-			</Card>
-
-			<View style={styles.stack}>
-				{sensorKeys.map(key => (
-					<SensorCard
-						key={key}
-						sensorKey={key}
-						selected={selectedKeys[key]}
-						runState={runStates[key]}
-						startDate={key === 'labs' ? defaultStartDate : startDates[key as DependentSensorKey]}
-						labsConfig={labsConfig}
-						voiceMemosConfig={voiceMemosConfig}
-						macrofactorConfig={macrofactorConfig}
-						labDates={configQuery.data?.labDates ?? []}
-						labCategories={configQuery.data?.labCategories ?? []}
-						onSelectedChange={selected =>
-							setSelectedKeys(previous => ({ ...previous, [key]: selected }))
-						}
-						onRun={() => void runSensor(key).catch(error => setNotice(error.message))}
-						onStartDateChange={startDate =>
-							setStartDates(previous => ({
-								...previous,
-								[key as DependentSensorKey]: startDate,
-							}))
-						}
-						onLabsConfigChange={setLabsConfig}
-						onVoiceMemosConfigChange={setVoiceMemosConfig}
-						onMacrofactorConfigChange={setMacrofactorConfig}
-						styles={styles}
+					<TextInput
+						value={defaultStartDate}
+						placeholder='YYYY-MM-DD'
+						placeholderTextColor={styles.placeholder.color}
+						style={styles.compactInput}
+						onChangeText={updateDefaultStartDate}
 					/>
-				))}
-			</View>
-
-			<Card full>
-				<Card.Body>
-					<View style={styles.stack}>
-						<View style={styles.rowBetween}>
-							<Text style={styles.sectionTitle}>Export</Text>
-							<Button
-								size='small'
-								type='primary'
-								onPress={() => void shareOutput()}
-								disabled={
-									outputMode === 'csv' ? csvFiles.length === 0 : outputText.trim().length === 0
-								}
-							>
-								Share
-							</Button>
-						</View>
-						{outputMode === 'csv' ? (
-							<CsvOutput files={csvFiles} onShare={shareCsvFile} styles={styles} />
-						) : (
-							<TextOutput value={outputText} isRunning={isAnyRunning} styles={styles} />
-						)}
+					<View style={styles.chipRow}>
+						<Chip label='7 days' onPress={() => updateDefaultStartDate(getDateDaysAgo(7))} />
+						<Chip label='1 month' onPress={() => updateDefaultStartDate(getDateMonthsAgo(1))} />
+						<Chip label='3 months' onPress={() => updateDefaultStartDate(getDateMonthsAgo(3))} />
 					</View>
-				</Card.Body>
-			</Card>
-		</ScrollView>
+					<View style={styles.segment}>
+						{outputModes.map(mode => (
+							<SegmentButton
+								key={mode}
+								label={mode.toUpperCase()}
+								active={outputMode === mode}
+								onPress={() => setOutputMode(mode)}
+								styles={styles}
+							/>
+						))}
+					</View>
+				</View>
+
+				<View style={styles.stack}>
+					{sensorKeys.map(key => (
+						<SensorCard
+							key={key}
+							sensorKey={key}
+							selected={selectedKeys[key]}
+							runState={runStates[key]}
+							startDate={key === 'labs' ? defaultStartDate : startDates[key as DependentSensorKey]}
+							labsConfig={labsConfig}
+							voiceMemosConfig={voiceMemosConfig}
+							macrofactorConfig={macrofactorConfig}
+							onSelectedChange={selected =>
+								setSelectedKeys(previous => ({ ...previous, [key]: selected }))
+							}
+							onRun={() => void runSensor(key).catch(error => setNotice(error.message))}
+							onConfigure={() => setConfigSensor(key)}
+							styles={styles}
+						/>
+					))}
+				</View>
+
+				<View style={styles.outputCard}>
+					<View style={styles.rowBetween}>
+						<Text style={styles.sectionTitle}>Output</Text>
+						<Text style={styles.muted}>{outputMode.toUpperCase()}</Text>
+					</View>
+					{outputMode === 'csv' ? (
+						<CsvOutput files={csvFiles} onShare={shareCsvFile} styles={styles} />
+					) : (
+						<TextOutput value={outputText} isRunning={isAnyRunning} styles={styles} />
+					)}
+				</View>
+			</ScrollView>
+			<FloatingActionButton
+				icon='play.circle.fill'
+				label='Run'
+				onPress={() => void runKeys(selectedRunKeys)}
+				loading={isAnySelectedRunning}
+			/>
+			<SensorConfigSheet
+				sensorKey={configSensor}
+				defaultStartDate={defaultStartDate}
+				startDates={startDates}
+				labsConfig={labsConfig}
+				voiceMemosConfig={voiceMemosConfig}
+				macrofactorConfig={macrofactorConfig}
+				labDates={configQuery.data?.labDates ?? []}
+				labCategories={configQuery.data?.labCategories ?? []}
+				onClose={() => setConfigSensor(null)}
+				onStartDateChange={(key, startDate) =>
+					setStartDates(previous => ({ ...previous, [key]: startDate }))
+				}
+				onLabsConfigChange={setLabsConfig}
+				onVoiceMemosConfigChange={setVoiceMemosConfig}
+				onMacrofactorConfigChange={setMacrofactorConfig}
+				styles={styles}
+			/>
+		</>
 	);
 }
 
@@ -349,14 +348,9 @@ function SensorCard({
 	labsConfig,
 	voiceMemosConfig,
 	macrofactorConfig,
-	labDates,
-	labCategories,
 	onSelectedChange,
 	onRun,
-	onStartDateChange,
-	onLabsConfigChange,
-	onVoiceMemosConfigChange,
-	onMacrofactorConfigChange,
+	onConfigure,
 	styles,
 }: {
 	sensorKey: SensorKey;
@@ -366,64 +360,113 @@ function SensorCard({
 	labsConfig: LabsConfig;
 	voiceMemosConfig: VoiceMemosConfig;
 	macrofactorConfig: MacrofactorConfig;
-	labDates: string[];
-	labCategories: Array<{ category: string; count: number }>;
 	onSelectedChange: (selected: boolean) => void;
 	onRun: () => void;
-	onStartDateChange: (startDate: string) => void;
+	onConfigure: () => void;
+	styles: ReturnType<typeof sensorsStyles>;
+}) {
+	const configSummary = getSensorConfigSummary({
+		sensorKey,
+		startDate,
+		labsConfig,
+		voiceMemosConfig,
+		macrofactorConfig,
+	});
+
+	return (
+		<View style={styles.sensorCard}>
+			<View style={styles.rowBetween}>
+				<Pressable onPress={() => onSelectedChange(!selected)} style={styles.sensorTitleRow}>
+					<View style={[styles.checkbox, selected && styles.checkboxActive]}>
+						{selected ? <View style={styles.checkboxDot} /> : null}
+					</View>
+					<View style={{ flex: 1 }}>
+						<Text style={styles.cardTitle}>{sensorLabels[sensorKey]}</Text>
+						<Text style={styles.muted} numberOfLines={2}>
+							{configSummary}
+						</Text>
+					</View>
+				</Pressable>
+				<View style={styles.inline}>
+					<IconButton
+						icon='gearshape'
+						label={`${sensorLabels[sensorKey]} settings`}
+						onPress={onConfigure}
+					/>
+					<Button size='small' onPress={onRun} loading={runState.status === 'running'}>
+						Run
+					</Button>
+				</View>
+			</View>
+			<RunStatePill state={runState} styles={styles} />
+			{runState.error ? (
+				<Text selectable style={styles.errorText}>
+					{runState.error}
+				</Text>
+			) : null}
+		</View>
+	);
+}
+
+function SensorConfigSheet({
+	sensorKey,
+	defaultStartDate,
+	startDates,
+	labsConfig,
+	voiceMemosConfig,
+	macrofactorConfig,
+	labDates,
+	labCategories,
+	onClose,
+	onStartDateChange,
+	onLabsConfigChange,
+	onVoiceMemosConfigChange,
+	onMacrofactorConfigChange,
+	styles,
+}: {
+	sensorKey: SensorKey | null;
+	defaultStartDate: string;
+	startDates: Record<DependentSensorKey, string>;
+	labsConfig: LabsConfig;
+	voiceMemosConfig: VoiceMemosConfig;
+	macrofactorConfig: MacrofactorConfig;
+	labDates: string[];
+	labCategories: Array<{ category: string; count: number }>;
+	onClose: () => void;
+	onStartDateChange: (key: DependentSensorKey, startDate: string) => void;
 	onLabsConfigChange: (config: LabsConfig) => void;
 	onVoiceMemosConfigChange: (config: VoiceMemosConfig) => void;
 	onMacrofactorConfigChange: (config: MacrofactorConfig) => void;
 	styles: ReturnType<typeof sensorsStyles>;
 }) {
-	const isLabs = sensorKey === 'labs';
-	const isVoiceMemos = sensorKey === 'voiceMemos';
-	const isMacrofactor = sensorKey === 'macrofactor';
+	const dependentKey = sensorKey && sensorKey !== 'labs' ? (sensorKey as DependentSensorKey) : null;
 
 	return (
-		<Card full>
-			<Card.Body>
+		<BottomSheet
+			visible={sensorKey !== null}
+			title={sensorKey ? `${sensorLabels[sensorKey]} settings` : 'Settings'}
+			onClose={onClose}
+		>
+			{sensorKey === 'labs' ? (
+				<LabsConfigView
+					config={labsConfig}
+					labDates={labDates}
+					labCategories={labCategories}
+					onChange={onLabsConfigChange}
+					styles={styles}
+				/>
+			) : dependentKey ? (
 				<View style={styles.stack}>
-					<View style={styles.rowBetween}>
-						<Pressable onPress={() => onSelectedChange(!selected)} style={styles.sensorTitleRow}>
-							<View style={[styles.checkbox, selected && styles.checkboxActive]}>
-								{selected ? <View style={styles.checkboxDot} /> : null}
-							</View>
-							<Text style={styles.cardTitle}>{sensorLabels[sensorKey]}</Text>
-						</Pressable>
-						<Button size='small' onPress={onRun} loading={runState.status === 'running'}>
-							Run
-						</Button>
-					</View>
-					<RunStatePill state={runState} styles={styles} />
-					{runState.error ? (
-						<Text selectable style={styles.errorText}>
-							{runState.error}
-						</Text>
-					) : null}
-
-					{isLabs ? (
-						<LabsConfigView
-							config={labsConfig}
-							labDates={labDates}
-							labCategories={labCategories}
-							onChange={onLabsConfigChange}
-							styles={styles}
-						/>
-					) : (
-						<View style={styles.stack}>
-							<Text style={styles.fieldLabel}>Start date</Text>
-							<TextInput
-								value={startDate}
-								placeholder='YYYY-MM-DD'
-								placeholderTextColor={styles.placeholder.color}
-								style={styles.input}
-								onChangeText={onStartDateChange}
-							/>
-						</View>
-					)}
-
-					{isVoiceMemos ? (
+					<Text style={styles.fieldLabel}>Start date</Text>
+					<TextInput
+						value={startDates[dependentKey]}
+						placeholder='YYYY-MM-DD'
+						placeholderTextColor={styles.placeholder.color}
+						style={styles.input}
+						onChangeText={startDate => onStartDateChange(dependentKey, startDate)}
+					/>
+					<Text style={styles.muted}>Default is {defaultStartDate}.</Text>
+					{sensorKey === 'voiceMemos' ? (
 						<View style={styles.chipRow}>
 							{voiceMemoContentOptions.map(content => (
 								<Chip
@@ -435,8 +478,7 @@ function SensorCard({
 							))}
 						</View>
 					) : null}
-
-					{isMacrofactor ? (
+					{sensorKey === 'macrofactor' ? (
 						<Chip
 							label='Recipe details'
 							active={macrofactorConfig.recipeDetails}
@@ -448,9 +490,38 @@ function SensorCard({
 						/>
 					) : null}
 				</View>
-			</Card.Body>
-		</Card>
+			) : null}
+		</BottomSheet>
 	);
+}
+
+function getSensorConfigSummary({
+	sensorKey,
+	startDate,
+	labsConfig,
+	voiceMemosConfig,
+	macrofactorConfig,
+}: {
+	sensorKey: SensorKey;
+	startDate: string;
+	labsConfig: LabsConfig;
+	voiceMemosConfig: VoiceMemosConfig;
+	macrofactorConfig: MacrofactorConfig;
+}) {
+	if (sensorKey === 'labs') {
+		const parts = [
+			labsConfig.startDate ?? startDate,
+			labsConfig.onlyLatest ? 'latest only' : null,
+			labsConfig.categories.length ? `${labsConfig.categories.length} categories` : null,
+			labsConfig.textFilter.trim() ? 'filtered' : null,
+		].filter(Boolean);
+		return parts.join(' - ');
+	}
+	if (sensorKey === 'voiceMemos') return `${startDate} - ${voiceMemosConfig.content}`;
+	if (sensorKey === 'macrofactor') {
+		return `${startDate}${macrofactorConfig.recipeDetails ? ' - recipes' : ''}`;
+	}
+	return startDate;
 }
 
 function LabsConfigView({
@@ -718,11 +789,30 @@ function sensorsStyles(isDark: boolean) {
 		stack: {
 			gap: 12,
 		},
+		controlPanel: {
+			backgroundColor: surface,
+			borderColor: border,
+			borderRadius: 14,
+			borderWidth: 1,
+			gap: 10,
+			padding: 12,
+		},
+		statValue: {
+			color: text,
+			fontSize: 26,
+			fontVariant: ['tabular-nums'] as ['tabular-nums'],
+			fontWeight: '800' as const,
+		},
 		rowBetween: {
 			alignItems: 'center' as const,
 			flexDirection: 'row' as const,
 			gap: 10,
 			justifyContent: 'space-between' as const,
+		},
+		inline: {
+			alignItems: 'center' as const,
+			flexDirection: 'row' as const,
+			gap: 8,
 		},
 		notice: {
 			backgroundColor: isDark ? '#102a43' : '#e6f4ff',
@@ -771,6 +861,16 @@ function sensorsStyles(isDark: boolean) {
 			backgroundColor: surface,
 			borderColor: border,
 			borderRadius: 8,
+			borderWidth: 1,
+			color: text,
+			fontSize: 15,
+			paddingHorizontal: 10,
+			paddingVertical: 8,
+		},
+		compactInput: {
+			backgroundColor: isDark ? '#0f172a' : '#f6f7f9',
+			borderColor: border,
+			borderRadius: 10,
 			borderWidth: 1,
 			color: text,
 			fontSize: 15,
@@ -829,6 +929,14 @@ function sensorsStyles(isDark: boolean) {
 			flexDirection: 'row' as const,
 			gap: 10,
 		},
+		sensorCard: {
+			backgroundColor: surface,
+			borderColor: border,
+			borderRadius: 14,
+			borderWidth: 1,
+			gap: 10,
+			padding: 12,
+		},
 		checkbox: {
 			alignItems: 'center' as const,
 			borderColor: border,
@@ -874,6 +982,14 @@ function sensorsStyles(isDark: boolean) {
 		},
 		csvFile: {
 			gap: 10,
+		},
+		outputCard: {
+			backgroundColor: surface,
+			borderColor: border,
+			borderRadius: 14,
+			borderWidth: 1,
+			gap: 10,
+			padding: 12,
 		},
 	};
 }

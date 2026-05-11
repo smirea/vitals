@@ -6,9 +6,11 @@ export function pageStyles(isDark: boolean) {
 
 	return {
 		page: {
-			gap: 14,
-			padding: 16,
 			backgroundColor: isDark ? '#0f172a' : '#f6f7f9',
+			gap: 14,
+			paddingBottom: 94,
+			paddingHorizontal: 14,
+			paddingTop: 12,
 		} satisfies StyleProp<ViewStyle>,
 		header: {
 			gap: 6,

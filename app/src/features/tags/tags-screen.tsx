@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View, useColorScheme } from 'react-native';
 
 import { useTRPC } from '@/src/api/trpc';
+import { BottomSheet, FloatingActionButton } from '@/src/components/mobile-ui';
 import {
 	assertValidTagForm,
 	createEmptyTagForm,
@@ -23,6 +24,7 @@ export function TagsScreen() {
 	const sharedStyles = pageStyles(isDark);
 	const [notice, setNotice] = useState<string | null>(null);
 	const [form, setForm] = useState<TagFormValues>(() => createEmptyTagForm());
+	const [formOpen, setFormOpen] = useState(false);
 
 	const tagsQuery = useQuery(trpc.tags.list.queryOptions());
 	const tags = tagsQuery.data ?? [];
@@ -40,6 +42,7 @@ export function TagsScreen() {
 		onSuccess: async () => {
 			await invalidateTags();
 			setForm(createEmptyTagForm());
+			setFormOpen(false);
 			setNotice('Tag created.');
 		},
 		onError: error => setNotice(error.message),
@@ -49,6 +52,7 @@ export function TagsScreen() {
 		onSuccess: async () => {
 			await invalidateTags();
 			setForm(createEmptyTagForm());
+			setFormOpen(false);
 			setNotice('Tag updated.');
 		},
 		onError: error => setNotice(error.message),
@@ -103,98 +107,104 @@ export function TagsScreen() {
 	}
 
 	return (
-		<ScrollView
-			contentInsetAdjustmentBehavior='automatic'
-			contentContainerStyle={sharedStyles.page}
-		>
-			<View style={styles.headerRow}>
-				<View>
-					<Text style={styles.title}>Tags</Text>
-					<Text style={styles.muted}>{tags.length} rows</Text>
-				</View>
-				{isEditing ? (
-					<Button size='small' onPress={() => setForm(createEmptyTagForm())}>
-						Cancel
-					</Button>
+		<>
+			<ScrollView
+				contentInsetAdjustmentBehavior='automatic'
+				contentContainerStyle={sharedStyles.page}
+			>
+				{notice ? (
+					<Pressable onPress={() => setNotice(null)} style={styles.notice}>
+						<Text selectable style={styles.noticeText}>
+							{notice}
+						</Text>
+					</Pressable>
 				) : null}
-			</View>
 
-			{notice ? (
-				<Pressable onPress={() => setNotice(null)} style={styles.notice}>
-					<Text selectable style={styles.noticeText}>
-						{notice}
-					</Text>
-				</Pressable>
-			) : null}
-
-			<Card full>
-				<Card.Body>
-					<View style={styles.stack}>
-						<Text style={styles.sectionTitle}>{isEditing ? 'Edit tag' : 'Create tag'}</Text>
-						<TextField
-							label='Name'
-							value={form.name}
-							onChangeText={name => patchForm({ name })}
-							styles={styles}
-						/>
-						<View style={styles.stack}>
-							<Text style={styles.fieldLabel}>Color</Text>
-							<View style={styles.swatchRow}>
-								{tagColorPresets.map(color => (
-									<Pressable
-										key={color}
-										onPress={() => patchForm({ color })}
-										style={[
-											styles.swatch,
-											{ backgroundColor: color },
-											form.color.toLocaleLowerCase() === color.toLocaleLowerCase() &&
-												styles.swatchActive,
-										]}
-									/>
-								))}
-							</View>
-							<TextInput
-								value={form.color}
-								placeholder='#1677ff'
-								placeholderTextColor={styles.placeholder.color}
-								style={styles.input}
-								autoCapitalize='none'
-								onChangeText={color => patchForm({ color })}
-							/>
-						</View>
-						<TextField
-							label='Note'
-							value={form.note}
-							onChangeText={note => patchForm({ note })}
-							multiline
-							styles={styles}
-						/>
-						<Button
-							type='primary'
-							onPress={() => void saveTag()}
-							loading={createTagMutation.isPending || updateTagMutation.isPending}
-						>
-							{isEditing ? 'Save tag' : 'Create tag'}
-						</Button>
+				<View style={styles.stack}>
+					<View style={styles.rowBetween}>
+						<Text style={styles.sectionTitle}>All tags</Text>
+						<Text style={styles.muted}>{tags.length} rows</Text>
 					</View>
-				</Card.Body>
-			</Card>
-
-			<View style={styles.stack}>
-				<View style={styles.rowBetween}>
-					<Text style={styles.sectionTitle}>All tags</Text>
-					<Text style={styles.muted}>{tags.length} rows</Text>
+					{tags.map(tag => (
+						<TagCard
+							key={tag.id}
+							tag={tag}
+							onPress={() => {
+								setForm(tagToFormValues(tag));
+								setFormOpen(true);
+							}}
+							styles={styles}
+						/>
+					))}
 				</View>
-				{tags.map(tag => (
-					<TagCard
-						key={tag.id}
-						tag={tag}
-						onPress={() => setForm(tagToFormValues(tag))}
+			</ScrollView>
+			<FloatingActionButton
+				icon='plus'
+				label='Tag'
+				onPress={() => {
+					setForm(createEmptyTagForm());
+					setFormOpen(true);
+				}}
+			/>
+			<BottomSheet
+				visible={formOpen}
+				title={isEditing ? 'Edit tag' : 'Create tag'}
+				onClose={() => {
+					setFormOpen(false);
+					setForm(createEmptyTagForm());
+				}}
+				footer={
+					<Button
+						type='primary'
+						onPress={() => void saveTag()}
+						loading={createTagMutation.isPending || updateTagMutation.isPending}
+					>
+						{isEditing ? 'Save tag' : 'Create tag'}
+					</Button>
+				}
+			>
+				<View style={styles.stack}>
+					<TextField
+						label='Name'
+						value={form.name}
+						onChangeText={name => patchForm({ name })}
 						styles={styles}
 					/>
-				))}
-			</View>
-		</ScrollView>
+					<View style={styles.stack}>
+						<Text style={styles.fieldLabel}>Color</Text>
+						<View style={styles.swatchRow}>
+							{tagColorPresets.map(color => (
+								<Pressable
+									key={color}
+									onPress={() => patchForm({ color })}
+									style={[
+										styles.swatch,
+										{ backgroundColor: color },
+										form.color.toLocaleLowerCase() === color.toLocaleLowerCase() &&
+											styles.swatchActive,
+									]}
+								/>
+							))}
+						</View>
+						<TextInput
+							value={form.color}
+							placeholder='#1677ff'
+							placeholderTextColor={styles.placeholder.color}
+							style={styles.input}
+							autoCapitalize='none'
+							onChangeText={color => patchForm({ color })}
+						/>
+					</View>
+					<TextField
+						label='Note'
+						value={form.note}
+						onChangeText={note => patchForm({ note })}
+						multiline
+						styles={styles}
+					/>
+				</View>
+			</BottomSheet>
+		</>
 	);
 }
 

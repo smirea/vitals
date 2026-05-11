@@ -4,6 +4,10 @@ import { Text, useColorScheme } from 'react-native';
 
 const activeTintColor = '#1677ff';
 
+export const unstable_settings = {
+	initialRouteName: 'labs',
+};
+
 function TabIcon({
 	color,
 	name,
@@ -31,7 +35,9 @@ export default function TabLayout() {
 
 	return (
 		<Tabs
+			initialRouteName='labs'
 			screenOptions={{
+				headerShown: false,
 				tabBarActiveTintColor: activeTintColor,
 				tabBarInactiveTintColor: isDark ? '#a1a1aa' : '#71717a',
 				tabBarLabelStyle: {
@@ -42,25 +48,8 @@ export default function TabLayout() {
 					backgroundColor: isDark ? '#111827' : '#ffffff',
 					borderTopColor: isDark ? '#27272a' : '#e5e7eb',
 				},
-				headerStyle: {
-					backgroundColor: isDark ? '#111827' : '#ffffff',
-				},
-				headerTintColor: isDark ? '#f9fafb' : '#111827',
-				headerTitleStyle: {
-					fontWeight: '700',
-				},
 			}}
 		>
-			<Tabs.Screen
-				name='index'
-				options={{
-					title: 'Vitals',
-					tabBarLabel: 'Status',
-					tabBarIcon: ({ color }) => (
-						<TabIcon color={color} name='checkmark.circle.fill' fallback='S' />
-					),
-				}}
-			/>
 			<Tabs.Screen
 				name='labs'
 				options={{

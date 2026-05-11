@@ -16,6 +16,7 @@ import * as Sharing from 'expo-sharing';
 import { useEffect, useMemo, useState } from 'react';
 
 import { useTRPC } from '@/src/api/trpc';
+import { FloatingActionButton } from '@/src/components/mobile-ui';
 import {
 	assertValidPillForm,
 	buildPillSections,
@@ -51,6 +52,7 @@ import {
 import { pageStyles } from '@/src/theme/page-styles';
 
 type EditorSection = 'details' | 'images' | 'ranges' | 'components';
+type PillFilter = PillSection['key'] | 'all';
 
 export function PillsScreen() {
 	const trpc = useTRPC();
@@ -61,11 +63,17 @@ export function PillsScreen() {
 	const [notice, setNotice] = useState<string | null>(null);
 	const [editorOpen, setEditorOpen] = useState(false);
 	const [form, setForm] = useState<PillFormValues>(() => createEmptyPillForm());
+	const [pillFilter, setPillFilter] = useState<PillFilter>('all');
 
 	const dashboardQuery = useQuery(trpc.pills.getDashboard.queryOptions());
 	const tagsQuery = useQuery(trpc.tags.list.queryOptions());
 	const dashboard = dashboardQuery.data;
 	const sections = useMemo(() => (dashboard ? buildPillSections(dashboard) : []), [dashboard]);
+	const visibleSections = useMemo(
+		() =>
+			pillFilter === 'all' ? sections : sections.filter(section => section.key === pillFilter),
+		[pillFilter, sections],
+	);
 	const editingPill = useMemo(
 		() => dashboard?.pills.find(pill => pill.id === form.id) ?? null,
 		[dashboard, form.id],
@@ -250,15 +258,6 @@ export function PillsScreen() {
 				contentInsetAdjustmentBehavior='automatic'
 				contentContainerStyle={sharedStyles.page}
 			>
-				<View style={styles.actionRow}>
-					<Button size='small' onPress={onShareExport} disabled={!dashboard}>
-						Export
-					</Button>
-					<Button type='primary' size='small' onPress={openNewPill}>
-						Log pill
-					</Button>
-				</View>
-
 				{notice ? (
 					<Pressable onPress={() => setNotice(null)} style={styles.notice}>
 						<Text selectable style={styles.noticeText}>
@@ -267,9 +266,17 @@ export function PillsScreen() {
 					</Pressable>
 				) : null}
 
-				{dashboard ? <PillsTotals dashboard={dashboard} styles={styles} /> : null}
+				{dashboard ? (
+					<PillsTotals
+						dashboard={dashboard}
+						activeFilter={pillFilter}
+						onFilterChange={setPillFilter}
+						onShareExport={onShareExport}
+						styles={styles}
+					/>
+				) : null}
 
-				{sections.map(section => (
+				{visibleSections.map(section => (
 					<PillSectionView
 						key={section.key}
 						section={section}
@@ -278,6 +285,7 @@ export function PillsScreen() {
 					/>
 				))}
 			</ScrollView>
+			<FloatingActionButton icon='plus' label='Pill' onPress={openNewPill} />
 
 			<PillEditorModal
 				form={form}
@@ -306,26 +314,49 @@ export function PillsScreen() {
 
 function PillsTotals({
 	dashboard,
+	activeFilter,
+	onFilterChange,
+	onShareExport,
 	styles,
 }: {
 	dashboard: PillsDashboard;
+	activeFilter: PillFilter;
+	onFilterChange: (filter: PillFilter) => void;
+	onShareExport: () => void;
 	styles: ReturnType<typeof pillStyles>;
 }) {
-	const totals = {
-		all: dashboard.pills.length,
-		active: dashboard.activePills.length,
-		future: dashboard.futurePills.length,
-		past: dashboard.pastPills.reduce(
-			(total, pill) => total + pill.periods.filter(period => Boolean(period.endDate)).length,
-			0,
-		),
-	};
+	const totals: Array<{ label: string; value: number; filter: PillFilter }> = [
+		{ label: 'Active', value: dashboard.activePills.length, filter: 'active' },
+		{ label: 'Future', value: dashboard.futurePills.length, filter: 'future' },
+		{
+			label: 'Past',
+			value: dashboard.pastPills.reduce(
+				(total, pill) => total + pill.periods.filter(period => Boolean(period.endDate)).length,
+				0,
+			),
+			filter: 'past',
+		},
+		{ label: 'All', value: dashboard.pills.length, filter: 'all' },
+	] satisfies Array<{ label: string; value: number; filter: PillFilter }>;
+	const visibleTotals = totals.filter(total => total.value > 0);
+
 	return (
-		<View style={styles.totalsRow}>
-			<TotalCard label='Active' value={totals.active} styles={styles} />
-			<TotalCard label='Future' value={totals.future} styles={styles} />
-			<TotalCard label='Past' value={totals.past} styles={styles} />
-			<TotalCard label='All' value={totals.all} styles={styles} />
+		<View style={styles.filtersWrap}>
+			<View style={styles.filterRow}>
+				{visibleTotals.map(total => (
+					<TotalCard
+						key={total.filter}
+						label={total.label}
+						value={total.value}
+						active={activeFilter === total.filter}
+						onPress={() => onFilterChange(activeFilter === total.filter ? 'all' : total.filter)}
+						styles={styles}
+					/>
+				))}
+			</View>
+			<Button size='small' onPress={onShareExport}>
+				Export
+			</Button>
 		</View>
 	);
 }
@@ -333,17 +364,21 @@ function PillsTotals({
 function TotalCard({
 	label,
 	value,
+	active,
+	onPress,
 	styles,
 }: {
 	label: string;
 	value: number;
+	active: boolean;
+	onPress: () => void;
 	styles: ReturnType<typeof pillStyles>;
 }) {
 	return (
-		<View style={styles.totalCard}>
-			<Text style={styles.totalValue}>{value}</Text>
-			<Text style={styles.muted}>{label}</Text>
-		</View>
+		<Pressable onPress={onPress} style={[styles.totalChip, active && styles.totalChipActive]}>
+			<Text style={[styles.totalValue, active && styles.totalValueActive]}>{value}</Text>
+			<Text style={active ? styles.totalLabelActive : styles.muted}>{label}</Text>
+		</Pressable>
 	);
 }
 
@@ -362,9 +397,11 @@ function PillSectionView({
 				<Text style={styles.sectionTitle}>{section.title}</Text>
 				<Text style={styles.muted}>{section.rows.length} rows</Text>
 			</View>
-			{section.rows.map(row => (
-				<PillRow key={row.key} row={row} onOpenPill={onOpenPill} styles={styles} />
-			))}
+			<View style={styles.tileGrid}>
+				{section.rows.map(row => (
+					<PillRow key={row.key} row={row} onOpenPill={onOpenPill} styles={styles} />
+				))}
+			</View>
 		</View>
 	);
 }
@@ -380,59 +417,35 @@ function PillRow({
 }) {
 	const { pill, period } = row;
 	const count = period?.count ?? 1;
-	const firstComponent = pill.components[0];
 	const firstImage = pill.images[0];
 	const tagNames = mergeTagNames(pill, period?.tags ?? []);
+	const amount = formatServing(multiplyServingValue(pill.value, count), pill.unit);
 
 	return (
-		<Pressable onPress={() => onOpenPill(pill)}>
-			<Card full>
-				<Card.Body>
-					<View style={styles.pillRow}>
-						<View style={styles.pillMain}>
-							<View style={styles.rowBetween}>
-								<Text style={styles.pillTitle} numberOfLines={2}>
-									{pill.name}
-								</Text>
-								<Text style={styles.amountText}>
-									{formatServing(multiplyServingValue(pill.value, count), pill.unit)}
-								</Text>
-							</View>
-							{tagNames.length > 0 ? (
-								<View style={styles.tagRow}>
-									{tagNames.map(tagName => (
-										<Tag key={tagName} small>
-											{tagName}
-										</Tag>
-									))}
-								</View>
-							) : null}
-							<Text style={styles.muted}>{formatRowTiming(row)}</Text>
-							{firstComponent ? (
-								<Text style={styles.body} numberOfLines={2}>
-									{firstComponent.name}:{' '}
-									{formatServing(
-										multiplyServingValue(firstComponent.value, count),
-										firstComponent.unit,
-									)}
-								</Text>
-							) : (
-								<Text style={styles.muted}>No components</Text>
-							)}
-							{pill.components.length > 1 ? (
-								<Text style={styles.muted}>+{pill.components.length - 1} more</Text>
-							) : null}
-						</View>
-						{firstImage ? (
-							<Image
-								source={{ uri: normalizeImageUrl(firstImage.dataUrl) }}
-								style={styles.thumbnail}
-								accessibilityLabel={firstImage.fileName}
-							/>
-						) : null}
-					</View>
-				</Card.Body>
-			</Card>
+		<Pressable onPress={() => onOpenPill(pill)} style={styles.pillTile}>
+			{firstImage ? (
+				<Image
+					source={{ uri: normalizeImageUrl(firstImage.dataUrl) }}
+					style={styles.tileImage}
+					accessibilityLabel={firstImage.fileName}
+				/>
+			) : (
+				<View style={styles.tileImagePlaceholder}>
+					<Text style={styles.placeholderInitial}>{pill.name.slice(0, 1)}</Text>
+				</View>
+			)}
+			<View style={styles.tileBody}>
+				<Text style={styles.pillTitle} numberOfLines={2}>
+					{pill.name}
+				</Text>
+				<Text style={styles.amountText} numberOfLines={1}>
+					{amount}
+				</Text>
+				<Text style={styles.muted} numberOfLines={1}>
+					{formatRowTiming(row)}
+				</Text>
+				{tagNames[0] ? <Tag small>{tagNames[0]}</Tag> : null}
+			</View>
 		</Pressable>
 	);
 }
@@ -1028,23 +1041,42 @@ function pillStyles(isDark: boolean) {
 			flexDirection: 'row' as const,
 			gap: 8,
 		},
-		totalsRow: {
+		filtersWrap: {
+			alignItems: 'center' as const,
+			flexDirection: 'row' as const,
+			gap: 10,
+		},
+		filterRow: {
+			flex: 1,
 			flexDirection: 'row' as const,
 			gap: 8,
 		},
-		totalCard: {
+		totalChip: {
 			alignItems: 'center' as const,
 			backgroundColor: surface,
 			borderColor: border,
-			borderRadius: 8,
+			borderRadius: 12,
 			borderWidth: 1,
 			flex: 1,
-			padding: 10,
+			paddingHorizontal: 8,
+			paddingVertical: 8,
+		},
+		totalChipActive: {
+			backgroundColor: '#1677ff',
+			borderColor: '#1677ff',
 		},
 		totalValue: {
 			color: text,
-			fontSize: 18,
+			fontSize: 17,
 			fontWeight: '800' as const,
+		},
+		totalValueActive: {
+			color: '#fff',
+		},
+		totalLabelActive: {
+			color: '#fff',
+			fontSize: 12,
+			fontWeight: '700' as const,
 		},
 		sectionTitle: {
 			color: muted,
@@ -1066,19 +1098,21 @@ function pillStyles(isDark: boolean) {
 			color: muted,
 			fontSize: 12,
 		},
-		pillRow: {
-			alignItems: 'flex-start' as const,
+		tileGrid: {
 			flexDirection: 'row' as const,
-			gap: 12,
+			flexWrap: 'wrap' as const,
+			gap: 10,
 		},
-		pillMain: {
-			flex: 1,
-			gap: 6,
-			minWidth: 0,
+		pillTile: {
+			backgroundColor: surface,
+			borderColor: border,
+			borderRadius: 14,
+			borderWidth: 1,
+			overflow: 'hidden' as const,
+			width: '48.6%' as const,
 		},
 		pillTitle: {
 			color: text,
-			flex: 1,
 			fontSize: 15,
 			fontWeight: '700' as const,
 		},
@@ -1086,8 +1120,6 @@ function pillStyles(isDark: boolean) {
 			color: text,
 			fontSize: 13,
 			fontWeight: '700' as const,
-			maxWidth: 120,
-			textAlign: 'right' as const,
 		},
 		tagRow: {
 			alignItems: 'center' as const,
@@ -1095,11 +1127,26 @@ function pillStyles(isDark: boolean) {
 			flexWrap: 'wrap' as const,
 			gap: 4,
 		},
-		thumbnail: {
+		tileImage: {
 			backgroundColor: isDark ? '#1f2937' : '#f4f4f5',
-			borderRadius: 8,
-			height: 58,
-			width: 58,
+			height: 128,
+			width: '100%' as const,
+		},
+		tileImagePlaceholder: {
+			alignItems: 'center' as const,
+			backgroundColor: isDark ? '#1f2937' : '#e5e7eb',
+			height: 128,
+			justifyContent: 'center' as const,
+			width: '100%' as const,
+		},
+		placeholderInitial: {
+			color: muted,
+			fontSize: 34,
+			fontWeight: '800' as const,
+		},
+		tileBody: {
+			gap: 5,
+			padding: 10,
 		},
 		modalScroll: {
 			maxHeight: 520,
