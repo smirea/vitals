@@ -1,4 +1,4 @@
-import { ActivityIndicator, Button, Card, Modal, Tag } from '@ant-design/react-native';
+import { ActivityIndicator, Button, Card, Modal } from '@ant-design/react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
@@ -17,6 +17,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { useTRPC } from '@/src/api/trpc';
 import { BottomSheet, FloatingActionButton } from '@/src/components/mobile-ui';
+import { TagSelector } from '@/src/components/tag-selector';
 import {
 	assertValidPillForm,
 	buildPillSections,
@@ -611,27 +612,14 @@ function PillEditorSheet({
 								Open URL
 							</Button>
 						) : null}
-						<TextField
-							label='Tags'
-							value={form.tagText}
-							onChangeText={tagText => onPatch({ tagText })}
-							placeholder='blueprint, sleep'
-							styles={styles}
-						/>
-						{availableTags.length > 0 ? (
-							<ScrollView horizontal showsHorizontalScrollIndicator={false}>
-								<View style={styles.tagRow}>
-									{availableTags.map(tag => (
-										<Pressable
-											key={tag.name}
-											onPress={() => onPatch({ tagText: appendTagText(form.tagText, tag.name) })}
-										>
-											<Tag small>{tag.name}</Tag>
-										</Pressable>
-									))}
-								</View>
-							</ScrollView>
-						) : null}
+						<View style={styles.field}>
+							<Text style={styles.fieldLabel}>Tags</Text>
+							<TagSelector
+								value={form.tagText}
+								availableTags={availableTags}
+								onChange={tagText => onPatch({ tagText })}
+							/>
+						</View>
 						<TextField
 							label='Note'
 							value={form.note}
@@ -703,6 +691,7 @@ function PillEditorSheet({
 								index={index}
 								onPatch={patch => setPeriod(index, patch)}
 								onDelete={() => onDeletePeriod(period, index)}
+								availableTags={availableTags}
 								styles={styles}
 							/>
 						))}
@@ -752,12 +741,14 @@ function PeriodEditor({
 	index,
 	onPatch,
 	onDelete,
+	availableTags,
 	styles,
 }: {
 	period: PillPeriodFormValue;
 	index: number;
 	onPatch: (patch: Partial<PillPeriodFormValue>) => void;
 	onDelete: () => void;
+	availableTags: Array<{ name: string; color: string }>;
 	styles: ReturnType<typeof pillStyles>;
 }) {
 	const daily = period.daysOfWeek.length === 0;
@@ -830,12 +821,14 @@ function PeriodEditor({
 							/>
 						))}
 					</View>
-					<TextField
-						label='Range tags'
-						value={period.tagText}
-						onChangeText={tagText => onPatch({ tagText })}
-						styles={styles}
-					/>
+					<View style={styles.field}>
+						<Text style={styles.fieldLabel}>Range tags</Text>
+						<TagSelector
+							value={period.tagText}
+							availableTags={availableTags}
+							onChange={tagText => onPatch({ tagText })}
+						/>
+					</View>
 				</View>
 			</Card.Body>
 		</Card>
@@ -945,16 +938,6 @@ function SegmentButton({
 			</Text>
 		</Pressable>
 	);
-}
-
-function appendTagText(value: string, tagName: string) {
-	const existing = value
-		.split(',')
-		.map(tag => tag.trim())
-		.filter(Boolean);
-	const seen = new Set(existing.map(tag => tag.toLocaleLowerCase()));
-	if (!seen.has(tagName.toLocaleLowerCase())) existing.push(tagName);
-	return existing.join(', ');
 }
 
 function toggleWeekday(days: PillWeekday[], day: PillWeekday) {

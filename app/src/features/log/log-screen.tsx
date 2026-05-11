@@ -1,4 +1,4 @@
-import { ActivityIndicator, Button, Card, Modal, Tag } from '@ant-design/react-native';
+import { ActivityIndicator, Button, Modal, Tag } from '@ant-design/react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Location from 'expo-location';
@@ -21,9 +21,10 @@ import {
 } from 'react-native';
 
 import { BottomSheet, FloatingActionButton } from '@/src/components/mobile-ui';
+import { MarkdownText } from '@/src/components/markdown-text';
+import { TagChips, TagSelector } from '@/src/components/tag-selector';
 import { useTRPC } from '@/src/api/trpc';
 import {
-	appendTagText,
 	audioFileNameFromUri,
 	audioMimeTypeFromUri,
 	formatBytes,
@@ -31,7 +32,6 @@ import {
 	formatDuration,
 	formatLocationLabel,
 	formatRecorderDuration,
-	getEntryPreview,
 	getEntryTranscriptText,
 	mapsUrl,
 	parseTagText,
@@ -46,6 +46,7 @@ import {
 import { pageStyles } from '@/src/theme/page-styles';
 
 type TagDraftKey = `entry-${number}` | `voice-${number}`;
+type LogFilter = 'entries' | 'pending' | 'recoveries';
 
 export function LogScreen() {
 	const trpc = useTRPC();
@@ -64,6 +65,7 @@ export function LogScreen() {
 	const [selectedEntry, setSelectedEntry] = useState<DiaryEntry | null>(null);
 	const [isUploadingRecording, setIsUploadingRecording] = useState(false);
 	const [composerOpen, setComposerOpen] = useState(false);
+	const [activeFilter, setActiveFilter] = useState<LogFilter>('entries');
 
 	const entriesQuery = useQuery(trpc.diary.list.queryOptions());
 	const pendingVoiceMemosQuery = useQuery(trpc.diary.listPendingVoiceMemos.queryOptions());
@@ -77,6 +79,19 @@ export function LogScreen() {
 	const entries = entriesQuery.data ?? [];
 	const pendingVoiceMemos = pendingVoiceMemosQuery.data ?? [];
 	const pendingVoiceMemoRecoveries = pendingVoiceMemoRecoveriesQuery.data ?? [];
+	const filterOptions = useMemo(
+		() =>
+			[
+				{ key: 'entries', label: 'Entries', value: entries.length },
+				{ key: 'pending', label: 'Pending', value: pendingVoiceMemos.length },
+				{ key: 'recoveries', label: 'Recoveries', value: pendingVoiceMemoRecoveries.length },
+			].filter(option => option.key === 'entries' || option.value > 0) as Array<{
+				key: LogFilter;
+				label: string;
+				value: number;
+			}>,
+		[entries.length, pendingVoiceMemoRecoveries.length, pendingVoiceMemos.length],
+	);
 
 	const invalidateDiary = async () => {
 		await Promise.all([
@@ -160,6 +175,9 @@ export function LogScreen() {
 	useEffect(() => {
 		void refreshLocation();
 	}, []);
+	useEffect(() => {
+		if (!filterOptions.some(option => option.key === activeFilter)) setActiveFilter('entries');
+	}, [activeFilter, filterOptions]);
 
 	const isBusy =
 		createEntryMutation.isPending ||
@@ -356,14 +374,20 @@ export function LogScreen() {
 				) : null}
 
 				<View style={styles.totalsRow}>
-					<TotalCard label='Entries' value={entries.length} styles={styles} />
-					<TotalCard label='Pending' value={pendingVoiceMemos.length} styles={styles} />
-					<TotalCard label='Recoveries' value={pendingVoiceMemoRecoveries.length} styles={styles} />
+					{filterOptions.map(option => (
+						<TotalCard
+							key={option.key}
+							label={option.label}
+							value={option.value}
+							active={activeFilter === option.key}
+							onPress={() => setActiveFilter(option.key)}
+							styles={styles}
+						/>
+					))}
 				</View>
 
-				{pendingVoiceMemos.length > 0 ? (
-					<View style={styles.stack}>
-						<SectionHeader title='Pending memos' count={pendingVoiceMemos.length} styles={styles} />
+				{activeFilter === 'pending' ? (
+					<View style={styles.listStack}>
 						{pendingVoiceMemos.map(memo => (
 							<PendingVoiceMemoCard
 								key={memo.id}
@@ -383,13 +407,8 @@ export function LogScreen() {
 					</View>
 				) : null}
 
-				{pendingVoiceMemoRecoveries.length > 0 ? (
-					<View style={styles.stack}>
-						<SectionHeader
-							title='Recovery memos'
-							count={pendingVoiceMemoRecoveries.length}
-							styles={styles}
-						/>
+				{activeFilter === 'recoveries' ? (
+					<View style={styles.listStack}>
 						{pendingVoiceMemoRecoveries.map(recovery => (
 							<RecoveryMemoCard
 								key={recovery.id}
@@ -402,17 +421,18 @@ export function LogScreen() {
 					</View>
 				) : null}
 
-				<View style={styles.stack}>
-					<SectionHeader title='Diary' count={entries.length} styles={styles} />
-					{entries.map(entry => (
-						<EntryCard
-							key={entry.id}
-							entry={entry}
-							onOpen={() => setSelectedEntry(entry)}
-							styles={styles}
-						/>
-					))}
-				</View>
+				{activeFilter === 'entries' ? (
+					<View style={styles.listStack}>
+						{entries.map(entry => (
+							<EntryCard
+								key={entry.id}
+								entry={entry}
+								onOpen={() => setSelectedEntry(entry)}
+								styles={styles}
+							/>
+						))}
+					</View>
+				) : null}
 			</ScrollView>
 			<FloatingActionButton
 				icon='mic.fill'
@@ -463,29 +483,12 @@ export function LogScreen() {
 						style={[styles.input, styles.composerInput]}
 						onChangeText={setNotes}
 					/>
-					<TextInput
+					<TagSelector
 						value={tagText}
-						editable={!isBusy}
-						placeholder='Tags'
-						placeholderTextColor={styles.placeholder.color}
-						style={styles.input}
-						autoCapitalize='none'
-						onChangeText={setTagText}
+						availableTags={availableTags}
+						onChange={setTagText}
+						disabled={isBusy}
 					/>
-					{availableTags.length > 0 ? (
-						<ScrollView horizontal showsHorizontalScrollIndicator={false}>
-							<View style={styles.tagRow}>
-								{availableTags.map(tag => (
-									<Pressable
-										key={tag.name}
-										onPress={() => setTagText(previous => appendTagText(previous, tag.name))}
-									>
-										<Tag small>{tag.name}</Tag>
-									</Pressable>
-								))}
-							</View>
-						</ScrollView>
-					) : null}
 					{recorderState.isRecording ? (
 						<Text style={styles.recordingText}>
 							Recording {formatRecorderDuration(recorderState.durationMillis)}
@@ -519,34 +522,21 @@ export function LogScreen() {
 function TotalCard({
 	label,
 	value,
+	active,
+	onPress,
 	styles,
 }: {
 	label: string;
 	value: number;
+	active: boolean;
+	onPress: () => void;
 	styles: ReturnType<typeof logStyles>;
 }) {
 	return (
-		<View style={styles.totalCard}>
-			<Text style={styles.totalValue}>{value}</Text>
-			<Text style={styles.muted}>{label}</Text>
-		</View>
-	);
-}
-
-function SectionHeader({
-	title,
-	count,
-	styles,
-}: {
-	title: string;
-	count: number;
-	styles: ReturnType<typeof logStyles>;
-}) {
-	return (
-		<View style={styles.rowBetween}>
-			<Text style={styles.sectionTitle}>{title}</Text>
-			<Text style={styles.muted}>{count} rows</Text>
-		</View>
+		<Pressable onPress={onPress} style={[styles.totalCard, active && styles.totalCardActive]}>
+			<Text style={[styles.totalValue, active && styles.totalValueActive]}>{value}</Text>
+			<Text style={active ? styles.totalLabelActive : styles.muted}>{label}</Text>
+		</Pressable>
 	);
 }
 
@@ -559,43 +549,38 @@ function EntryCard({
 	onOpen: () => void;
 	styles: ReturnType<typeof logStyles>;
 }) {
-	const preview = getEntryPreview(entry);
+	const transcript = getEntryTranscriptText(entry);
+	const summary = entry.summary?.trim() ?? '';
 	return (
-		<Card full>
-			<Card.Body>
-				<View style={styles.stack}>
-					<Pressable onPress={onOpen} style={styles.stack}>
-						<View style={styles.rowBetween}>
-							<Text style={styles.cardTitle}>{formatDiaryTimestamp(entry.createdAt)}</Text>
-							<Text style={styles.muted}>#{entry.id}</Text>
-						</View>
-						<Pressable
-							onPress={() => {
-								void Linking.openURL(mapsUrl(entry.location));
-							}}
-						>
-							<Text style={styles.linkText}>{formatLocationLabel(entry.location)}</Text>
-						</Pressable>
-						<TagList tags={entry.tags} styles={styles} />
-						<Text style={styles.body} numberOfLines={4}>
-							{preview}
-						</Text>
-						{entry.summary ? (
-							<Text style={styles.muted} numberOfLines={3}>
-								{entry.summary}
-							</Text>
-						) : null}
-						{entry.voiceMemos.length > 0 ? (
-							<View style={styles.voiceMemoRow}>
-								{entry.voiceMemos.map(memo => (
-									<VoiceMemoButton key={memo.id} memo={memo} styles={styles} />
-								))}
-							</View>
-						) : null}
-					</Pressable>
-				</View>
-			</Card.Body>
-		</Card>
+		<Pressable onPress={onOpen} style={styles.entryCard}>
+			{summary ? (
+				<MarkdownText value={summary} numberOfLines={2} compact style={styles.summaryText} />
+			) : null}
+			{transcript ? (
+				<Text style={styles.bodyPreview} numberOfLines={2}>
+					{transcript}
+				</Text>
+			) : null}
+			<View style={styles.rowBetween}>
+				<Text style={styles.muted}>{formatDiaryTimestamp(entry.createdAt)}</Text>
+				<Text style={styles.muted}>#{entry.id}</Text>
+			</View>
+			<View style={styles.entryMetaRow}>
+				<Pressable
+					onPress={() => {
+						void Linking.openURL(mapsUrl(entry.location));
+					}}
+				>
+					<Text style={styles.linkText} numberOfLines={1}>
+						{formatLocationLabel(entry.location)}
+					</Text>
+				</Pressable>
+				{entry.voiceMemos.length > 0 ? (
+					<Text style={styles.metaPill}>{entry.voiceMemos.length} memo</Text>
+				) : null}
+			</View>
+			<TagList tags={entry.tags} />
+		</Pressable>
 	);
 }
 
@@ -625,52 +610,48 @@ function PendingVoiceMemoCard({
 	styles: ReturnType<typeof logStyles>;
 }) {
 	return (
-		<Card full>
-			<Card.Body>
-				<View style={styles.stack}>
-					<View style={styles.rowBetween}>
-						<Text style={styles.cardTitle}>{formatDiaryTimestamp(memo.createdAt)}</Text>
-						<Tag small>{memo.transcriptionStatus}</Tag>
-					</View>
-					<Text style={styles.muted}>
-						{memo.fileName} - {formatDuration(memo.durationSeconds)} -{' '}
-						{formatBytes(memo.audioBytes)}
-					</Text>
-					<Pressable
-						onPress={() => {
-							void Linking.openURL(voiceMemoAudioUrl(memo.id));
-						}}
-					>
-						<Text style={styles.linkText}>Open audio</Text>
-					</Pressable>
-					<Text style={styles.body} numberOfLines={4}>
-						{memo.transcript?.trim() || memo.notes.trim() || 'No transcript yet'}
-					</Text>
-					{memo.transcriptionError ? (
-						<Text selectable style={styles.errorText} numberOfLines={4}>
-							{memo.transcriptionError}
-						</Text>
-					) : null}
-					<TagList tags={memo.tags} styles={styles} />
-					<TagAddControl
-						value={tagDraft}
-						availableTags={availableTags}
-						loading={isAddingTags}
-						onChange={onSetTagDraft}
-						onAdd={onAddTags}
-						styles={styles}
-					/>
-					<View style={styles.actionRow}>
-						<Button size='small' onPress={onReprocess} loading={isProcessing}>
-							Reprocess
-						</Button>
-						<Button size='small' onPress={onDelete} loading={isDeleting}>
-							Delete
-						</Button>
-					</View>
+		<View style={styles.entryCard}>
+			<View style={styles.stack}>
+				<View style={styles.rowBetween}>
+					<Text style={styles.cardTitle}>{formatDiaryTimestamp(memo.createdAt)}</Text>
+					<Tag small>{memo.transcriptionStatus}</Tag>
 				</View>
-			</Card.Body>
-		</Card>
+				<Text style={styles.muted}>
+					{memo.fileName} - {formatDuration(memo.durationSeconds)} - {formatBytes(memo.audioBytes)}
+				</Text>
+				<Pressable
+					onPress={() => {
+						void Linking.openURL(voiceMemoAudioUrl(memo.id));
+					}}
+				>
+					<Text style={styles.linkText}>Open audio</Text>
+				</Pressable>
+				<Text style={styles.bodyPreview} numberOfLines={3}>
+					{memo.transcript?.trim() || memo.notes.trim() || 'No transcript yet'}
+				</Text>
+				{memo.transcriptionError ? (
+					<Text selectable style={styles.errorText} numberOfLines={4}>
+						{memo.transcriptionError}
+					</Text>
+				) : null}
+				<TagList tags={memo.tags} />
+				<TagAddControl
+					value={tagDraft}
+					availableTags={availableTags}
+					loading={isAddingTags}
+					onChange={onSetTagDraft}
+					onAdd={onAddTags}
+				/>
+				<View style={styles.actionRow}>
+					<Button size='small' onPress={onReprocess} loading={isProcessing}>
+						Reprocess
+					</Button>
+					<Button size='small' onPress={onDelete} loading={isDeleting}>
+						Delete
+					</Button>
+				</View>
+			</View>
+		</View>
 	);
 }
 
@@ -686,31 +667,29 @@ function RecoveryMemoCard({
 	styles: ReturnType<typeof logStyles>;
 }) {
 	return (
-		<Card full>
-			<Card.Body>
-				<View style={styles.stack}>
-					<View style={styles.rowBetween}>
-						<Text style={styles.cardTitle}>{formatDiaryTimestamp(recovery.createdAt)}</Text>
-						<Tag small>{recovery.status}</Tag>
-					</View>
-					<Text style={styles.muted}>
-						{recovery.fileName} - {formatDuration(recovery.durationSeconds)} -{' '}
-						{formatBytes(recovery.audioBytes)}
-					</Text>
-					<Text style={styles.body} numberOfLines={4}>
-						{recovery.transcript?.trim() || 'No transcript yet'}
-					</Text>
-					{recovery.error ? (
-						<Text selectable style={styles.errorText} numberOfLines={4}>
-							{recovery.error}
-						</Text>
-					) : null}
-					<Button size='small' onPress={onReprocess} loading={isProcessing}>
-						Reprocess
-					</Button>
+		<View style={styles.entryCard}>
+			<View style={styles.stack}>
+				<View style={styles.rowBetween}>
+					<Text style={styles.cardTitle}>{formatDiaryTimestamp(recovery.createdAt)}</Text>
+					<Tag small>{recovery.status}</Tag>
 				</View>
-			</Card.Body>
-		</Card>
+				<Text style={styles.muted}>
+					{recovery.fileName} - {formatDuration(recovery.durationSeconds)} -{' '}
+					{formatBytes(recovery.audioBytes)}
+				</Text>
+				<Text style={styles.bodyPreview} numberOfLines={4}>
+					{recovery.transcript?.trim() || 'No transcript yet'}
+				</Text>
+				{recovery.error ? (
+					<Text selectable style={styles.errorText} numberOfLines={4}>
+						{recovery.error}
+					</Text>
+				) : null}
+				<Button size='small' onPress={onReprocess} loading={isProcessing}>
+					Reprocess
+				</Button>
+			</View>
+		</View>
 	);
 }
 
@@ -735,26 +714,8 @@ function VoiceMemoButton({
 	);
 }
 
-function TagList({
-	tags,
-	styles,
-}: {
-	tags: Array<{ id: number; name: string; color: string }>;
-	styles: ReturnType<typeof logStyles>;
-}) {
-	if (tags.length === 0) {
-		return <Text style={styles.muted}>No tags</Text>;
-	}
-
-	return (
-		<View style={styles.tagRow}>
-			{tags.map(tag => (
-				<Tag key={tag.id} small>
-					{tag.name}
-				</Tag>
-			))}
-		</View>
-	);
+function TagList({ tags }: { tags: Array<{ id: number; name: string; color: string }> }) {
+	return <TagChips tags={tags} />;
 }
 
 function TagAddControl({
@@ -763,43 +724,22 @@ function TagAddControl({
 	loading,
 	onChange,
 	onAdd,
-	styles,
 }: {
 	value: string;
 	availableTags: TagRecord[];
 	loading: boolean;
 	onChange: (value: string) => void;
 	onAdd: () => void;
-	styles: ReturnType<typeof logStyles>;
 }) {
-	const tagCount = parseTagText(value).length;
 	return (
-		<View style={styles.stack}>
-			<View style={styles.inline}>
-				<TextInput
-					value={value}
-					placeholder='Add tags'
-					placeholderTextColor={styles.placeholder.color}
-					style={[styles.input, styles.tagInput]}
-					autoCapitalize='none'
-					onChangeText={onChange}
-				/>
-				<Button size='small' onPress={onAdd} disabled={tagCount === 0} loading={loading}>
-					Add
-				</Button>
-			</View>
-			{availableTags.length > 0 ? (
-				<ScrollView horizontal showsHorizontalScrollIndicator={false}>
-					<View style={styles.tagRow}>
-						{availableTags.map(tag => (
-							<Pressable key={tag.name} onPress={() => onChange(appendTagText(value, tag.name))}>
-								<Tag small>{tag.name}</Tag>
-							</Pressable>
-						))}
-					</View>
-				</ScrollView>
-			) : null}
-		</View>
+		<TagSelector
+			value={value}
+			availableTags={availableTags}
+			onChange={onChange}
+			onSubmit={onAdd}
+			submitLabel='Add'
+			loading={loading}
+		/>
 	);
 }
 
@@ -843,29 +783,26 @@ function EntryDetailSheet({
 					>
 						<Text style={styles.linkText}>{formatLocationLabel(entry.location)}</Text>
 					</Pressable>
-					<TagList tags={entry.tags} styles={styles} />
+					<TagList tags={entry.tags} />
 					<TagAddControl
 						value={tagDraft}
 						availableTags={availableTags}
 						loading={isAddingTags}
 						onChange={onSetTagDraft}
 						onAdd={onAddTags}
-						styles={styles}
 					/>
+					{entry.summary ? (
+						<View style={styles.stack}>
+							<Text style={styles.sectionTitle}>Summary</Text>
+							<MarkdownText value={entry.summary} style={styles.body} />
+						</View>
+					) : null}
 					<View style={styles.stack}>
 						<Text style={styles.sectionTitle}>Transcript</Text>
 						<Text style={styles.body} numberOfLines={8}>
 							{getEntryTranscriptText(entry) || entry.notes.trim() || 'No transcript'}
 						</Text>
 					</View>
-					{entry.summary ? (
-						<View style={styles.stack}>
-							<Text style={styles.sectionTitle}>Summary</Text>
-							<Text style={styles.body} numberOfLines={5}>
-								{entry.summary}
-							</Text>
-						</View>
-					) : null}
 					{entry.voiceMemos.length > 0 ? (
 						<View style={styles.stack}>
 							<Text style={styles.sectionTitle}>Voice memos</Text>
@@ -912,25 +849,17 @@ function logStyles(isDark: boolean) {
 			flex: 1,
 			justifyContent: 'center' as const,
 		},
-		headerRow: {
-			alignItems: 'center' as const,
-			flexDirection: 'row' as const,
-			gap: 12,
-			justifyContent: 'space-between' as const,
-		},
 		stack: {
 			gap: 12,
+		},
+		listStack: {
+			gap: 10,
 		},
 		rowBetween: {
 			alignItems: 'center' as const,
 			flexDirection: 'row' as const,
 			gap: 10,
 			justifyContent: 'space-between' as const,
-		},
-		inline: {
-			alignItems: 'center' as const,
-			flexDirection: 'row' as const,
-			gap: 8,
 		},
 		actionRow: {
 			alignItems: 'center' as const,
@@ -949,11 +878,6 @@ function logStyles(isDark: boolean) {
 			color: text,
 			fontSize: 14,
 		},
-		title: {
-			color: text,
-			fontSize: 24,
-			fontWeight: '800' as const,
-		},
 		sectionTitle: {
 			color: muted,
 			fontSize: 13,
@@ -970,6 +894,17 @@ function logStyles(isDark: boolean) {
 			color: text,
 			fontSize: 14,
 			lineHeight: 20,
+		},
+		bodyPreview: {
+			color: muted,
+			fontSize: 14,
+			lineHeight: 20,
+		},
+		summaryText: {
+			color: text,
+			fontSize: 15,
+			fontWeight: '500' as const,
+			lineHeight: 21,
 		},
 		muted: {
 			color: muted,
@@ -999,15 +934,53 @@ function logStyles(isDark: boolean) {
 			alignItems: 'center' as const,
 			backgroundColor: surface,
 			borderColor: border,
-			borderRadius: 8,
+			borderRadius: 12,
 			borderWidth: 1,
 			flex: 1,
-			padding: 10,
+			paddingHorizontal: 10,
+			paddingVertical: 9,
+		},
+		totalCardActive: {
+			backgroundColor: '#1677ff',
+			borderColor: '#1677ff',
 		},
 		totalValue: {
 			color: text,
 			fontSize: 18,
 			fontWeight: '800' as const,
+		},
+		totalValueActive: {
+			color: '#fff',
+		},
+		totalLabelActive: {
+			color: '#fff',
+			fontSize: 12,
+			fontWeight: '800' as const,
+		},
+		entryCard: {
+			backgroundColor: surface,
+			borderColor: border,
+			borderRadius: 14,
+			borderWidth: 1,
+			gap: 8,
+			padding: 12,
+		},
+		entryMetaRow: {
+			alignItems: 'center' as const,
+			flexDirection: 'row' as const,
+			flexWrap: 'wrap' as const,
+			gap: 8,
+		},
+		metaPill: {
+			backgroundColor: isDark ? '#1f2937' : '#eef6ff',
+			borderColor: isDark ? '#334155' : '#bfdbfe',
+			borderRadius: 999,
+			borderWidth: 1,
+			color: '#1677ff',
+			fontSize: 11,
+			fontWeight: '800' as const,
+			paddingHorizontal: 8,
+			paddingVertical: 4,
 		},
 		input: {
 			backgroundColor: surface,
@@ -1023,22 +996,8 @@ function logStyles(isDark: boolean) {
 			minHeight: 104,
 			textAlignVertical: 'top' as const,
 		},
-		tagInput: {
-			flex: 1,
-		},
 		placeholder: {
 			color: muted,
-		},
-		tagRow: {
-			alignItems: 'center' as const,
-			flexDirection: 'row' as const,
-			flexWrap: 'wrap' as const,
-			gap: 4,
-		},
-		voiceMemoRow: {
-			flexDirection: 'row' as const,
-			flexWrap: 'wrap' as const,
-			gap: 6,
 		},
 		voiceMemoPill: {
 			backgroundColor: isDark ? '#1f2937' : '#eef6ff',

@@ -39,13 +39,6 @@ export function parseTagText(value: string) {
 	return tags;
 }
 
-export function appendTagText(value: string, tagName: string) {
-	const tags = parseTagText(value);
-	const seen = new Set(tags.map(tag => tag.toLocaleLowerCase()));
-	if (!seen.has(tagName.toLocaleLowerCase())) tags.push(tagName);
-	return tags.join(', ');
-}
-
 export function getEntryTranscriptText(entry: DiaryEntry) {
 	const voiceTranscripts = entry.voiceMemos
 		.map(memo => memo.transcript?.trim() ?? '')
@@ -56,10 +49,6 @@ export function getEntryTranscriptText(entry: DiaryEntry) {
 	}
 
 	return entry.notes.trim();
-}
-
-export function getEntryPreview(entry: DiaryEntry) {
-	return getEntryTranscriptText(entry) || entry.summary?.trim() || 'No notes or transcript';
 }
 
 export function formatDiaryDate(value: string) {
