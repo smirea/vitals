@@ -1,5 +1,5 @@
-import { PendingRoute } from '@/src/components/pending-route';
+import { LogScreen as LogFeatureScreen } from '@/src/features/log/log-screen';
 
 export default function LogScreen() {
-	return <PendingRoute title="Captain's Log" />;
+	return <LogFeatureScreen />;
 }
