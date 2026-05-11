@@ -1,5 +1,5 @@
-import { PendingRoute } from '@/src/components/pending-route';
+import { PillsScreen as PillsFeatureScreen } from '@/src/features/pills/pills-screen';
 
 export default function PillsScreen() {
-	return <PendingRoute title='Pills' />;
+	return <PillsFeatureScreen />;
 }
