@@ -494,7 +494,7 @@ export function LogScreen() {
 				</View>
 			</BottomSheet>
 
-			<EntryDetailModal
+			<EntryDetailSheet
 				entry={selectedEntry}
 				visible={selectedEntry !== null}
 				availableTags={availableTags}
@@ -803,7 +803,7 @@ function TagAddControl({
 	);
 }
 
-function EntryDetailModal({
+function EntryDetailSheet({
 	entry,
 	visible,
 	availableTags,
@@ -827,66 +827,56 @@ function EntryDetailModal({
 	styles: ReturnType<typeof logStyles>;
 }) {
 	return (
-		<Modal
-			visible={visible}
-			title='Diary entry'
-			transparent
-			animationType='slide-up'
-			onClose={onClose}
-			closable
-			footer={[{ text: 'Close', onPress: onClose }]}
-		>
+		<BottomSheet visible={visible} title='Diary entry' onClose={onClose}>
 			{entry ? (
-				<ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalContent}>
+				<View style={styles.stack}>
+					<View style={styles.rowBetween}>
+						<Text style={styles.cardTitle}>{formatDiaryTimestamp(entry.createdAt)}</Text>
+						<Button size='small' onPress={() => onDelete(entry)}>
+							Delete
+						</Button>
+					</View>
+					<Pressable
+						onPress={() => {
+							void Linking.openURL(mapsUrl(entry.location));
+						}}
+					>
+						<Text style={styles.linkText}>{formatLocationLabel(entry.location)}</Text>
+					</Pressable>
+					<TagList tags={entry.tags} styles={styles} />
+					<TagAddControl
+						value={tagDraft}
+						availableTags={availableTags}
+						loading={isAddingTags}
+						onChange={onSetTagDraft}
+						onAdd={onAddTags}
+						styles={styles}
+					/>
 					<View style={styles.stack}>
-						<View style={styles.rowBetween}>
-							<Text style={styles.cardTitle}>{formatDiaryTimestamp(entry.createdAt)}</Text>
-							<Button size='small' onPress={() => onDelete(entry)}>
-								Delete
-							</Button>
-						</View>
-						<Pressable
-							onPress={() => {
-								void Linking.openURL(mapsUrl(entry.location));
-							}}
-						>
-							<Text style={styles.linkText}>{formatLocationLabel(entry.location)}</Text>
-						</Pressable>
-						<TagList tags={entry.tags} styles={styles} />
-						<TagAddControl
-							value={tagDraft}
-							availableTags={availableTags}
-							loading={isAddingTags}
-							onChange={onSetTagDraft}
-							onAdd={onAddTags}
-							styles={styles}
-						/>
+						<Text style={styles.sectionTitle}>Transcript</Text>
+						<Text style={styles.body} numberOfLines={8}>
+							{getEntryTranscriptText(entry) || entry.notes.trim() || 'No transcript'}
+						</Text>
+					</View>
+					{entry.summary ? (
 						<View style={styles.stack}>
-							<Text style={styles.sectionTitle}>Transcript</Text>
-							<Text style={styles.body} numberOfLines={8}>
-								{getEntryTranscriptText(entry) || entry.notes.trim() || 'No transcript'}
+							<Text style={styles.sectionTitle}>Summary</Text>
+							<Text style={styles.body} numberOfLines={5}>
+								{entry.summary}
 							</Text>
 						</View>
-						{entry.summary ? (
-							<View style={styles.stack}>
-								<Text style={styles.sectionTitle}>Summary</Text>
-								<Text style={styles.body} numberOfLines={5}>
-									{entry.summary}
-								</Text>
-							</View>
-						) : null}
-						{entry.voiceMemos.length > 0 ? (
-							<View style={styles.stack}>
-								<Text style={styles.sectionTitle}>Voice memos</Text>
-								{entry.voiceMemos.map(memo => (
-									<VoiceMemoButton key={memo.id} memo={memo} styles={styles} />
-								))}
-							</View>
-						) : null}
-					</View>
-				</ScrollView>
+					) : null}
+					{entry.voiceMemos.length > 0 ? (
+						<View style={styles.stack}>
+							<Text style={styles.sectionTitle}>Voice memos</Text>
+							{entry.voiceMemos.map(memo => (
+								<VoiceMemoButton key={memo.id} memo={memo} styles={styles} />
+							))}
+						</View>
+					) : null}
+				</View>
 			) : null}
-		</Modal>
+		</BottomSheet>
 	);
 }
 
@@ -1062,12 +1052,6 @@ function logStyles(isDark: boolean) {
 			color: '#1677ff',
 			fontSize: 12,
 			fontWeight: '700' as const,
-		},
-		modalScroll: {
-			maxHeight: 520,
-		},
-		modalContent: {
-			paddingBottom: 12,
 		},
 	};
 }

@@ -16,7 +16,7 @@ import * as Sharing from 'expo-sharing';
 import { useEffect, useMemo, useState } from 'react';
 
 import { useTRPC } from '@/src/api/trpc';
-import { FloatingActionButton } from '@/src/components/mobile-ui';
+import { BottomSheet, FloatingActionButton } from '@/src/components/mobile-ui';
 import {
 	assertValidPillForm,
 	buildPillSections,
@@ -26,14 +26,9 @@ import {
 	createEmptyPillForm,
 	createImageUid,
 	extractionToFormPatch,
-	formatPeriodRange,
-	formatPillSchedule,
-	formatRelativeDate,
-	formatServing,
 	formatSupplementFactsTitle,
 	formValuesToMutationInput,
 	isBase64DataImage,
-	multiplyServingValue,
 	normalizeImageUrl,
 	normalizeWeekdaySelection,
 	pillToFormValues,
@@ -46,13 +41,12 @@ import {
 	type PillPeriodFormValue,
 	type PillRecord,
 	type PillSection,
-	type PillsDashboard,
 	type PillWeekday,
 } from '@/src/features/pills/model';
 import { pageStyles } from '@/src/theme/page-styles';
 
 type EditorSection = 'details' | 'images' | 'ranges' | 'components';
-type PillFilter = PillSection['key'] | 'all';
+type PillFilter = 'active' | 'inactive';
 
 export function PillsScreen() {
 	const trpc = useTRPC();
@@ -63,15 +57,20 @@ export function PillsScreen() {
 	const [notice, setNotice] = useState<string | null>(null);
 	const [editorOpen, setEditorOpen] = useState(false);
 	const [form, setForm] = useState<PillFormValues>(() => createEmptyPillForm());
-	const [pillFilter, setPillFilter] = useState<PillFilter>('all');
+	const [pillFilter, setPillFilter] = useState<PillFilter>('active');
 
 	const dashboardQuery = useQuery(trpc.pills.getDashboard.queryOptions());
 	const tagsQuery = useQuery(trpc.tags.list.queryOptions());
 	const dashboard = dashboardQuery.data;
 	const sections = useMemo(() => (dashboard ? buildPillSections(dashboard) : []), [dashboard]);
-	const visibleSections = useMemo(
+	const filterCounts = useMemo(() => getPillFilterCounts(sections), [sections]);
+	const visibleRows = useMemo(
 		() =>
-			pillFilter === 'all' ? sections : sections.filter(section => section.key === pillFilter),
+			sections
+				.filter(section =>
+					pillFilter === 'active' ? section.key === 'active' : section.key !== 'active',
+				)
+				.flatMap(section => section.rows),
 		[pillFilter, sections],
 	);
 	const editingPill = useMemo(
@@ -138,6 +137,12 @@ export function PillsScreen() {
 		setEditorOpen(false);
 		setForm(createEmptyPillForm());
 	};
+	useEffect(() => {
+		const activeVisible = filterCounts.active > 0;
+		const inactiveVisible = filterCounts.inactive > 0;
+		if (pillFilter === 'active' && !activeVisible && inactiveVisible) setPillFilter('inactive');
+		if (pillFilter === 'inactive' && !inactiveVisible && activeVisible) setPillFilter('active');
+	}, [filterCounts.active, filterCounts.inactive, pillFilter]);
 	const patchForm = (patch: Partial<PillFormValues>) => {
 		setForm(previous => ({ ...previous, ...patch }));
 	};
@@ -184,8 +189,27 @@ export function PillsScreen() {
 			setNotice(error instanceof Error ? error.message : String(error));
 		}
 	};
+	const addImageAssets = (assets: ImagePicker.ImagePickerAsset[]) => {
+		const nextImages = assets.map((asset, index) => {
+			if (!asset.base64) throw new Error(`Unable to read ${asset.fileName ?? 'selected image'}.`);
+			const fileName = asset.fileName ?? `pill-image-${Date.now()}-${index}.jpg`;
+			const mimeType = asset.mimeType ?? 'image/jpeg';
+			const image = {
+				fileName,
+				dataUrl: `data:${mimeType};base64,${asset.base64}`,
+			};
+			return {
+				...image,
+				uid: createImageUid(image, form.images.length + index),
+			} satisfies PillImageFormValue;
+		});
+		patchForm({ images: [...form.images, ...nextImages] });
+	};
 	const onPickImages = async () => {
 		try {
+			const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+			if (!permission.granted)
+				throw new Error('Photo library permission is required to add images.');
 			const result = await ImagePicker.launchImageLibraryAsync({
 				mediaTypes: ['images'],
 				allowsMultipleSelection: true,
@@ -193,20 +217,23 @@ export function PillsScreen() {
 				quality: 0.9,
 			});
 			if (result.canceled) return;
-			const nextImages = result.assets.map((asset, index) => {
-				if (!asset.base64) throw new Error(`Unable to read ${asset.fileName ?? 'selected image'}.`);
-				const fileName = asset.fileName ?? `pill-image-${Date.now()}-${index}.jpg`;
-				const mimeType = asset.mimeType ?? 'image/jpeg';
-				const image = {
-					fileName,
-					dataUrl: `data:${mimeType};base64,${asset.base64}`,
-				};
-				return {
-					...image,
-					uid: createImageUid(image, form.images.length + index),
-				} satisfies PillImageFormValue;
+			addImageAssets(result.assets);
+		} catch (error) {
+			setNotice(error instanceof Error ? error.message : String(error));
+		}
+	};
+	const onTakePhoto = async () => {
+		try {
+			const permission = await ImagePicker.requestCameraPermissionsAsync();
+			if (!permission.granted)
+				throw new Error('Camera permission is required to take pill photos.');
+			const result = await ImagePicker.launchCameraAsync({
+				mediaTypes: ['images'],
+				base64: true,
+				quality: 0.9,
 			});
-			patchForm({ images: [...form.images, ...nextImages] });
+			if (result.canceled) return;
+			addImageAssets(result.assets);
 		} catch (error) {
 			setNotice(error instanceof Error ? error.message : String(error));
 		}
@@ -268,7 +295,7 @@ export function PillsScreen() {
 
 				{dashboard ? (
 					<PillsTotals
-						dashboard={dashboard}
+						sections={sections}
 						activeFilter={pillFilter}
 						onFilterChange={setPillFilter}
 						onShareExport={onShareExport}
@@ -276,18 +303,11 @@ export function PillsScreen() {
 					/>
 				) : null}
 
-				{visibleSections.map(section => (
-					<PillSectionView
-						key={section.key}
-						section={section}
-						onOpenPill={openExistingPill}
-						styles={styles}
-					/>
-				))}
+				<PillGrid rows={visibleRows} onOpenPill={openExistingPill} styles={styles} />
 			</ScrollView>
 			<FloatingActionButton icon='plus' label='Pill' onPress={openNewPill} />
 
-			<PillEditorModal
+			<PillEditorSheet
 				form={form}
 				editingPill={editingPill}
 				availableTags={tagsQuery.data ?? []}
@@ -300,6 +320,7 @@ export function PillsScreen() {
 				onSave={onSave}
 				onDeletePill={onDeletePill}
 				onPickImages={onPickImages}
+				onTakePhoto={onTakePhoto}
 				onParseImages={onParseImages}
 				onDeletePeriod={(period, index) => {
 					void onDeletePeriod(period, index).catch(error =>
@@ -313,30 +334,22 @@ export function PillsScreen() {
 }
 
 function PillsTotals({
-	dashboard,
+	sections,
 	activeFilter,
 	onFilterChange,
 	onShareExport,
 	styles,
 }: {
-	dashboard: PillsDashboard;
+	sections: PillSection[];
 	activeFilter: PillFilter;
 	onFilterChange: (filter: PillFilter) => void;
 	onShareExport: () => void;
 	styles: ReturnType<typeof pillStyles>;
 }) {
+	const counts = getPillFilterCounts(sections);
 	const totals: Array<{ label: string; value: number; filter: PillFilter }> = [
-		{ label: 'Active', value: dashboard.activePills.length, filter: 'active' },
-		{ label: 'Future', value: dashboard.futurePills.length, filter: 'future' },
-		{
-			label: 'Past',
-			value: dashboard.pastPills.reduce(
-				(total, pill) => total + pill.periods.filter(period => Boolean(period.endDate)).length,
-				0,
-			),
-			filter: 'past',
-		},
-		{ label: 'All', value: dashboard.pills.length, filter: 'all' },
+		{ label: 'Active', value: counts.active, filter: 'active' },
+		{ label: 'Inactive', value: counts.inactive, filter: 'inactive' },
 	] satisfies Array<{ label: string; value: number; filter: PillFilter }>;
 	const visibleTotals = totals.filter(total => total.value > 0);
 
@@ -349,7 +362,7 @@ function PillsTotals({
 						label={total.label}
 						value={total.value}
 						active={activeFilter === total.filter}
-						onPress={() => onFilterChange(activeFilter === total.filter ? 'all' : total.filter)}
+						onPress={() => onFilterChange(total.filter)}
 						styles={styles}
 					/>
 				))}
@@ -382,26 +395,35 @@ function TotalCard({
 	);
 }
 
-function PillSectionView({
-	section,
+function getPillFilterCounts(sections: PillSection[]) {
+	return sections.reduce(
+		(counts, section) => {
+			if (section.key === 'active') counts.active += section.rows.length;
+			else counts.inactive += section.rows.length;
+			return counts;
+		},
+		{ active: 0, inactive: 0 },
+	);
+}
+
+function PillGrid({
+	rows,
 	onOpenPill,
 	styles,
 }: {
-	section: PillSection;
+	rows: PillListRow[];
 	onOpenPill: (pill: PillRecord) => void;
 	styles: ReturnType<typeof pillStyles>;
 }) {
+	if (rows.length === 0) {
+		return <Text style={styles.muted}>No pills in this status.</Text>;
+	}
+
 	return (
-		<View style={styles.stack}>
-			<View style={styles.rowBetween}>
-				<Text style={styles.sectionTitle}>{section.title}</Text>
-				<Text style={styles.muted}>{section.rows.length} rows</Text>
-			</View>
-			<View style={styles.tileGrid}>
-				{section.rows.map(row => (
-					<PillRow key={row.key} row={row} onOpenPill={onOpenPill} styles={styles} />
-				))}
-			</View>
+		<View style={styles.tileGrid}>
+			{rows.map(row => (
+				<PillRow key={row.key} row={row} onOpenPill={onOpenPill} styles={styles} />
+			))}
 		</View>
 	);
 }
@@ -415,11 +437,8 @@ function PillRow({
 	onOpenPill: (pill: PillRecord) => void;
 	styles: ReturnType<typeof pillStyles>;
 }) {
-	const { pill, period } = row;
-	const count = period?.count ?? 1;
+	const { pill } = row;
 	const firstImage = pill.images[0];
-	const tagNames = mergeTagNames(pill, period?.tags ?? []);
-	const amount = formatServing(multiplyServingValue(pill.value, count), pill.unit);
 
 	return (
 		<Pressable onPress={() => onOpenPill(pill)} style={styles.pillTile}>
@@ -435,22 +454,20 @@ function PillRow({
 				</View>
 			)}
 			<View style={styles.tileBody}>
-				<Text style={styles.pillTitle} numberOfLines={2}>
+				<Text
+					style={styles.pillTitle}
+					numberOfLines={1}
+					adjustsFontSizeToFit
+					minimumFontScale={0.72}
+				>
 					{pill.name}
 				</Text>
-				<Text style={styles.amountText} numberOfLines={1}>
-					{amount}
-				</Text>
-				<Text style={styles.muted} numberOfLines={1}>
-					{formatRowTiming(row)}
-				</Text>
-				{tagNames[0] ? <Tag small>{tagNames[0]}</Tag> : null}
 			</View>
 		</Pressable>
 	);
 }
 
-function PillEditorModal({
+function PillEditorSheet({
 	form,
 	editingPill,
 	availableTags,
@@ -463,6 +480,7 @@ function PillEditorModal({
 	onSave,
 	onDeletePill,
 	onPickImages,
+	onTakePhoto,
 	onParseImages,
 	onDeletePeriod,
 	styles,
@@ -479,6 +497,7 @@ function PillEditorModal({
 	onSave: () => void;
 	onDeletePill: () => void;
 	onPickImages: () => void;
+	onTakePhoto: () => void;
 	onParseImages: () => void;
 	onDeletePeriod: (period: PillPeriodFormValue, index: number) => void;
 	styles: ReturnType<typeof pillStyles>;
@@ -503,232 +522,228 @@ function PillEditorModal({
 	}, [visible]);
 
 	return (
-		<Modal
+		<BottomSheet
 			visible={visible}
 			title={editingPill ? 'Edit pill' : 'Log pill'}
-			transparent
-			animationType='slide-up'
 			onClose={onClose}
-			closable
-			footer={[
-				{ text: 'Cancel', onPress: onClose },
-				{ text: isSaving ? 'Saving...' : 'Save', onPress: onSave },
-			]}
+			footer={
+				<View style={styles.sheetFooter}>
+					<Button onPress={onClose}>Cancel</Button>
+					<Button type='primary' onPress={onSave} loading={isSaving}>
+						Save
+					</Button>
+				</View>
+			}
 		>
-			<ScrollView
-				style={styles.modalScroll}
-				contentContainerStyle={styles.modalContent}
-				keyboardShouldPersistTaps='handled'
-			>
-				<View style={styles.stack}>
-					{editingPill ? (
-						<View style={styles.rowBetween}>
-							<Text style={styles.muted}>Pill #{editingPill.id}</Text>
-							<Button size='small' onPress={onDeletePill} loading={isDeleting}>
-								Remove
-							</Button>
-						</View>
-					) : null}
+			<View style={styles.stack}>
+				{editingPill ? (
+					<View style={styles.rowBetween}>
+						<Text style={styles.muted}>Pill #{editingPill.id}</Text>
+						<Button size='small' onPress={onDeletePill} loading={isDeleting}>
+							Remove
+						</Button>
+					</View>
+				) : null}
 
-					<View style={styles.segment}>
-						<SegmentButton
-							label='Details'
-							active={activeSection === 'details'}
-							onPress={() => setActiveSection('details')}
+				<View style={styles.segment}>
+					<SegmentButton
+						label='Details'
+						active={activeSection === 'details'}
+						onPress={() => setActiveSection('details')}
+						styles={styles}
+					/>
+					<SegmentButton
+						label='Images'
+						active={activeSection === 'images'}
+						onPress={() => setActiveSection('images')}
+						styles={styles}
+					/>
+					<SegmentButton
+						label='Ranges'
+						active={activeSection === 'ranges'}
+						onPress={() => setActiveSection('ranges')}
+						styles={styles}
+					/>
+					<SegmentButton
+						label='Facts'
+						active={activeSection === 'components'}
+						onPress={() => setActiveSection('components')}
+						styles={styles}
+					/>
+				</View>
+
+				{activeSection === 'details' ? (
+					<View style={styles.fieldGrid}>
+						<TextField
+							label='Pill name'
+							value={form.name}
+							onChangeText={name => onPatch({ name })}
 							styles={styles}
 						/>
-						<SegmentButton
-							label='Images'
-							active={activeSection === 'images'}
-							onPress={() => setActiveSection('images')}
+						<View style={styles.twoColumn}>
+							<TextField
+								label='Value'
+								value={form.value}
+								onChangeText={value => onPatch({ value })}
+								styles={styles}
+							/>
+							<TextField
+								label='Unit'
+								value={form.unit}
+								onChangeText={unit => onPatch({ unit })}
+								styles={styles}
+							/>
+						</View>
+						<TextField
+							label='URL'
+							value={form.url}
+							onChangeText={url => onPatch({ url })}
+							autoCapitalize='none'
 							styles={styles}
 						/>
-						<SegmentButton
-							label='Ranges'
-							active={activeSection === 'ranges'}
-							onPress={() => setActiveSection('ranges')}
+						{form.url.trim() ? (
+							<Button
+								size='small'
+								onPress={() => {
+									void Linking.openURL(form.url.trim());
+								}}
+							>
+								Open URL
+							</Button>
+						) : null}
+						<TextField
+							label='Tags'
+							value={form.tagText}
+							onChangeText={tagText => onPatch({ tagText })}
+							placeholder='blueprint, sleep'
 							styles={styles}
 						/>
-						<SegmentButton
-							label='Facts'
-							active={activeSection === 'components'}
-							onPress={() => setActiveSection('components')}
+						{availableTags.length > 0 ? (
+							<ScrollView horizontal showsHorizontalScrollIndicator={false}>
+								<View style={styles.tagRow}>
+									{availableTags.map(tag => (
+										<Pressable
+											key={tag.name}
+											onPress={() => onPatch({ tagText: appendTagText(form.tagText, tag.name) })}
+										>
+											<Tag small>{tag.name}</Tag>
+										</Pressable>
+									))}
+								</View>
+							</ScrollView>
+						) : null}
+						<TextField
+							label='Note'
+							value={form.note}
+							onChangeText={note => onPatch({ note })}
+							multiline
 							styles={styles}
 						/>
 					</View>
+				) : null}
 
-					{activeSection === 'details' ? (
-						<View style={styles.fieldGrid}>
-							<TextField
-								label='Pill name'
-								value={form.name}
-								onChangeText={name => onPatch({ name })}
-								styles={styles}
-							/>
-							<View style={styles.twoColumn}>
-								<TextField
-									label='Value'
-									value={form.value}
-									onChangeText={value => onPatch({ value })}
-									styles={styles}
-								/>
-								<TextField
-									label='Unit'
-									value={form.unit}
-									onChangeText={unit => onPatch({ unit })}
-									styles={styles}
-								/>
-							</View>
-							<TextField
-								label='URL'
-								value={form.url}
-								onChangeText={url => onPatch({ url })}
-								autoCapitalize='none'
-								styles={styles}
-							/>
-							{form.url.trim() ? (
+				{activeSection === 'images' ? (
+					<View style={styles.stack}>
+						<View style={styles.rowBetween}>
+							<Text style={styles.sectionTitle}>Images</Text>
+							<View style={styles.inline}>
+								<Button size='small' onPress={onTakePhoto}>
+									Camera
+								</Button>
+								<Button size='small' onPress={onPickImages}>
+									Library
+								</Button>
 								<Button
 									size='small'
-									onPress={() => {
-										void Linking.openURL(form.url.trim());
-									}}
+									onPress={onParseImages}
+									loading={isParsing}
+									disabled={!form.images.some(isBase64DataImage)}
 								>
-									Open URL
+									Parse
 								</Button>
-							) : null}
-							<TextField
-								label='Tags'
-								value={form.tagText}
-								onChangeText={tagText => onPatch({ tagText })}
-								placeholder='blueprint, sleep'
-								styles={styles}
-							/>
-							{availableTags.length > 0 ? (
-								<ScrollView horizontal showsHorizontalScrollIndicator={false}>
-									<View style={styles.tagRow}>
-										{availableTags.map(tag => (
-											<Pressable
-												key={tag.name}
-												onPress={() => onPatch({ tagText: appendTagText(form.tagText, tag.name) })}
-											>
-												<Tag small>{tag.name}</Tag>
-											</Pressable>
-										))}
+							</View>
+						</View>
+						<ScrollView horizontal showsHorizontalScrollIndicator={false}>
+							<View style={styles.imageRow}>
+								{form.images.map(image => (
+									<View key={image.uid} style={styles.imageTile}>
+										<Image source={{ uri: image.dataUrl }} style={styles.imagePreview} />
+										<Button
+											size='small'
+											onPress={() =>
+												onPatch({ images: form.images.filter(item => item.uid !== image.uid) })
+											}
+										>
+											Remove
+										</Button>
 									</View>
-								</ScrollView>
-							) : null}
-							<TextField
-								label='Note'
-								value={form.note}
-								onChangeText={note => onPatch({ note })}
-								multiline
+								))}
+								{form.images.length === 0 ? <Text style={styles.muted}>No images</Text> : null}
+							</View>
+						</ScrollView>
+					</View>
+				) : null}
+
+				{activeSection === 'ranges' ? (
+					<View style={styles.stack}>
+						<View style={styles.rowBetween}>
+							<Text style={styles.sectionTitle}>Date Ranges</Text>
+							<Button
+								size='small'
+								onPress={() => onPatch({ periods: [...form.periods, createBlankPeriod()] })}
+							>
+								Add range
+							</Button>
+						</View>
+						{form.periods.length === 0 ? <Text style={styles.muted}>Not tracked yet.</Text> : null}
+						{form.periods.map((period, index) => (
+							<PeriodEditor
+								key={period.id ?? `period-${index}`}
+								period={period}
+								index={index}
+								onPatch={patch => setPeriod(index, patch)}
+								onDelete={() => onDeletePeriod(period, index)}
 								styles={styles}
 							/>
-						</View>
-					) : null}
+						))}
+					</View>
+				) : null}
 
-					{activeSection === 'images' ? (
-						<View style={styles.stack}>
-							<View style={styles.rowBetween}>
-								<Text style={styles.sectionTitle}>Images</Text>
-								<View style={styles.inline}>
-									<Button size='small' onPress={onPickImages}>
-										Add
-									</Button>
-									<Button
-										size='small'
-										onPress={onParseImages}
-										loading={isParsing}
-										disabled={!form.images.some(isBase64DataImage)}
-									>
-										Parse
-									</Button>
-								</View>
-							</View>
-							<ScrollView horizontal showsHorizontalScrollIndicator={false}>
-								<View style={styles.imageRow}>
-									{form.images.map(image => (
-										<View key={image.uid} style={styles.imageTile}>
-											<Image source={{ uri: image.dataUrl }} style={styles.imagePreview} />
-											<Button
-												size='small'
-												onPress={() =>
-													onPatch({ images: form.images.filter(item => item.uid !== image.uid) })
-												}
-											>
-												Remove
-											</Button>
-										</View>
-									))}
-									{form.images.length === 0 ? <Text style={styles.muted}>No images</Text> : null}
-								</View>
-							</ScrollView>
+				{activeSection === 'components' ? (
+					<View style={styles.stack}>
+						<View style={styles.rowBetween}>
+							<Text style={styles.sectionTitle}>
+								{formatSupplementFactsTitle(form.value, form.unit)}
+							</Text>
+							<Button
+								size='small'
+								onPress={() =>
+									onPatch({ components: [...form.components, createBlankComponent()] })
+								}
+							>
+								Add component
+							</Button>
 						</View>
-					) : null}
-
-					{activeSection === 'ranges' ? (
-						<View style={styles.stack}>
-							<View style={styles.rowBetween}>
-								<Text style={styles.sectionTitle}>Date Ranges</Text>
-								<Button
-									size='small'
-									onPress={() => onPatch({ periods: [...form.periods, createBlankPeriod()] })}
-								>
-									Add range
-								</Button>
-							</View>
-							{form.periods.length === 0 ? (
-								<Text style={styles.muted}>Not tracked yet.</Text>
-							) : null}
-							{form.periods.map((period, index) => (
-								<PeriodEditor
-									key={period.id ?? `period-${index}`}
-									period={period}
-									index={index}
-									onPatch={patch => setPeriod(index, patch)}
-									onDelete={() => onDeletePeriod(period, index)}
-									styles={styles}
-								/>
-							))}
-						</View>
-					) : null}
-
-					{activeSection === 'components' ? (
-						<View style={styles.stack}>
-							<View style={styles.rowBetween}>
-								<Text style={styles.sectionTitle}>
-									{formatSupplementFactsTitle(form.value, form.unit)}
-								</Text>
-								<Button
-									size='small'
-									onPress={() =>
-										onPatch({ components: [...form.components, createBlankComponent()] })
-									}
-								>
-									Add component
-								</Button>
-							</View>
-							{form.components.map((component, index) => (
-								<ComponentEditor
-									key={`component-${index}`}
-									component={component}
-									onPatch={patch => setComponent(index, patch)}
-									onDelete={() =>
-										onPatch({
-											components:
-												form.components.length === 1
-													? [createBlankComponent()]
-													: form.components.filter((_, componentIndex) => componentIndex !== index),
-										})
-									}
-									styles={styles}
-								/>
-							))}
-						</View>
-					) : null}
-				</View>
-			</ScrollView>
-		</Modal>
+						{form.components.map((component, index) => (
+							<ComponentEditor
+								key={`component-${index}`}
+								component={component}
+								onPatch={patch => setComponent(index, patch)}
+								onDelete={() =>
+									onPatch({
+										components:
+											form.components.length === 1
+												? [createBlankComponent()]
+												: form.components.filter((_, componentIndex) => componentIndex !== index),
+									})
+								}
+								styles={styles}
+							/>
+						))}
+					</View>
+				) : null}
+			</View>
+		</BottomSheet>
 	);
 }
 
@@ -932,29 +947,6 @@ function SegmentButton({
 	);
 }
 
-function mergeTagNames(pill: PillRecord, periodTags: PillPeriodFormValue[] | PillRecord['tags']) {
-	const names = pill.tags.map(tag => tag.name);
-	const seen = new Set(names.map(name => name.toLocaleLowerCase()));
-	for (const tag of periodTags as Array<{ name?: string }>) {
-		const name = tag.name?.trim();
-		if (!name || seen.has(name.toLocaleLowerCase())) continue;
-		seen.add(name.toLocaleLowerCase());
-		names.push(name);
-	}
-	return names;
-}
-
-function formatRowTiming(row: PillListRow) {
-	if (!row.period) return 'Not tracked yet';
-	if (row.section === 'active') {
-		return `${formatPillSchedule(row.period)}, started ${formatRelativeDate(row.period.startDate)}`;
-	}
-	if (row.section === 'future') {
-		return `${formatPillSchedule(row.period)}, starts ${row.period.startDate}`;
-	}
-	return `${formatPillSchedule(row.period)}, ${formatPeriodRange(row.period)}`;
-}
-
 function appendTagText(value: string, tagName: string) {
 	const existing = value
 		.split(',')
@@ -1113,13 +1105,9 @@ function pillStyles(isDark: boolean) {
 		},
 		pillTitle: {
 			color: text,
-			fontSize: 15,
-			fontWeight: '700' as const,
-		},
-		amountText: {
-			color: text,
 			fontSize: 13,
 			fontWeight: '700' as const,
+			lineHeight: 16,
 		},
 		tagRow: {
 			alignItems: 'center' as const,
@@ -1145,14 +1133,12 @@ function pillStyles(isDark: boolean) {
 			fontWeight: '800' as const,
 		},
 		tileBody: {
-			gap: 5,
-			padding: 10,
+			paddingHorizontal: 9,
+			paddingVertical: 8,
 		},
-		modalScroll: {
-			maxHeight: 520,
-		},
-		modalContent: {
-			paddingBottom: 12,
+		sheetFooter: {
+			flexDirection: 'row' as const,
+			gap: 10,
 		},
 		fieldGrid: {
 			gap: 10,

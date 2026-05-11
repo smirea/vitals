@@ -1,12 +1,4 @@
-import {
-	ActivityIndicator,
-	Button,
-	Card,
-	Checkbox,
-	Modal,
-	Switch,
-	Tag,
-} from '@ant-design/react-native';
+import { ActivityIndicator, Button, Card, Checkbox, Switch, Tag } from '@ant-design/react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -380,8 +372,8 @@ export function LabsScreen() {
 				loading={uploadDocumentsMutation.isPending}
 			/>
 
-			<MeasurementModal row={selectedRow} onClose={() => setSelectedRow(null)} styles={styles} />
-			<DocumentPreviewModal
+			<MeasurementSheet row={selectedRow} onClose={() => setSelectedRow(null)} styles={styles} />
+			<DocumentPreviewSheet
 				document={previewDocument}
 				dashboard={dashboard}
 				showFlaggedOnly={showFlaggedPreviewOnly}
@@ -755,7 +747,7 @@ function MeasurementRow({
 	);
 }
 
-function MeasurementModal({
+function MeasurementSheet({
 	row,
 	onClose,
 	styles,
@@ -765,43 +757,36 @@ function MeasurementModal({
 	styles: ReturnType<typeof labStyles>;
 }) {
 	return (
-		<Modal
+		<BottomSheet
 			visible={row !== null}
 			title={row?.name ?? 'Measurement'}
-			transparent
-			animationType='slide-up'
 			onClose={onClose}
-			closable
-			footer={[{ text: 'Done', onPress: onClose }]}
+			footer={<Button onPress={onClose}>Done</Button>}
 		>
-			<ScrollView style={styles.modalScroll}>
-				{row ? (
-					<View style={styles.stack}>
-						<Text style={styles.muted}>{row.category}</Text>
-						{row.values.map(value => (
-							<View key={`${value.sourceId}:${value.documentId}`} style={styles.timelineRow}>
-								<View style={styles.timelineDot} />
-								<View style={styles.timelineContent}>
-									<View style={styles.rowBetween}>
-										<Text style={styles.cardTitle}>{value.display}</Text>
-										<ValueStatusTag status={value.status} />
-									</View>
-									<Text style={styles.muted}>{value.prettyDate}</Text>
-									{value.rangeCaption ? (
-										<Text style={styles.muted}>{value.rangeCaption}</Text>
-									) : null}
-									{value.note ? <Text style={styles.muted}>{value.note}</Text> : null}
+			{row ? (
+				<View style={styles.stack}>
+					<Text style={styles.muted}>{row.category}</Text>
+					{row.values.map(value => (
+						<View key={`${value.sourceId}:${value.documentId}`} style={styles.timelineRow}>
+							<View style={styles.timelineDot} />
+							<View style={styles.timelineContent}>
+								<View style={styles.rowBetween}>
+									<Text style={styles.cardTitle}>{value.display}</Text>
+									<ValueStatusTag status={value.status} />
 								</View>
+								<Text style={styles.muted}>{value.prettyDate}</Text>
+								{value.rangeCaption ? <Text style={styles.muted}>{value.rangeCaption}</Text> : null}
+								{value.note ? <Text style={styles.muted}>{value.note}</Text> : null}
 							</View>
-						))}
-					</View>
-				) : null}
-			</ScrollView>
-		</Modal>
+						</View>
+					))}
+				</View>
+			) : null}
+		</BottomSheet>
 	);
 }
 
-function DocumentPreviewModal({
+function DocumentPreviewSheet({
 	document,
 	dashboard,
 	showFlaggedOnly,
@@ -826,36 +811,33 @@ function DocumentPreviewModal({
 	const visibleRows = showFlaggedOnly ? previewRows.filter(row => row.hasIssue) : previewRows;
 
 	return (
-		<Modal
+		<BottomSheet
 			visible={document !== null}
 			title={document?.fileName ?? 'Document'}
-			transparent
-			animationType='slide-up'
 			onClose={onClose}
-			closable
-			footer={[
-				{ text: 'PDF', onPress: () => (document ? onOpenPdf(document) : undefined) },
-				{ text: 'Done', onPress: onClose },
-			]}
-		>
-			<ScrollView style={styles.modalScroll}>
-				<View style={styles.stack}>
-					<View style={styles.rowBetween}>
-						<Text style={styles.cardTitle}>Parsed Values ({visibleRows.length})</Text>
-						<View style={styles.inline}>
-							<Checkbox
-								checked={showFlaggedOnly}
-								onChange={() => onShowFlaggedOnlyChange(!showFlaggedOnly)}
-							/>
-							<Text style={styles.body}>Flagged ({flaggedCount})</Text>
-						</View>
-					</View>
-					{visibleRows.map(row => (
-						<PreviewValueRow key={row.id} row={row} styles={styles} />
-					))}
+			footer={
+				<View style={styles.sheetFooter}>
+					<Button onPress={() => (document ? onOpenPdf(document) : undefined)}>PDF</Button>
+					<Button onPress={onClose}>Done</Button>
 				</View>
-			</ScrollView>
-		</Modal>
+			}
+		>
+			<View style={styles.stack}>
+				<View style={styles.rowBetween}>
+					<Text style={styles.cardTitle}>Parsed Values ({visibleRows.length})</Text>
+					<View style={styles.inline}>
+						<Checkbox
+							checked={showFlaggedOnly}
+							onChange={() => onShowFlaggedOnlyChange(!showFlaggedOnly)}
+						/>
+						<Text style={styles.body}>Flagged ({flaggedCount})</Text>
+					</View>
+				</View>
+				{visibleRows.map(row => (
+					<PreviewValueRow key={row.id} row={row} styles={styles} />
+				))}
+			</View>
+		</BottomSheet>
 	);
 }
 
@@ -1047,6 +1029,10 @@ function labStyles(isDark: boolean) {
 			flexDirection: 'row' as const,
 			gap: 8,
 		},
+		sheetFooter: {
+			flexDirection: 'row' as const,
+			gap: 10,
+		},
 		body: {
 			color: text,
 			fontSize: 14,
@@ -1192,9 +1178,6 @@ function labStyles(isDark: boolean) {
 			gap: 8,
 			justifyContent: 'flex-end' as const,
 			marginTop: 10,
-		},
-		modalScroll: {
-			maxHeight: 460,
 		},
 		timelineRow: {
 			flexDirection: 'row' as const,

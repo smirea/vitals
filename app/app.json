@@ -42,6 +42,13 @@
 				{
 					"locationWhenInUsePermission": "Allow Vitals to attach your current location to diary entries."
 				}
+			],
+			[
+				"expo-image-picker",
+				{
+					"cameraPermission": "Allow Vitals to take pill label photos.",
+					"photosPermission": "Allow Vitals to add pill label photos."
+				}
 			]
 		],
 		"experiments": {
