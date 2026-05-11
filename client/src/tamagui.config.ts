@@ -153,6 +153,24 @@ const media = {
 	xxl: { minWidth: breakpoints.xxl },
 } as const;
 
+const appTokens = {
+	...tokens,
+	radius: {
+		...tokens.radius,
+		1: 2,
+		2: 3,
+		3: 4,
+		4: 5,
+		true: 5,
+		5: 6,
+		6: 7,
+		7: 8,
+		8: 10,
+		9: 12,
+		10: 14,
+	},
+} as const;
+
 export const config = createTamagui({
 	media,
 	shorthands,
@@ -161,7 +179,7 @@ export const config = createTamagui({
 		light: appLightTheme,
 		dark: appDarkTheme,
 	},
-	tokens,
+	tokens: appTokens,
 	fonts: {
 		body: createAppFont(),
 		heading: createAppFont({

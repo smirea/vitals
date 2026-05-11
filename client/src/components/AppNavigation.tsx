@@ -15,13 +15,13 @@ const navigationItems = [
 		key: '/labs',
 		to: '/labs',
 		label: 'Labs',
-		icon: <Pill size={18} />,
+		icon: <TestTube size={18} />,
 	},
 	{
 		key: '/pills',
 		to: '/pills',
 		label: 'Pills',
-		icon: <TestTube size={18} />,
+		icon: <Pill size={18} />,
 	},
 	{
 		key: '/diary',
@@ -64,7 +64,9 @@ export function AppNavigation() {
 				<H4 className='app-nav-title' m={0}>
 					Vitals
 				</H4>
-				<Text color='$textMuted'>Pages</Text>
+				<Text color='$textMuted' fontSize={12}>
+					Dashboard
+				</Text>
 			</div>
 
 			<nav className='app-nav-menu' style={{ background: colors.bgContainer?.get('web') }}>

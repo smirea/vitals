@@ -150,7 +150,7 @@ function TagsRouteComponent() {
 			<PageNav title='Tags' />
 
 			<div className='pills-page-inner'>
-				<Card bg='$bgContainer' borderColor='$borderSubtle' borderWidth={1}>
+				<Card bg='$bgContainer' borderColor='$borderSubtle' borderWidth={1} borderRadius={5}>
 					<XStack
 						alignItems='center'
 						justifyContent='space-between'
@@ -197,12 +197,15 @@ function TagsRouteComponent() {
 							<FormField label=' '>
 								<XStack gap={8}>
 									<Button
+										className='app-button-primary'
 										type='submit'
 										disabled={isSaving}
 										backgroundColor='$primary'
 										style={{ color: 'white' }}
 									>
-										{isSaving ? 'Saving...' : editingTagId === null ? 'Create tag' : 'Save tag'}
+										<Text color='$white'>
+											{isSaving ? 'Saving...' : editingTagId === null ? 'Create tag' : 'Save tag'}
+										</Text>
 									</Button>
 
 									{editingTagId !== null ? <Button onPress={resetTagForm}>Cancel</Button> : null}
@@ -212,7 +215,7 @@ function TagsRouteComponent() {
 					</form>
 				</Card>
 
-				<Card bg='$bgContainer' borderColor='$borderSubtle' borderWidth={1}>
+				<Card bg='$bgContainer' borderColor='$borderSubtle' borderWidth={1} borderRadius={5}>
 					<XStack
 						alignItems='center'
 						justifyContent='space-between'
@@ -225,7 +228,7 @@ function TagsRouteComponent() {
 						<Text color='$textMuted'>{tagsQuery.data?.length ?? 0} rows</Text>
 					</XStack>
 
-					<YStack padding={16}>
+					<YStack padding={12}>
 						<DataTable
 							getRowKey={row => row.id}
 							loading={tagsQuery.isLoading}

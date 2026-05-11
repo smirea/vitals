@@ -30,14 +30,17 @@ export function TagChip({
 		<XStack
 			className={className}
 			alignItems='center'
-			gap={5}
+			gap={3}
 			borderWidth={1}
-			borderRadius={999}
-			paddingHorizontal={8}
-			paddingVertical={2}
+			borderRadius={5}
+			paddingHorizontal={6}
+			paddingVertical={1}
 			cursor={onPress ? 'pointer' : undefined}
 			onPress={onPress}
 			style={{
+				display: 'inline-flex',
+				width: 'fit-content',
+				maxWidth: '100%',
 				borderColor: resolvedColor ?? theme.borderColor?.get('web'),
 				background: resolvedColor ? `${resolvedColor}22` : theme.fill?.get('web'),
 				color: resolvedColor ?? theme.color?.get('web'),
@@ -45,7 +48,7 @@ export function TagChip({
 			}}
 		>
 			{icon}
-			<Text fontSize={12} color='inherit'>
+			<Text fontSize={12} lineHeight={16} color='inherit'>
 				{children}
 			</Text>
 			{closable ? (
@@ -53,8 +56,8 @@ export function TagChip({
 					size='$1'
 					chromeless
 					padding={0}
-					width={16}
-					height={16}
+					width={14}
+					height={14}
 					onPress={event => {
 						event.stopPropagation();
 						onClose?.();

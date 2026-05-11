@@ -11,7 +11,13 @@ function HomePage() {
 
 	return (
 		<main className='home-page' style={{ background: theme.bgLayout?.get('web') }}>
-			<Card className='home-card' bg='$bgContainer' borderColor='$borderSubtle' borderWidth={1}>
+			<Card
+				className='home-card'
+				bg='$bgContainer'
+				borderColor='$borderSubtle'
+				borderWidth={1}
+				borderRadius={5}
+			>
 				<div className='home-card-content'>
 					<div
 						className='home-icon-shell'

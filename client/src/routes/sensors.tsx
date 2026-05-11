@@ -294,13 +294,14 @@ function SensorsPage() {
 							3 month
 						</Button>
 						<Button
-							icon={<PlayCircleOutlined />}
+							className='app-button-primary'
+							icon={<PlayCircleOutlined color='white' />}
 							disabled={isAnySelectedRunning}
 							backgroundColor='$primary'
 							style={{ color: 'white' }}
 							onPress={() => void runKeys(selectedRunKeys)}
 						>
-							{isAnySelectedRunning ? 'Running...' : 'Run selected'}
+							<Text color='$white'>{isAnySelectedRunning ? 'Running...' : 'Run selected'}</Text>
 						</Button>
 					</XStack>
 				</section>
@@ -378,13 +379,14 @@ function SensorsPage() {
 								onChange={value => setOutputMode(value as OutputMode)}
 							/>
 							<Button
-								icon={<PlayCircleOutlined />}
+								className='app-button-primary'
+								icon={<PlayCircleOutlined color='white' />}
 								disabled={isAnySelectedRunning}
 								backgroundColor='$primary'
 								style={{ color: 'white' }}
 								onPress={() => void runKeys(selectedRunKeys)}
 							>
-								{isAnySelectedRunning ? 'Running...' : 'Start'}
+								<Text color='$white'>{isAnySelectedRunning ? 'Running...' : 'Start'}</Text>
 							</Button>
 							<Button
 								icon={<DownloadOutlined />}

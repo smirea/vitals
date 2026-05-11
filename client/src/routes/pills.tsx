@@ -1116,12 +1116,13 @@ function PillsRouteComponent() {
 							Export
 						</Button>
 						<Button
+							className='app-button-primary'
 							backgroundColor='$primary'
 							style={{ color: 'white' }}
-							icon={<PlusOutlined />}
+							icon={<PlusOutlined color='white' />}
 							onPress={openNewPillDrawer}
 						>
-							Log pill
+							<Text color='$white'>Log pill</Text>
 						</Button>
 					</XStack>
 				}
@@ -1221,6 +1222,7 @@ function PillsRouteComponent() {
 							) : null}
 							<Button onPress={handleCloseDrawer}>Cancel</Button>
 							<Button
+								className='app-button-primary'
 								backgroundColor='$primary'
 								style={{ color: 'white' }}
 								disabled={isSaveDisabled}
@@ -1228,7 +1230,7 @@ function PillsRouteComponent() {
 									void handleSubmit(formValues);
 								}}
 							>
-								{upsertMutation.isPending ? 'Saving...' : 'Save'}
+								<Text color='$white'>{upsertMutation.isPending ? 'Saving...' : 'Save'}</Text>
 							</Button>
 						</XStack>
 					}
@@ -1345,7 +1347,7 @@ function PillsRouteComponent() {
 									width: IMAGE_TILE_SIZE,
 									height: IMAGE_TILE_SIZE,
 									border: `1px dashed ${token.colorBorderSecondary}`,
-									borderRadius: 8,
+									borderRadius: 5,
 									background: token.colorFillAlter,
 								}}
 								onFiles={files => {
@@ -1503,7 +1505,7 @@ function SectionCard(props: { title: ReactNode; actions?: ReactNode; children: R
 			borderWidth={1}
 			borderColor='$borderSubtle'
 			backgroundColor='$bgContainer'
-			borderRadius={8}
+			borderRadius={5}
 			overflow='hidden'
 		>
 			<XStack
@@ -1511,14 +1513,14 @@ function SectionCard(props: { title: ReactNode; actions?: ReactNode; children: R
 				alignItems='center'
 				gap={12}
 				flexWrap='wrap'
-				paddingHorizontal={16}
-				paddingVertical={12}
+				paddingHorizontal={12}
+				paddingVertical={10}
 				style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}
 			>
 				{typeof props.title === 'string' ? <H3>{props.title}</H3> : props.title}
 				{props.actions}
 			</XStack>
-			<div style={{ padding: 16 }}>{props.children}</div>
+			<div style={{ padding: 12 }}>{props.children}</div>
 		</Card>
 	);
 }
@@ -1548,7 +1550,7 @@ function DrawerOverlay(props: {
 		height: 'calc(100vh - 32px)',
 		background: token.colorBgContainer,
 		border: `1px solid ${token.colorBorderSecondary}`,
-		borderRadius: 10,
+		borderRadius: 6,
 		boxShadow: '0 18px 48px rgba(15, 23, 42, 0.24)',
 		overflow: 'hidden',
 	};
@@ -1570,14 +1572,14 @@ function DrawerOverlay(props: {
 					justifyContent='space-between'
 					alignItems='center'
 					gap={12}
-					paddingHorizontal={16}
-					paddingVertical={12}
+					paddingHorizontal={12}
+					paddingVertical={10}
 					style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}
 				>
 					<H3>{props.title}</H3>
 					{props.actions}
 				</XStack>
-				<div style={{ height: 'calc(100% - 61px)', overflowY: 'auto', padding: 16 }}>
+				<div style={{ height: 'calc(100% - 53px)', overflowY: 'auto', padding: 12 }}>
 					{props.children}
 				</div>
 			</div>
@@ -1591,9 +1593,9 @@ function InlineAlert(props: { title: ReactNode; children: ReactNode }) {
 	return (
 		<XStack
 			gap={10}
-			padding={12}
+			padding={10}
 			borderWidth={1}
-			borderRadius={8}
+			borderRadius={5}
 			className='pills-image-error'
 			style={{ background: token.colorErrorBg, borderColor: token.colorErrorBorder }}
 		>
@@ -2141,8 +2143,8 @@ function renderImages(images: PillImage[]) {
 					key={image.id}
 					src={image.dataUrl}
 					alt={image.fileName}
-					width={44}
-					height={44}
+					width={34}
+					height={34}
 					className='pills-image-preview'
 				/>
 			))}

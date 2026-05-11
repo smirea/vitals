@@ -94,7 +94,7 @@ export const Route = createFileRoute('/labs')({
 
 const BLOODWORK_IMPORT_POLL_INTERVAL_MS = 3_000;
 const PREVIEW_DRAWER_CONTENT_HEIGHT = 'calc(100vh - 108px)';
-const PREVIEW_RESULTS_PANEL_WIDTH = 360;
+const PREVIEW_RESULTS_PANEL_WIDTH = 420;
 const NORMAL_PREVIEW_FLAG_NOTES = new Set([
 	'n',
 	'normal',
@@ -1238,72 +1238,31 @@ function LabsPage() {
 													key={row.id}
 													ref={isHighlighted ? scrollToPreviewRow : undefined}
 													style={{
-														padding: '8px 14px',
+														padding: '7px 12px',
 														borderBottom: `1px solid ${token.colorBorderSecondary}`,
 														background: isHighlighted ? token.colorPrimaryBg : undefined,
 													}}
 												>
-													<XStack justifyContent='space-between' alignItems='flex-start' gap={10}>
-														<div style={{ minWidth: 0, flex: 1 }}>
-															<XStack alignItems='flex-start' gap={6}>
-																<Text
-																	fontWeight='700'
-																	style={{
-																		display: 'block',
-																		lineHeight: 1.25,
-																		overflowWrap: 'break-word',
-																	}}
-																>
-																	{row.name}
-																</Text>
-																{row.issueLabel ? (
-																	<WarningCircle
-																		size={15}
-																		weight='fill'
-																		color={token.colorWarning}
-																		style={{ flexShrink: 0, marginTop: 2 }}
-																		aria-label={row.issueLabel}
-																	/>
-																) : null}
-															</XStack>
-														</div>
-														<div
-															style={{
-																textAlign: 'right',
-																flexShrink: 0,
-																maxWidth: 138,
-															}}
-														>
-															<Text
-																style={{
-																	display: 'block',
-																	overflowWrap: 'anywhere',
-																}}
-															>
-																{row.valueText}
-															</Text>
-															{row.rangeText ? (
-																<Text
-																	color='$textMuted'
-																	style={{
-																		display: 'block',
-																		marginTop: 2,
-																		fontSize: 11,
-																		lineHeight: 1.2,
-																	}}
-																>
-																	ref {row.rangeText}
-																</Text>
+													<div className='labs-preview-value-row'>
+														<div className='labs-preview-value-name'>
+															<span>{row.name}</span>
+															{row.issueLabel ? (
+																<WarningCircle
+																	size={13}
+																	weight='fill'
+																	color={token.colorWarning}
+																	style={{ flexShrink: 0, marginTop: 1 }}
+																	aria-label={row.issueLabel}
+																/>
 															) : null}
 														</div>
-													</XStack>
+														<div className='labs-preview-value-text'>
+															<span>{row.valueText}</span>
+															{row.rangeText ? <span> · ref {row.rangeText}</span> : null}
+														</div>
+													</div>
 													{row.note ? (
-														<Text
-															color='$textMuted'
-															style={{ display: 'block', marginTop: 3, fontSize: 12 }}
-														>
-															{row.note}
-														</Text>
+														<div className='labs-preview-value-note'>{row.note}</div>
 													) : null}
 												</div>
 											);
@@ -1374,7 +1333,7 @@ function SectionCard(props: {
 			borderWidth={1}
 			borderColor='$borderSubtle'
 			backgroundColor='$bgContainer'
-			borderRadius={8}
+			borderRadius={5}
 			overflow='hidden'
 		>
 			{props.title || props.actions ? (
@@ -1383,15 +1342,15 @@ function SectionCard(props: {
 					alignItems='center'
 					gap={12}
 					flexWrap='wrap'
-					paddingHorizontal={16}
-					paddingVertical={12}
+					paddingHorizontal={12}
+					paddingVertical={10}
 					style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}
 				>
 					{typeof props.title === 'string' ? <H3>{props.title}</H3> : props.title}
 					{props.actions}
 				</XStack>
 			) : null}
-			<div style={{ padding: props.bodyPadding ?? 16 }}>{props.children}</div>
+			<div style={{ padding: props.bodyPadding ?? 12 }}>{props.children}</div>
 		</Card>
 	);
 }
@@ -1410,9 +1369,9 @@ function InlineAlert(props: { title: ReactNode; children: ReactNode }) {
 	return (
 		<XStack
 			gap={10}
-			padding={14}
+			padding={10}
 			borderWidth={1}
-			borderRadius={8}
+			borderRadius={5}
 			style={{
 				background: token.colorErrorBg,
 				borderColor: token.colorErrorBorder,
@@ -1443,9 +1402,9 @@ function StatusBadge(props: {
 		<XStack
 			alignItems='center'
 			borderWidth={1}
-			borderRadius={999}
-			paddingHorizontal={8}
-			paddingVertical={2}
+			borderRadius={5}
+			paddingHorizontal={6}
+			paddingVertical={1}
 			style={{ background: palette[0], borderColor: palette[1] }}
 		>
 			<Text fontSize={12} fontWeight='700' style={{ color: palette[2] }}>
@@ -1511,7 +1470,7 @@ function DocumentPreviewOverlay(props: {
 		maxHeight: 'calc(100vh - 32px)',
 		background: token.colorBgContainer,
 		border: `1px solid ${token.colorBorderSecondary}`,
-		borderRadius: 10,
+		borderRadius: 6,
 		boxShadow: '0 18px 48px rgba(15, 23, 42, 0.24)',
 		overflow: 'hidden',
 	};
@@ -1533,8 +1492,8 @@ function DocumentPreviewOverlay(props: {
 					justifyContent='space-between'
 					alignItems='center'
 					gap={12}
-					paddingHorizontal={16}
-					paddingVertical={12}
+					paddingHorizontal={12}
+					paddingVertical={10}
 					style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}
 				>
 					<Text fontWeight='700'>{props.title}</Text>

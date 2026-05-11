@@ -725,8 +725,8 @@ function DiaryRouteComponent() {
 					</InlineAlert>
 				) : null}
 
-				<Card bg='$bgContainer' borderColor='$borderSubtle' borderWidth={1}>
-					<YStack gap={12} padding={16} width='100%'>
+				<Card bg='$bgContainer' borderColor='$borderSubtle' borderWidth={1} borderRadius={5}>
+					<YStack gap={10} padding={12} width='100%'>
 						<div className='diary-composer-note'>
 							<AutoResizeTextArea
 								value={notes}
@@ -738,16 +738,22 @@ function DiaryRouteComponent() {
 								}}
 							/>
 							<Button
-								icon={<PlusOutlined />}
+								icon={<PlusOutlined color={canAddEntry ? 'white' : undefined} />}
 								disabled={!canAddEntry}
-								backgroundColor='$primary'
-								style={{ color: 'white' }}
-								className='diary-add-button'
+								backgroundColor={canAddEntry ? '$primary' : undefined}
+								style={canAddEntry ? { color: 'white' } : undefined}
+								className={canAddEntry ? 'app-button-primary diary-add-button' : 'diary-add-button'}
 								onPress={() => {
 									void handleAddEntry();
 								}}
 							>
-								{createEntryMutation.isPending ? 'Adding...' : 'Add'}
+								{canAddEntry ? (
+									<Text color='$white'>{createEntryMutation.isPending ? 'Adding...' : 'Add'}</Text>
+								) : createEntryMutation.isPending ? (
+									'Adding...'
+								) : (
+									'Add'
+								)}
 							</Button>
 						</div>
 
@@ -761,19 +767,24 @@ function DiaryRouteComponent() {
 
 						<div className='diary-actions'>
 							<Button
-								icon={isRecording ? <StopOutlined /> : <AudioOutlined />}
+								icon={isRecording ? <StopOutlined color='white' /> : <AudioOutlined />}
 								backgroundColor={isRecording ? '$error' : undefined}
 								style={isRecording ? { color: 'white' } : undefined}
+								className={isRecording ? 'app-button-danger' : undefined}
 								disabled={!currentLocation || createEntryMutation.isPending}
 								onPress={() => {
 									void handleRecordButton();
 								}}
 							>
-								{isStoppingRecording || isParsingVoiceMemo
-									? 'Working...'
-									: isRecording
-										? 'Stop'
-										: 'Record'}
+								{isRecording ? (
+									<Text color='$white'>
+										{isStoppingRecording || isParsingVoiceMemo ? 'Working...' : 'Stop'}
+									</Text>
+								) : isStoppingRecording || isParsingVoiceMemo ? (
+									'Working...'
+								) : (
+									'Record'
+								)}
 							</Button>
 							{isParsingVoiceMemo ? <Text color='$textMuted'>Parsing</Text> : null}
 						</div>
@@ -1137,7 +1148,7 @@ function DiaryRouteComponent() {
 
 function SectionCard(props: { title: string; extra?: ReactNode; children: ReactNode }) {
 	return (
-		<Card bg='$bgContainer' borderColor='$borderSubtle' borderWidth={1}>
+		<Card bg='$bgContainer' borderColor='$borderSubtle' borderWidth={1} borderRadius={5}>
 			<XStack
 				alignItems='center'
 				justifyContent='space-between'
@@ -1149,7 +1160,7 @@ function SectionCard(props: { title: string; extra?: ReactNode; children: ReactN
 				<Text fontWeight='700'>{props.title}</Text>
 				{props.extra}
 			</XStack>
-			<YStack padding={16}>{props.children}</YStack>
+			<YStack padding={12}>{props.children}</YStack>
 		</Card>
 	);
 }
@@ -1179,9 +1190,9 @@ function InlineAlert(props: {
 	return (
 		<XStack
 			gap={10}
-			padding={12}
+			padding={10}
 			borderWidth={1}
-			borderRadius={8}
+			borderRadius={5}
 			style={{ background: palette[0], borderColor: palette[1] }}
 		>
 			<Text fontWeight='700' style={{ color: palette[2] }}>
