@@ -110,7 +110,6 @@ export function BottomSheet({
 }) {
 	const isDark = useColorScheme() === 'dark';
 	const surface = isDark ? '#111827' : '#fff';
-	const text = isDark ? '#f9fafb' : '#111827';
 	const border = isDark ? '#27272a' : '#e5e7eb';
 
 	return (
@@ -141,26 +140,34 @@ export function BottomSheet({
 						paddingTop: 10,
 					}}
 				>
-					<View style={{ alignItems: 'center' }}>
+					<Pressable accessibilityRole='button' accessibilityLabel='Close' onPress={onClose}>
 						<View
 							style={{
+								alignSelf: 'center',
 								backgroundColor: border,
 								borderRadius: 999,
 								height: 4,
 								width: 42,
 							}}
 						/>
-					</View>
-					<View
-						style={{
-							alignItems: 'center',
-							flexDirection: 'row',
-							justifyContent: 'space-between',
-						}}
-					>
-						<Text style={{ color: text, fontSize: 18, fontWeight: '800' }}>{title}</Text>
-						<IconButton icon='xmark' label='Close' onPress={onClose} />
-					</View>
+					</Pressable>
+					{title.trim() ? (
+						<View
+							style={{
+								alignItems: 'center',
+							}}
+						>
+							<Text
+								style={{
+									color: isDark ? '#f9fafb' : '#111827',
+									fontSize: 18,
+									fontWeight: '800',
+								}}
+							>
+								{title}
+							</Text>
+						</View>
+					) : null}
 					<ScrollView
 						contentInsetAdjustmentBehavior='automatic'
 						keyboardShouldPersistTaps='handled'

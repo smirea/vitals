@@ -116,8 +116,18 @@ export const diaryAddVoiceMemoTagsInputSchema = z.object({
 	tagNames: z.array(z.string().trim().min(1)).min(1).max(50),
 });
 
+export const diarySetEntryTagsInputSchema = z.object({
+	entryId: z.number().int().positive(),
+	tagNames: z.array(z.string().trim().min(1)).max(50),
+});
+
+export const diarySetVoiceMemoTagsInputSchema = z.object({
+	voiceMemoId: z.number().int().positive(),
+	tagNames: z.array(z.string().trim().min(1)).max(50),
+});
+
 type DiaryReadDb = Pick<VitalsDatabase, 'select'>;
-type DiaryWriteDb = Pick<VitalsDatabase, 'select' | 'insert' | 'update'>;
+type DiaryWriteDb = Pick<VitalsDatabase, 'select' | 'insert' | 'update' | 'delete'>;
 
 type DiaryRecord = ReturnType<typeof buildDiaryPayload>[number];
 type DiaryVoiceMemoRecoveryRecord = {
@@ -813,6 +823,17 @@ function insertEntryTags(db: DiaryWriteDb, entryId: number, tagNames: string[]) 
 	}
 }
 
+function replaceEntryTags(db: DiaryWriteDb, entryId: number, tagNames: string[]) {
+	const resolvedTags = ensureTagsByNames(db, tagNames);
+	db.delete(diaryEntryTags).where(eq(diaryEntryTags.entryId, entryId)).run();
+
+	if (resolvedTags.length > 0) {
+		db.insert(diaryEntryTags)
+			.values(resolvedTags.map(tag => ({ entryId, tagId: tag.id })))
+			.run();
+	}
+}
+
 async function summarizeDiaryEntry(input: { notes: string; transcript?: string | null }) {
 	const sections = [
 		input.notes.trim() ? `Notes:\n${input.notes.trim()}` : null,
@@ -1429,6 +1450,26 @@ export function addTagsToDiaryEntry(
 	return record;
 }
 
+export function setDiaryEntryTags(
+	db: VitalsDatabase,
+	input: z.infer<typeof diarySetEntryTagsInputSchema>,
+) {
+	const entry = db.select().from(diaryEntries).where(eq(diaryEntries.id, input.entryId)).get();
+
+	if (!entry) {
+		throw new Error(`Diary entry ${input.entryId} does not exist.`);
+	}
+
+	replaceEntryTags(db, entry.id, input.tagNames);
+
+	const record = getDiaryRecord(db, entry.id);
+	if (!record) {
+		throw new Error(`Diary entry ${entry.id} was not found after tagging.`);
+	}
+
+	return record;
+}
+
 export function addTagsToDiaryVoiceMemo(
 	db: VitalsDatabase,
 	input: z.infer<typeof diaryAddVoiceMemoTagsInputSchema>,
@@ -1444,6 +1485,24 @@ export function addTagsToDiaryVoiceMemo(
 	}
 
 	insertEntryTags(db, voiceMemo.entryId, input.tagNames);
+	return getPendingVoiceMemoRecords(db);
+}
+
+export function setDiaryVoiceMemoTags(
+	db: VitalsDatabase,
+	input: z.infer<typeof diarySetVoiceMemoTagsInputSchema>,
+) {
+	const voiceMemo = db
+		.select()
+		.from(diaryVoiceMemos)
+		.where(eq(diaryVoiceMemos.id, input.voiceMemoId))
+		.get();
+
+	if (!voiceMemo) {
+		throw new Error(`Voice memo ${input.voiceMemoId} does not exist.`);
+	}
+
+	replaceEntryTags(db, voiceMemo.entryId, input.tagNames);
 	return getPendingVoiceMemoRecords(db);
 }
 

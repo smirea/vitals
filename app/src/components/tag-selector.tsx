@@ -1,5 +1,8 @@
+import { SymbolView } from 'expo-symbols';
 import { useMemo, useState } from 'react';
-import { Pressable, Text, TextInput, View, useColorScheme } from 'react-native';
+import { Pressable, Text, View, useColorScheme } from 'react-native';
+
+import { BottomSheet } from '@/src/components/mobile-ui';
 
 export type TagSelectorTag = {
 	name: string;
@@ -47,17 +50,11 @@ export function TagSelector({
 	value,
 	availableTags,
 	onChange,
-	onSubmit,
-	submitLabel = 'Add',
-	loading = false,
 	disabled = false,
 }: {
 	value: string;
 	availableTags: TagSelectorTag[];
 	onChange: (value: string) => void;
-	onSubmit?: () => void;
-	submitLabel?: string;
-	loading?: boolean;
 	disabled?: boolean;
 }) {
 	const isDark = useColorScheme() === 'dark';
@@ -67,21 +64,20 @@ export function TagSelector({
 		() => new Set(selectedNames.map(name => name.toLocaleLowerCase())),
 		[selectedNames],
 	);
-	const [customName, setCustomName] = useState('');
-	const visibleTags = useMemo(() => {
+	const [selectorOpen, setSelectorOpen] = useState(false);
+	const tagsByKey = useMemo(() => {
 		const tagsByKey = new Map<string, TagSelectorTag>();
 		for (const tag of availableTags) tagsByKey.set(tag.name.toLocaleLowerCase(), tag);
-		for (const name of selectedNames) {
-			const key = name.toLocaleLowerCase();
-			if (!tagsByKey.has(key)) tagsByKey.set(key, { name });
-		}
-		return [...tagsByKey.values()].sort((left, right) => {
-			const leftSelected = selectedKeys.has(left.name.toLocaleLowerCase());
-			const rightSelected = selectedKeys.has(right.name.toLocaleLowerCase());
-			if (leftSelected !== rightSelected) return leftSelected ? -1 : 1;
-			return left.name.localeCompare(right.name);
-		});
-	}, [availableTags, selectedKeys, selectedNames]);
+		return tagsByKey;
+	}, [availableTags]);
+	const sortedTags = useMemo(
+		() => [...availableTags].sort((left, right) => left.name.localeCompare(right.name)),
+		[availableTags],
+	);
+	const selectedTags = useMemo(
+		() => selectedNames.map(name => tagsByKey.get(name.toLocaleLowerCase()) ?? { name }),
+		[selectedNames, tagsByKey],
+	);
 
 	function setSelected(names: string[]) {
 		onChange(formatTagNames(names));
@@ -96,71 +92,65 @@ export function TagSelector({
 		setSelected([...selectedNames, name]);
 	}
 
-	function addCustomName() {
-		const name = customName.trim();
-		if (!name) return;
-		const key = name.toLocaleLowerCase();
-		if (!selectedKeys.has(key)) setSelected([...selectedNames, name]);
-		setCustomName('');
+	function openSelector() {
+		if (!disabled) setSelectorOpen(true);
 	}
 
 	return (
-		<View style={styles.wrap}>
-			{visibleTags.length > 0 ? (
-				<View style={styles.chipRow}>
-					{visibleTags.map(tag => {
+		<>
+			<View style={styles.chipRow}>
+				{selectedTags.map(tag => (
+					<Pressable
+						key={tag.name}
+						disabled={disabled}
+						onPress={openSelector}
+						style={[styles.pickChip, tag.color ? { borderColor: tag.color } : null]}
+					>
+						<Text style={styles.pickChipText}>{tag.name}</Text>
+					</Pressable>
+				))}
+				<Pressable
+					disabled={disabled}
+					onPress={openSelector}
+					style={[
+						styles.addButton,
+						selectedNames.length === 0 && styles.addButtonWithLabel,
+						disabled && styles.addButtonDisabled,
+					]}
+				>
+					<SymbolView
+						name='tag'
+						size={15}
+						tintColor={disabled ? styles.disabledIcon.color : '#1677ff'}
+						weight='semibold'
+					/>
+					{selectedNames.length === 0 ? <Text style={styles.addButtonText}>add tags</Text> : null}
+				</Pressable>
+			</View>
+			<BottomSheet visible={selectorOpen} title='' onClose={() => setSelectorOpen(false)}>
+				<View style={styles.optionList}>
+					{sortedTags.map(tag => {
 						const selected = selectedKeys.has(tag.name.toLocaleLowerCase());
 						return (
 							<Pressable
 								key={tag.name}
-								disabled={disabled}
 								onPress={() => toggleTag(tag.name)}
-								style={[
-									styles.pickChip,
-									selected && styles.pickChipSelected,
-									tag.color ? { borderColor: tag.color } : null,
-								]}
+								style={styles.optionRow}
 							>
-								<Text style={selected ? styles.pickChipTextSelected : styles.pickChipText}>
-									{tag.name}
-								</Text>
+								<View style={styles.optionTextWrap}>
+									<Text style={styles.optionText}>{tag.name}</Text>
+								</View>
+								<View style={[styles.checkbox, selected && styles.checkboxSelected]}>
+									{selected ? (
+										<SymbolView name='checkmark' size={15} tintColor='#fff' weight='bold' />
+									) : null}
+								</View>
 							</Pressable>
 						);
 					})}
 				</View>
-			) : null}
-			<View style={styles.inputRow}>
-				<TextInput
-					value={customName}
-					editable={!disabled}
-					placeholder='Custom tag'
-					placeholderTextColor={styles.placeholder.color}
-					style={styles.input}
-					autoCapitalize='none'
-					onChangeText={setCustomName}
-					onSubmitEditing={addCustomName}
-				/>
-				<Pressable
-					disabled={disabled || customName.trim().length === 0}
-					onPress={addCustomName}
-					style={[styles.smallButton, customName.trim().length === 0 && styles.smallButtonDisabled]}
-				>
-					<Text style={styles.smallButtonText}>+</Text>
-				</Pressable>
-				{onSubmit ? (
-					<Pressable
-						disabled={disabled || loading || selectedNames.length === 0}
-						onPress={onSubmit}
-						style={[
-							styles.submitButton,
-							(disabled || loading || selectedNames.length === 0) && styles.submitButtonDisabled,
-						]}
-					>
-						<Text style={styles.submitButtonText}>{loading ? 'Adding...' : submitLabel}</Text>
-					</Pressable>
-				) : null}
-			</View>
-		</View>
+			</BottomSheet>
+		</>
 	);
 }
 
@@ -171,9 +161,6 @@ function tagSelectorStyles(isDark: boolean) {
 	const border = isDark ? '#27272a' : '#e5e7eb';
 
 	return {
-		wrap: {
-			gap: 8,
-		},
 		chipRow: {
 			alignItems: 'center' as const,
 			flexDirection: 'row' as const,
@@ -185,22 +172,14 @@ function tagSelectorStyles(isDark: boolean) {
 			borderColor: border,
 			borderRadius: 999,
 			borderWidth: 1,
-			paddingHorizontal: 9,
-			paddingVertical: 5,
-		},
-		pickChipSelected: {
-			backgroundColor: isDark ? '#102a43' : '#e6f4ff',
-			borderColor: '#1677ff',
+			height: 34,
+			justifyContent: 'center' as const,
+			paddingHorizontal: 10,
 		},
 		pickChipText: {
-			color: muted,
+			color: text,
 			fontSize: 12,
 			fontWeight: '700' as const,
-		},
-		pickChipTextSelected: {
-			color: '#1677ff',
-			fontSize: 12,
-			fontWeight: '800' as const,
 		},
 		readChip: {
 			backgroundColor: isDark ? '#1f2937' : '#f6f7f9',
@@ -215,57 +194,67 @@ function tagSelectorStyles(isDark: boolean) {
 			fontSize: 11,
 			fontWeight: '700' as const,
 		},
-		inputRow: {
+		addButton: {
 			alignItems: 'center' as const,
-			flexDirection: 'row' as const,
-			gap: 8,
-		},
-		input: {
-			backgroundColor: surface,
-			borderColor: border,
-			borderRadius: 8,
+			backgroundColor: isDark ? '#102a43' : '#e6f4ff',
+			borderColor: '#91caff',
+			borderRadius: 999,
 			borderWidth: 1,
-			color: text,
-			flex: 1,
-			fontSize: 14,
-			paddingHorizontal: 10,
-			paddingVertical: 7,
+			flexDirection: 'row' as const,
+			gap: 6,
+			height: 34,
+			justifyContent: 'center' as const,
+			width: 34,
 		},
-		placeholder: {
+		addButtonWithLabel: {
+			paddingHorizontal: 11,
+			width: 'auto' as const,
+		},
+		addButtonDisabled: {
+			backgroundColor: isDark ? '#1f2937' : '#f4f4f5',
+			borderColor: border,
+		},
+		addButtonText: {
+			color: '#1677ff',
+			fontSize: 12,
+			fontWeight: '800' as const,
+		},
+		disabledIcon: {
 			color: muted,
 		},
-		smallButton: {
+		optionList: {
+			gap: 4,
+		},
+		optionRow: {
 			alignItems: 'center' as const,
-			backgroundColor: '#1677ff',
-			borderRadius: 8,
-			height: 36,
-			justifyContent: 'center' as const,
-			width: 36,
+			borderBottomColor: border,
+			borderBottomWidth: 1,
+			flexDirection: 'row' as const,
+			gap: 12,
+			justifyContent: 'space-between' as const,
+			minHeight: 46,
+			paddingVertical: 8,
 		},
-		smallButtonDisabled: {
-			backgroundColor: isDark ? '#334155' : '#d9d9d9',
+		optionTextWrap: {
+			flex: 1,
 		},
-		smallButtonText: {
-			color: '#fff',
-			fontSize: 20,
-			fontWeight: '800' as const,
-			lineHeight: 22,
+		optionText: {
+			color: text,
+			fontSize: 15,
+			fontWeight: '600' as const,
 		},
-		submitButton: {
+		checkbox: {
 			alignItems: 'center' as const,
-			backgroundColor: '#1677ff',
-			borderRadius: 8,
+			borderColor: border,
+			borderRadius: 6,
+			borderWidth: 1,
+			height: 24,
 			justifyContent: 'center' as const,
-			minHeight: 36,
-			paddingHorizontal: 12,
+			width: 24,
 		},
-		submitButtonDisabled: {
-			backgroundColor: isDark ? '#334155' : '#d9d9d9',
-		},
-		submitButtonText: {
-			color: '#fff',
-			fontSize: 13,
-			fontWeight: '800' as const,
+		checkboxSelected: {
+			backgroundColor: '#1677ff',
+			borderColor: '#1677ff',
 		},
 	};
 }

@@ -22,7 +22,7 @@ import {
 
 import { BottomSheet, FloatingActionButton } from '@/src/components/mobile-ui';
 import { MarkdownText } from '@/src/components/markdown-text';
-import { TagChips, TagSelector } from '@/src/components/tag-selector';
+import { formatTagNames, TagChips, TagSelector } from '@/src/components/tag-selector';
 import { useTRPC } from '@/src/api/trpc';
 import {
 	audioFileNameFromUri,
@@ -45,7 +45,6 @@ import {
 } from '@/src/features/log/model';
 import { pageStyles } from '@/src/theme/page-styles';
 
-type TagDraftKey = `entry-${number}` | `voice-${number}`;
 type LogFilter = 'entries' | 'pending' | 'recoveries';
 
 export function LogScreen() {
@@ -58,7 +57,6 @@ export function LogScreen() {
 	const recorderState = useAudioRecorderState(audioRecorder);
 	const [notes, setNotes] = useState('');
 	const [tagText, setTagText] = useState('');
-	const [tagDrafts, setTagDrafts] = useState<Partial<Record<TagDraftKey, string>>>({});
 	const [currentLocation, setCurrentLocation] = useState<DiaryLocationInput | null>(null);
 	const [locationMessage, setLocationMessage] = useState('Requesting location...');
 	const [notice, setNotice] = useState<string | null>(null);
@@ -155,19 +153,20 @@ export function LogScreen() {
 		},
 		onError: error => setNotice(error.message),
 	});
-	const addEntryTagsMutation = useMutation({
-		...trpc.diary.addEntryTags.mutationOptions(),
-		onSuccess: async () => {
+	const setEntryTagsMutation = useMutation({
+		...trpc.diary.setEntryTags.mutationOptions(),
+		onSuccess: async data => {
 			await invalidateDiary();
-			setNotice('Tags added.');
+			setSelectedEntry(previous => (previous?.id === data.id ? data : previous));
+			setNotice('Tags updated.');
 		},
 		onError: error => setNotice(error.message),
 	});
-	const addVoiceMemoTagsMutation = useMutation({
-		...trpc.diary.addVoiceMemoTags.mutationOptions(),
+	const setVoiceMemoTagsMutation = useMutation({
+		...trpc.diary.setVoiceMemoTags.mutationOptions(),
 		onSuccess: async () => {
 			await invalidateDiary();
-			setNotice('Tags added.');
+			setNotice('Tags updated.');
 		},
 		onError: error => setNotice(error.message),
 	});
@@ -318,26 +317,6 @@ export function LogScreen() {
 		]);
 	}
 
-	function addTagsToEntry(entryId: number) {
-		const key = `entry-${entryId}` as const;
-		const names = parseTagText(tagDrafts[key] ?? '');
-		if (names.length === 0) return;
-		addEntryTagsMutation.mutate({ entryId, tagNames: names });
-		setTagDrafts(previous => ({ ...previous, [key]: '' }));
-	}
-
-	function addTagsToVoiceMemo(voiceMemoId: number) {
-		const key = `voice-${voiceMemoId}` as const;
-		const names = parseTagText(tagDrafts[key] ?? '');
-		if (names.length === 0) return;
-		addVoiceMemoTagsMutation.mutate({ voiceMemoId, tagNames: names });
-		setTagDrafts(previous => ({ ...previous, [key]: '' }));
-	}
-
-	function setTagDraft(key: TagDraftKey, value: string) {
-		setTagDrafts(previous => ({ ...previous, [key]: value }));
-	}
-
 	if (entriesQuery.isLoading || pendingVoiceMemosQuery.isLoading || tagsQuery.isLoading) {
 		return (
 			<View style={styles.loadingScreen}>
@@ -393,12 +372,15 @@ export function LogScreen() {
 								key={memo.id}
 								memo={memo}
 								availableTags={availableTags}
-								tagDraft={tagDrafts[`voice-${memo.id}`] ?? ''}
-								isAddingTags={addVoiceMemoTagsMutation.isPending}
+								isSettingTags={setVoiceMemoTagsMutation.isPending}
 								isProcessing={processVoiceMemoMutation.isPending}
 								isDeleting={deleteVoiceMemoMutation.isPending}
-								onSetTagDraft={value => setTagDraft(`voice-${memo.id}`, value)}
-								onAddTags={() => addTagsToVoiceMemo(memo.id)}
+								onSetTags={value =>
+									setVoiceMemoTagsMutation.mutate({
+										voiceMemoId: memo.id,
+										tagNames: parseTagText(value),
+									})
+								}
 								onReprocess={() => processVoiceMemoMutation.mutate({ voiceMemoId: memo.id })}
 								onDelete={() => deleteVoiceMemo(memo)}
 								styles={styles}
@@ -501,16 +483,14 @@ export function LogScreen() {
 				entry={selectedEntry}
 				visible={selectedEntry !== null}
 				availableTags={availableTags}
-				tagDraft={selectedEntry ? (tagDrafts[`entry-${selectedEntry.id}`] ?? '') : ''}
-				isAddingTags={addEntryTagsMutation.isPending}
+				isSettingTags={setEntryTagsMutation.isPending}
 				onClose={() => setSelectedEntry(null)}
-				onSetTagDraft={value => {
+				onSetTags={value => {
 					if (!selectedEntry) return;
-					setTagDraft(`entry-${selectedEntry.id}`, value);
-				}}
-				onAddTags={() => {
-					if (!selectedEntry) return;
-					addTagsToEntry(selectedEntry.id);
+					setEntryTagsMutation.mutate({
+						entryId: selectedEntry.id,
+						tagNames: parseTagText(value),
+					});
 				}}
 				onDelete={entry => deleteEntry(entry)}
 				styles={styles}
@@ -587,24 +567,20 @@ function EntryCard({
 function PendingVoiceMemoCard({
 	memo,
 	availableTags,
-	tagDraft,
-	isAddingTags,
+	isSettingTags,
 	isProcessing,
 	isDeleting,
-	onSetTagDraft,
-	onAddTags,
+	onSetTags,
 	onReprocess,
 	onDelete,
 	styles,
 }: {
 	memo: DiaryPendingVoiceMemo;
 	availableTags: TagRecord[];
-	tagDraft: string;
-	isAddingTags: boolean;
+	isSettingTags: boolean;
 	isProcessing: boolean;
 	isDeleting: boolean;
-	onSetTagDraft: (value: string) => void;
-	onAddTags: () => void;
+	onSetTags: (value: string) => void;
 	onReprocess: () => void;
 	onDelete: () => void;
 	styles: ReturnType<typeof logStyles>;
@@ -634,13 +610,11 @@ function PendingVoiceMemoCard({
 						{memo.transcriptionError}
 					</Text>
 				) : null}
-				<TagList tags={memo.tags} />
-				<TagAddControl
-					value={tagDraft}
+				<TagSelector
+					value={formatTagNames(memo.tags.map(tag => tag.name))}
 					availableTags={availableTags}
-					loading={isAddingTags}
-					onChange={onSetTagDraft}
-					onAdd={onAddTags}
+					onChange={onSetTags}
+					disabled={isSettingTags}
 				/>
 				<View style={styles.actionRow}>
 					<Button size='small' onPress={onReprocess} loading={isProcessing}>
@@ -718,51 +692,22 @@ function TagList({ tags }: { tags: Array<{ id: number; name: string; color: stri
 	return <TagChips tags={tags} />;
 }
 
-function TagAddControl({
-	value,
-	availableTags,
-	loading,
-	onChange,
-	onAdd,
-}: {
-	value: string;
-	availableTags: TagRecord[];
-	loading: boolean;
-	onChange: (value: string) => void;
-	onAdd: () => void;
-}) {
-	return (
-		<TagSelector
-			value={value}
-			availableTags={availableTags}
-			onChange={onChange}
-			onSubmit={onAdd}
-			submitLabel='Add'
-			loading={loading}
-		/>
-	);
-}
-
 function EntryDetailSheet({
 	entry,
 	visible,
 	availableTags,
-	tagDraft,
-	isAddingTags,
+	isSettingTags,
 	onClose,
-	onSetTagDraft,
-	onAddTags,
+	onSetTags,
 	onDelete,
 	styles,
 }: {
 	entry: DiaryEntry | null;
 	visible: boolean;
 	availableTags: TagRecord[];
-	tagDraft: string;
-	isAddingTags: boolean;
+	isSettingTags: boolean;
 	onClose: () => void;
-	onSetTagDraft: (value: string) => void;
-	onAddTags: () => void;
+	onSetTags: (value: string) => void;
 	onDelete: (entry: DiaryEntry) => void;
 	styles: ReturnType<typeof logStyles>;
 }) {
@@ -783,13 +728,11 @@ function EntryDetailSheet({
 					>
 						<Text style={styles.linkText}>{formatLocationLabel(entry.location)}</Text>
 					</Pressable>
-					<TagList tags={entry.tags} />
-					<TagAddControl
-						value={tagDraft}
+					<TagSelector
+						value={formatTagNames(entry.tags.map(tag => tag.name))}
 						availableTags={availableTags}
-						loading={isAddingTags}
-						onChange={onSetTagDraft}
-						onAdd={onAddTags}
+						onChange={onSetTags}
+						disabled={isSettingTags}
 					/>
 					{entry.summary ? (
 						<View style={styles.stack}>
