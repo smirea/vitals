@@ -1,5 +1,5 @@
-import { PendingRoute } from '@/src/components/pending-route';
+import { TagsScreen as TagsFeatureScreen } from '@/src/features/tags/tags-screen';
 
 export default function TagsScreen() {
-	return <PendingRoute title='Tags' />;
+	return <TagsFeatureScreen />;
 }
