@@ -1,0 +1,58 @@
+{
+	"expo": {
+		"name": "Vitals",
+		"slug": "vitals-mobile",
+		"version": "1.0.0",
+		"orientation": "portrait",
+		"icon": "./assets/images/icon.png",
+		"scheme": "vitals",
+		"userInterfaceStyle": "automatic",
+		"newArchEnabled": true,
+		"splash": {
+			"image": "./assets/images/splash-icon.png",
+			"resizeMode": "contain",
+			"backgroundColor": "#ffffff"
+		},
+		"ios": {
+			"supportsTablet": true
+		},
+		"android": {
+			"adaptiveIcon": {
+				"foregroundImage": "./assets/images/adaptive-icon.png",
+				"backgroundColor": "#ffffff"
+			},
+			"edgeToEdgeEnabled": true,
+			"predictiveBackGestureEnabled": false
+		},
+		"web": {
+			"bundler": "metro",
+			"output": "static",
+			"favicon": "./assets/images/favicon.png"
+		},
+		"plugins": [
+			"expo-router",
+			[
+				"expo-audio",
+				{
+					"microphonePermission": "Allow Vitals to record voice memos."
+				}
+			],
+			[
+				"expo-location",
+				{
+					"locationWhenInUsePermission": "Allow Vitals to attach your current location to diary entries."
+				}
+			],
+			[
+				"expo-image-picker",
+				{
+					"cameraPermission": "Allow Vitals to take pill label photos.",
+					"photosPermission": "Allow Vitals to add pill label photos."
+				}
+			]
+		],
+		"experiments": {
+			"typedRoutes": true
+		}
+	}
+}

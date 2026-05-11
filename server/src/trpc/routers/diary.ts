@@ -8,6 +8,8 @@ import {
 	diaryFinishVoiceMemoDraftInputSchema,
 	diaryProcessVoiceMemoInputSchema,
 	diaryProcessVoiceMemoRecoveryInputSchema,
+	diarySetEntryTagsInputSchema,
+	diarySetVoiceMemoTagsInputSchema,
 	diaryStartVoiceMemoDraftInputSchema,
 	diaryUploadVoiceMemoInputSchema,
 	addTagsToDiaryEntry,
@@ -24,6 +26,8 @@ import {
 	processDiaryVoiceMemoRecovery,
 	processSavedDiaryVoiceMemo,
 	saveDiaryVoiceMemo,
+	setDiaryEntryTags,
+	setDiaryVoiceMemoTags,
 	startDiaryVoiceMemoDraft,
 	uploadDiaryVoiceMemo,
 } from 'server/db/diary.ts';
@@ -70,6 +74,12 @@ export const diaryRouter = createRouter({
 	addVoiceMemoTags: publicProcedure
 		.input(diaryAddVoiceMemoTagsInputSchema)
 		.mutation(({ ctx, input }) => addTagsToDiaryVoiceMemo(ctx.db, input)),
+	setEntryTags: publicProcedure
+		.input(diarySetEntryTagsInputSchema)
+		.mutation(({ ctx, input }) => setDiaryEntryTags(ctx.db, input)),
+	setVoiceMemoTags: publicProcedure
+		.input(diarySetVoiceMemoTagsInputSchema)
+		.mutation(({ ctx, input }) => setDiaryVoiceMemoTags(ctx.db, input)),
 	uploadVoiceMemo: publicProcedure
 		.input(diaryUploadVoiceMemoInputSchema)
 		.mutation(({ ctx, input }) => uploadDiaryVoiceMemo(ctx.db, input)),
