@@ -25,6 +25,7 @@ export default defineConfig(async ({ command, mode }) => {
 								target: env.VITE_API_URL,
 								changeOrigin: true,
 								secure: false,
+								ws: true,
 								rewrite: (path: string) => path.replace(/^\/api/, ''),
 							},
 						},

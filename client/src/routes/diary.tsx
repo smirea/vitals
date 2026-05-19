@@ -87,6 +87,7 @@ function DiaryRouteComponent() {
 	const [tagNames, setTagNames] = useState<string[]>([]);
 	const [currentLocation, setCurrentLocation] = useState<LocationInput | null>(null);
 	const [locationError, setLocationError] = useState<string | null>(null);
+	const [isRequestingLocation, setIsRequestingLocation] = useState(false);
 	const [isRecording, setIsRecording] = useState(false);
 	const [isStoppingRecording, setIsStoppingRecording] = useState(false);
 	const [isParsingVoiceMemo, setIsParsingVoiceMemo] = useState(false);
@@ -279,7 +280,10 @@ function DiaryRouteComponent() {
 			error => {
 				const messageText = formatGeolocationError(error);
 				setLocationError(messageText);
-				showError(error);
+				setErrorDetails({
+					message: messageText,
+					details: messageText,
+				});
 			},
 			{
 				enableHighAccuracy: true,
@@ -337,6 +341,36 @@ function DiaryRouteComponent() {
 		return currentLocation;
 	}
 
+	function requestCurrentLocation() {
+		if (!navigator.geolocation) {
+			setLocationError('Geolocation is not available in this browser.');
+			return;
+		}
+
+		setIsRequestingLocation(true);
+		navigator.geolocation.getCurrentPosition(
+			position => {
+				setCurrentLocation(locationFromPosition(position));
+				setLocationError(null);
+				setIsRequestingLocation(false);
+			},
+			error => {
+				const messageText = formatGeolocationError(error);
+				setLocationError(messageText);
+				setErrorDetails({
+					message: messageText,
+					details: messageText,
+				});
+				setIsRequestingLocation(false);
+			},
+			{
+				enableHighAccuracy: true,
+				maximumAge: 60_000,
+				timeout: 15_000,
+			},
+		);
+	}
+
 	async function handleAddEntry() {
 		try {
 			await createEntryMutation.mutateAsync({
@@ -374,8 +408,7 @@ function DiaryRouteComponent() {
 			interimTranscriptRef.current = '';
 			const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 			mediaStreamRef.current = stream;
-			await openLiveTranscription();
-			await startPcmStreaming(stream);
+			await startLiveTranscriptionIfAvailable(stream);
 			const mimeType = getPreferredRecordingMimeType();
 			const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
 			const resolvedMimeType = recorder.mimeType || mimeType || 'audio/webm';
@@ -425,7 +458,9 @@ function DiaryRouteComponent() {
 
 		setIsStoppingRecording(true);
 		stopPcmStreaming();
-		sttWebSocketRef.current?.send(JSON.stringify({ type: 'audio.done' }));
+		if (sttWebSocketRef.current?.readyState === WebSocket.OPEN) {
+			sttWebSocketRef.current.send(JSON.stringify({ type: 'audio.done' }));
+		}
 		recorder.stop();
 	}
 
@@ -464,7 +499,9 @@ function DiaryRouteComponent() {
 			});
 			savedVoiceMemoId = savedVoiceMemo.voiceMemoId;
 
-			const transcript = await waitForStreamingTranscript();
+			const transcript = sttWebSocketRef.current
+				? await waitForStreamingTranscript().catch(() => undefined)
+				: undefined;
 
 			await processVoiceMemoMutation.mutateAsync({
 				voiceMemoId: savedVoiceMemo.voiceMemoId,
@@ -496,8 +533,20 @@ function DiaryRouteComponent() {
 		}
 	}
 
+	async function startLiveTranscriptionIfAvailable(stream: MediaStream) {
+		try {
+			await openLiveTranscription();
+			await startPcmStreaming(stream);
+		} catch (error) {
+			console.warn(error);
+			stopLiveTranscription();
+			transcriptDoneRef.current = null;
+		}
+	}
+
 	async function openLiveTranscription() {
-		const socket = new WebSocket(getDiarySttWebSocketUrl());
+		const socketUrl = getDiarySttWebSocketUrl();
+		const socket = new WebSocket(socketUrl);
 		sttWebSocketRef.current = socket;
 		transcriptDoneRef.current = createStreamingTranscriptDeferred();
 		void transcriptDoneRef.current.promise.catch(() => undefined);
@@ -509,20 +558,20 @@ function DiaryRouteComponent() {
 					: new TextDecoder().decode(event.data as ArrayBuffer);
 			handleStreamingTranscriptEvent(JSON.parse(data) as StreamingTranscriptEvent);
 		};
-		socket.onerror = () => {
-			rejectStreamingTranscript(new Error('Live transcription connection failed.'));
+		socket.onerror = event => {
+			rejectStreamingTranscript(createLiveTranscriptionConnectionError(socket, socketUrl, event));
 		};
-		socket.onclose = () => {
+		socket.onclose = event => {
 			const deferred = transcriptDoneRef.current;
 			if (deferred && !deferred.isSettled) {
-				rejectStreamingTranscript(new Error('Live transcription connection closed.'));
+				rejectStreamingTranscript(createLiveTranscriptionConnectionError(socket, socketUrl, event));
 			}
 		};
 
 		await new Promise<void>((resolve, reject) => {
 			socket.onopen = () => resolve();
-			socket.onerror = () => {
-				const error = new Error('Live transcription connection failed.');
+			socket.onerror = event => {
+				const error = createLiveTranscriptionConnectionError(socket, socketUrl, event);
 				rejectStreamingTranscript(error);
 				reject(error);
 			};
@@ -733,6 +782,19 @@ function DiaryRouteComponent() {
 					/>
 				) : null}
 
+				{locationError && !currentLocation ? (
+					<Alert
+						type='warning'
+						showIcon
+						message={locationError}
+						action={
+							<Button size='small' loading={isRequestingLocation} onClick={requestCurrentLocation}>
+								Retry location
+							</Button>
+						}
+					/>
+				) : null}
+
 				<Card>
 					<Space direction='vertical' size={12} style={{ width: '100%' }}>
 						<div className='diary-composer-note'>
@@ -774,7 +836,7 @@ function DiaryRouteComponent() {
 								icon={isRecording ? <StopOutlined /> : <AudioOutlined />}
 								danger={isRecording}
 								loading={isStoppingRecording || isParsingVoiceMemo}
-								disabled={!currentLocation || createEntryMutation.isPending}
+								disabled={!currentLocation || createEntryMutation.isPending || isRequestingLocation}
 								onClick={() => {
 									void handleRecordButton();
 								}}
@@ -1338,9 +1400,48 @@ function createStreamingTranscriptDeferred(): StreamingTranscriptDeferred {
 }
 
 function getDiarySttWebSocketUrl() {
-	const url = new URL('/diary/stt/live', import.meta.env.VITE_API_URL.trim());
-	url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+	const apiUrl = new URL(import.meta.env.VITE_API_URL.trim());
+	const host = apiUrl.hostname.endsWith('.localhost') ? 'localhost' : apiUrl.hostname;
+	const port = apiUrl.port || (host === 'localhost' ? '6001' : '');
+	const url = new URL('/diary/stt/live', `${apiUrl.protocol}//${host}${port ? `:${port}` : ''}`);
+	url.protocol = 'ws:';
 	return url.toString();
+}
+
+function createLiveTranscriptionConnectionError(
+	socket: WebSocket,
+	socketUrl: string,
+	event: Event | CloseEvent,
+) {
+	const details = [
+		`url=${socketUrl}`,
+		`readyState=${formatWebSocketReadyState(socket.readyState)}`,
+		`page=${window.location.href}`,
+		`secureContext=${String(window.isSecureContext)}`,
+		`online=${String(navigator.onLine)}`,
+		`eventType=${event.type}`,
+		event instanceof CloseEvent ? `closeCode=${event.code}` : null,
+		event instanceof CloseEvent && event.reason ? `closeReason=${event.reason}` : null,
+	]
+		.filter(Boolean)
+		.join('\n');
+
+	return new Error(`Live transcription connection failed.\n${details}`);
+}
+
+function formatWebSocketReadyState(readyState: number) {
+	switch (readyState) {
+		case WebSocket.CONNECTING:
+			return 'CONNECTING';
+		case WebSocket.OPEN:
+			return 'OPEN';
+		case WebSocket.CLOSING:
+			return 'CLOSING';
+		case WebSocket.CLOSED:
+			return 'CLOSED';
+		default:
+			return String(readyState);
+	}
 }
 
 function getAudioContextConstructor() {
