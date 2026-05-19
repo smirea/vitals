@@ -1,7 +1,7 @@
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from 'server/trpc/index.ts';
 import { API_BASE_URL, useTRPC } from '@/src/api/trpc';
-import { ActivityIndicator, Modal, Steps, Tag } from '@ant-design/react-native';
+import { ActivityIndicator, Modal, Steps, Tag, Toast } from '@ant-design/react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -883,6 +883,7 @@ export default function LogScreen() {
 			setNotes('');
 			setTagText('');
 			setComposerOpen(false);
+			Toast.success('Video processed.', 2, undefined, false);
 		} catch (error) {
 			if (savedDraft) {
 				await updateLocalVideoDraft(savedDraft.id, {
@@ -1050,6 +1051,7 @@ export default function LogScreen() {
 		void uploadLocalVideoDraft(draft)
 			.then(() => {
 				setComposerOpen(false);
+				Toast.success('Video processed.', 2, undefined, false);
 			})
 			.catch(error => {
 				setNotice(error instanceof Error ? error.message : String(error));
