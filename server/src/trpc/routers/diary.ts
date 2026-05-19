@@ -9,8 +9,10 @@ import {
 	diaryFinishVoiceMemoDraftInputSchema,
 	diaryProcessVoiceMemoInputSchema,
 	diaryProcessVoiceMemoRecoveryInputSchema,
+	diaryResetVoiceMemoDraftInputSchema,
 	diarySetEntryTagsInputSchema,
 	diarySetVoiceMemoTagsInputSchema,
+	diarySetVoiceMemoDraftVideoInputSchema,
 	diaryStartVoiceMemoDraftInputSchema,
 	diaryUploadVoiceMemoInputSchema,
 	addTagsToDiaryEntry,
@@ -28,8 +30,10 @@ import {
 	listPendingDiaryVoiceMemos,
 	processDiaryVoiceMemoRecovery,
 	processSavedDiaryVoiceMemo,
+	resetDiaryVoiceMemoDraft,
 	saveDiaryVoiceMemo,
 	setDiaryEntryTags,
+	setDiaryVoiceMemoDraftVideo,
 	setDiaryVoiceMemoTags,
 	startDiaryVoiceMemoDraft,
 	uploadDiaryVoiceMemo,
@@ -56,6 +60,12 @@ export const diaryRouter = createRouter({
 	appendVoiceMemoDraft: publicProcedure
 		.input(diaryAppendVoiceMemoDraftInputSchema)
 		.mutation(({ ctx, input }) => appendDiaryVoiceMemoDraft(ctx.db, input)),
+	setVoiceMemoDraftVideo: publicProcedure
+		.input(diarySetVoiceMemoDraftVideoInputSchema)
+		.mutation(({ ctx, input }) => setDiaryVoiceMemoDraftVideo(ctx.db, input)),
+	resetVoiceMemoDraft: publicProcedure
+		.input(diaryResetVoiceMemoDraftInputSchema)
+		.mutation(({ ctx, input }) => resetDiaryVoiceMemoDraft(ctx.db, input)),
 	finishVoiceMemoDraft: publicProcedure
 		.input(diaryFinishVoiceMemoDraftInputSchema)
 		.mutation(({ ctx, input }) => finishDiaryVoiceMemoDraft(ctx.db, input)),

@@ -104,13 +104,37 @@ export const diaryUploadVoiceMemoInputSchema = z
 		}
 	});
 
-export const diaryStartVoiceMemoDraftInputSchema = diaryUploadVoiceMemoInputSchema.omit({
-	dataBase64: true,
-	durationSeconds: true,
+export const diaryStartVoiceMemoDraftInputSchema = z
+	.object({
+		mediaKind: z.enum(['audio', 'video']).optional().default('audio'),
+		notes: z.string().trim().optional().default(''),
+		transcript: z.string().trim().optional().default(''),
+		fileName: z.string().trim().min(1),
+		mimeType: z.string().trim().min(1),
+		videoFileName: z.string().trim().min(1).optional(),
+		videoMimeType: z.string().trim().min(1).optional(),
+		tagNames: z.array(z.string().trim().min(1)).max(50).default([]),
+		location: diaryLocationInputSchema,
+	})
+	.refine(input => input.mediaKind === 'video' || (!input.videoFileName && !input.videoMimeType), {
+		message: 'Video metadata is only valid for video diary memos.',
+		path: ['videoFileName'],
+	});
+
+export const diarySetVoiceMemoDraftVideoInputSchema = z.object({
+	recoveryId: z.string().trim().min(1),
+	videoFileName: z.string().trim().min(1),
+	videoMimeType: z.string().trim().min(1),
+});
+
+export const diaryResetVoiceMemoDraftInputSchema = z.object({
+	recoveryId: z.string().trim().min(1),
 });
 
 export const diaryAppendVoiceMemoDraftInputSchema = z.object({
 	recoveryId: z.string().trim().min(1),
+	mediaKind: z.enum(['audio', 'video']).optional().default('audio'),
+	encoding: z.enum(['file', 'pcm_s16le']).optional().default('file'),
 	dataBase64: z.string().trim().min(1),
 });
 
@@ -205,6 +229,11 @@ type DiaryVoiceMemoRecoveryRecord = {
 		details?: Record<string, unknown>;
 	}>;
 };
+
+const LIVE_AUDIO_SAMPLE_RATE = 16_000;
+const LIVE_AUDIO_CHANNELS = 1;
+const LIVE_AUDIO_BIT_DEPTH = 16;
+const PCM_WAV_HEADER_BYTES = 44;
 
 function normalizeOptionalText(value: string | null | undefined) {
 	const trimmed = value?.trim() ?? '';
@@ -312,8 +341,15 @@ function createDiaryVoiceMemoDraftRecovery(
 ) {
 	const createdAt = new Date().toISOString();
 	const paths = getDiaryRecoveryPaths(createdAt, input.fileName.trim());
+	const videoPath =
+		input.mediaKind === 'video' && input.videoFileName
+			? getDiaryRecoveryVideoPath(createdAt, input.videoFileName.trim())
+			: null;
 	fs.mkdirSync(paths.dirPath, { recursive: true });
 	fs.writeFileSync(paths.audioPath, '');
+	if (videoPath) {
+		fs.writeFileSync(videoPath, '');
+	}
 
 	const record: DiaryVoiceMemoRecoveryRecord = {
 		id: paths.id,
@@ -323,12 +359,12 @@ function createDiaryVoiceMemoDraftRecovery(
 		mediaKind: input.mediaKind,
 		audioPath: paths.audioPath,
 		audioDeletedAt: null,
-		videoPath: null,
+		videoPath,
 		videoDeletedAt: null,
 		fileName: input.fileName.trim(),
 		mimeType: input.mimeType.trim(),
-		videoFileName: null,
-		videoMimeType: null,
+		videoFileName: input.videoFileName?.trim() ?? null,
+		videoMimeType: input.videoMimeType?.trim() ?? null,
 		durationSeconds: null,
 		audioBytes: 0,
 		videoBytes: 0,
@@ -346,6 +382,7 @@ function createDiaryVoiceMemoDraftRecovery(
 				status: 'recording',
 				details: {
 					audioPath: paths.audioPath,
+					videoPath,
 				},
 			},
 		],
@@ -424,6 +461,50 @@ function deleteDiaryRecoveryVideo(
 			deletedVideoPath: videoPath,
 		},
 	);
+}
+
+function createPcm16WavHeader(dataBytes: number) {
+	const header = Buffer.alloc(PCM_WAV_HEADER_BYTES);
+	const byteRate = LIVE_AUDIO_SAMPLE_RATE * LIVE_AUDIO_CHANNELS * (LIVE_AUDIO_BIT_DEPTH / 8);
+	const blockAlign = LIVE_AUDIO_CHANNELS * (LIVE_AUDIO_BIT_DEPTH / 8);
+	header.write('RIFF', 0);
+	header.writeUInt32LE(36 + dataBytes, 4);
+	header.write('WAVE', 8);
+	header.write('fmt ', 12);
+	header.writeUInt32LE(16, 16);
+	header.writeUInt16LE(1, 20);
+	header.writeUInt16LE(LIVE_AUDIO_CHANNELS, 22);
+	header.writeUInt32LE(LIVE_AUDIO_SAMPLE_RATE, 24);
+	header.writeUInt32LE(byteRate, 28);
+	header.writeUInt16LE(blockAlign, 32);
+	header.writeUInt16LE(LIVE_AUDIO_BIT_DEPTH, 34);
+	header.write('data', 36);
+	header.writeUInt32LE(dataBytes, 40);
+	return header;
+}
+
+function ensureLivePcmWavFile(audioPath: string) {
+	if (!fs.existsSync(audioPath) || fs.statSync(audioPath).size === 0) {
+		fs.writeFileSync(audioPath, createPcm16WavHeader(0));
+	}
+	const size = fs.statSync(audioPath).size;
+	if (size < PCM_WAV_HEADER_BYTES) {
+		throw new Error(`Live audio file is smaller than a WAV header: ${audioPath}`);
+	}
+}
+
+function patchLivePcmWavHeader(audioPath: string) {
+	const size = fs.statSync(audioPath).size;
+	if (size < PCM_WAV_HEADER_BYTES) {
+		throw new Error(`Live audio file is smaller than a WAV header: ${audioPath}`);
+	}
+	const header = createPcm16WavHeader(size - PCM_WAV_HEADER_BYTES);
+	const fd = fs.openSync(audioPath, 'r+');
+	try {
+		fs.writeSync(fd, header, 0, header.byteLength, 0);
+	} finally {
+		fs.closeSync(fd);
+	}
 }
 
 function findDiaryRecoveryByVoiceMemoId(voiceMemoId: number) {
@@ -937,6 +1018,69 @@ function replaceEntryTags(db: DiaryWriteDb, entryId: number, tagNames: string[])
 	}
 }
 
+async function insertDiaryVoiceMemoFromMedia(
+	db: VitalsDatabase,
+	input: {
+		createdAt: string;
+		notes: string;
+		tagNames: string[];
+		location: z.infer<typeof diaryLocationInputSchema>;
+		mediaKind: DiaryVoiceMemoRow['mediaKind'];
+		fileName: string;
+		mimeType: string;
+		audioData: Buffer;
+		videoFileName: string | null;
+		videoMimeType: string | null;
+		videoData: Buffer | null;
+		durationSeconds: number | null;
+		transcript: string | null;
+	},
+) {
+	const locationId = await resolveLocation(db, input.location);
+	return db.transaction(tx => {
+		const insertedEntry = tx
+			.insert(diaryEntries)
+			.values({
+				createdAt: input.createdAt,
+				notes: input.notes,
+				locationId,
+			})
+			.returning({
+				id: diaryEntries.id,
+			})
+			.get();
+
+		insertEntryTags(tx, insertedEntry.id, input.tagNames);
+
+		const insertedVoiceMemo = tx
+			.insert(diaryVoiceMemos)
+			.values({
+				entryId: insertedEntry.id,
+				createdAt: input.createdAt,
+				mediaKind: input.mediaKind,
+				fileName: input.fileName,
+				mimeType: input.mimeType,
+				audioData: input.audioData,
+				videoFileName: input.videoFileName,
+				videoMimeType: input.videoMimeType,
+				videoData: input.videoData,
+				durationSeconds: input.durationSeconds,
+				transcriptionStatus: 'uploaded',
+				transcript: input.transcript,
+				transcriptLanguage: input.transcript ? 'English' : null,
+			})
+			.returning({
+				id: diaryVoiceMemos.id,
+			})
+			.get();
+
+		return {
+			entryId: insertedEntry.id,
+			voiceMemoId: insertedVoiceMemo.id,
+		};
+	});
+}
+
 async function summarizeDiaryEntry(input: { notes: string; transcript?: string | null }) {
 	const sections = [
 		input.notes.trim() ? `Notes:\n${input.notes.trim()}` : null,
@@ -1105,48 +1249,20 @@ export async function saveDiaryVoiceMemo(
 			recoveryRecord,
 			'saving_to_database',
 		);
-		const locationId = await resolveLocation(db, input.location);
-		const { entryId, voiceMemoId } = db.transaction(tx => {
-			const insertedEntry = tx
-				.insert(diaryEntries)
-				.values({
-					createdAt: new Date().toISOString(),
-					notes: input.notes.trim(),
-					locationId,
-				})
-				.returning({
-					id: diaryEntries.id,
-				})
-				.get();
-
-			insertEntryTags(tx, insertedEntry.id, input.tagNames);
-
-			const insertedVoiceMemo = tx
-				.insert(diaryVoiceMemos)
-				.values({
-					entryId: insertedEntry.id,
-					createdAt: new Date().toISOString(),
-					mediaKind: input.mediaKind,
-					fileName: input.fileName.trim(),
-					mimeType: input.mimeType.trim(),
-					audioData,
-					videoFileName: input.videoFileName?.trim() ?? null,
-					videoMimeType: input.videoMimeType?.trim() ?? null,
-					videoData,
-					durationSeconds: nullableNumber(input.durationSeconds),
-					transcriptionStatus: 'uploaded',
-					transcript: normalizeOptionalText(input.transcript),
-					transcriptLanguage: normalizeOptionalText(input.transcript) ? 'English' : null,
-				})
-				.returning({
-					id: diaryVoiceMemos.id,
-				})
-				.get();
-
-			return {
-				entryId: insertedEntry.id,
-				voiceMemoId: insertedVoiceMemo.id,
-			};
+		const { entryId, voiceMemoId } = await insertDiaryVoiceMemoFromMedia(db, {
+			createdAt: new Date().toISOString(),
+			notes: input.notes.trim(),
+			tagNames: input.tagNames,
+			location: input.location,
+			mediaKind: input.mediaKind,
+			fileName: input.fileName.trim(),
+			mimeType: input.mimeType.trim(),
+			audioData,
+			videoFileName: input.videoFileName?.trim() ?? null,
+			videoMimeType: input.videoMimeType?.trim() ?? null,
+			videoData,
+			durationSeconds: nullableNumber(input.durationSeconds),
+			transcript: normalizeOptionalText(input.transcript),
 		});
 
 		recoveryRecord = updateDiaryVoiceMemoRecovery(
@@ -1209,35 +1325,130 @@ export function startDiaryVoiceMemoDraft(
 	};
 }
 
+export function setDiaryVoiceMemoDraftVideo(
+	_db: VitalsDatabase,
+	input: z.infer<typeof diarySetVoiceMemoDraftVideoInputSchema>,
+) {
+	const recovery = findDiaryRecoveryById(input.recoveryId);
+	if (recovery.record.mediaKind !== 'video') {
+		throw new Error(`Diary recovery ${input.recoveryId} is not a video memo.`);
+	}
+	if (recovery.record.videoPath) {
+		throw new Error(`Diary recovery ${input.recoveryId} already has a video path.`);
+	}
+
+	const videoPath = getDiaryRecoveryVideoPath(
+		recovery.record.createdAt,
+		input.videoFileName.trim(),
+	);
+	fs.writeFileSync(videoPath, '');
+	const record = updateDiaryVoiceMemoRecovery(
+		recovery.metadataPath,
+		recovery.record,
+		'recording',
+		{
+			videoPath,
+			videoFileName: input.videoFileName.trim(),
+			videoMimeType: input.videoMimeType.trim(),
+			videoBytes: 0,
+		},
+		{
+			videoPath,
+		},
+	);
+
+	return {
+		recoveryId: record.id,
+		videoPath: record.videoPath,
+	};
+}
+
+export function resetDiaryVoiceMemoDraft(
+	_db: VitalsDatabase,
+	input: z.infer<typeof diaryResetVoiceMemoDraftInputSchema>,
+) {
+	const recovery = findDiaryRecoveryById(input.recoveryId);
+	if (recovery.record.voiceMemoId) {
+		throw new Error(`Diary recovery ${input.recoveryId} already belongs to a saved memo.`);
+	}
+	if (!recovery.record.audioPath) {
+		throw new Error(`Diary recovery ${input.recoveryId} no longer has an audio path.`);
+	}
+
+	fs.writeFileSync(recovery.record.audioPath, '');
+	if (recovery.record.videoPath && fs.existsSync(recovery.record.videoPath)) {
+		fs.unlinkSync(recovery.record.videoPath);
+	}
+
+	const record = updateDiaryVoiceMemoRecovery(
+		recovery.metadataPath,
+		recovery.record,
+		'recording',
+		{
+			audioBytes: 0,
+			videoBytes: 0,
+			videoPath: null,
+			videoFileName: null,
+			videoMimeType: null,
+			error: null,
+		},
+		{
+			reset: true,
+		},
+	);
+
+	return {
+		recoveryId: record.id,
+		audioPath: record.audioPath,
+	};
+}
+
 export function appendDiaryVoiceMemoDraft(
 	_db: VitalsDatabase,
 	input: z.infer<typeof diaryAppendVoiceMemoDraftInputSchema>,
 ) {
 	const recovery = findDiaryRecoveryById(input.recoveryId);
-	const audioPath = recovery.record.audioPath;
-	if (!audioPath) {
-		throw new Error(`Diary recovery ${input.recoveryId} no longer has an audio path.`);
+	const chunk = Buffer.from(input.dataBase64, 'base64');
+	const targetPath =
+		input.mediaKind === 'video' ? recovery.record.videoPath : recovery.record.audioPath;
+	if (!targetPath) {
+		throw new Error(`Diary recovery ${input.recoveryId} no longer has a ${input.mediaKind} path.`);
 	}
 
-	const chunk = Buffer.from(input.dataBase64, 'base64');
-	fs.appendFileSync(audioPath, chunk);
-	const audioBytes = recovery.record.audioBytes + chunk.byteLength;
+	if (input.encoding === 'pcm_s16le') {
+		if (input.mediaKind !== 'audio') {
+			throw new Error('PCM stream chunks are only valid for diary audio.');
+		}
+		ensureLivePcmWavFile(targetPath);
+	}
+	fs.appendFileSync(targetPath, chunk);
+	if (input.encoding === 'pcm_s16le') {
+		patchLivePcmWavHeader(targetPath);
+	}
+	const targetBytes = fs.statSync(targetPath).size;
+	const audioBytes = input.mediaKind === 'audio' ? targetBytes : recovery.record.audioBytes;
+	const videoBytes = input.mediaKind === 'video' ? targetBytes : recovery.record.videoBytes;
 	const record = updateDiaryVoiceMemoRecovery(
 		recovery.metadataPath,
 		recovery.record,
 		'recording',
 		{
 			audioBytes,
+			videoBytes,
 		},
 		{
+			mediaKind: input.mediaKind,
+			encoding: input.encoding,
 			chunkBytes: chunk.byteLength,
 			audioBytes,
+			videoBytes,
 		},
 	);
 
 	return {
 		recoveryId: record.id,
 		audioBytes: record.audioBytes,
+		videoBytes: record.videoBytes,
 	};
 }
 
@@ -1257,6 +1468,9 @@ export async function finishDiaryVoiceMemoDraft(
 		if (audioData.byteLength === 0) {
 			throw new Error(`Diary recovery ${input.recoveryId} did not receive audio.`);
 		}
+		if (recoveryRecord.mediaKind === 'video' && (!videoData || videoData.byteLength === 0)) {
+			throw new Error(`Diary recovery ${input.recoveryId} did not receive video.`);
+		}
 
 		recoveryRecord = updateDiaryVoiceMemoRecovery(
 			recovery.metadataPath,
@@ -1271,48 +1485,20 @@ export async function finishDiaryVoiceMemoDraft(
 				audioBytes: audioData.byteLength,
 			},
 		);
-		const locationId = await resolveLocation(db, recoveryRecord.location);
-		const inserted = db.transaction(tx => {
-			const insertedEntry = tx
-				.insert(diaryEntries)
-				.values({
-					createdAt: recoveryRecord.createdAt,
-					notes: recoveryRecord.notes,
-					locationId,
-				})
-				.returning({
-					id: diaryEntries.id,
-				})
-				.get();
-
-			insertEntryTags(tx, insertedEntry.id, recoveryRecord.tagNames);
-
-			const insertedVoiceMemo = tx
-				.insert(diaryVoiceMemos)
-				.values({
-					entryId: insertedEntry.id,
-					createdAt: recoveryRecord.createdAt,
-					mediaKind: recoveryRecord.mediaKind,
-					fileName: recoveryRecord.fileName,
-					mimeType: recoveryRecord.mimeType,
-					audioData,
-					videoFileName: recoveryRecord.videoFileName,
-					videoMimeType: recoveryRecord.videoMimeType,
-					videoData,
-					durationSeconds: recoveryRecord.durationSeconds,
-					transcriptionStatus: 'uploaded',
-					transcript: recoveryRecord.transcript,
-					transcriptLanguage: recoveryRecord.transcript ? 'English' : null,
-				})
-				.returning({
-					id: diaryVoiceMemos.id,
-				})
-				.get();
-
-			return {
-				entryId: insertedEntry.id,
-				voiceMemoId: insertedVoiceMemo.id,
-			};
+		const inserted = await insertDiaryVoiceMemoFromMedia(db, {
+			createdAt: recoveryRecord.createdAt,
+			notes: recoveryRecord.notes,
+			tagNames: recoveryRecord.tagNames,
+			location: recoveryRecord.location,
+			mediaKind: recoveryRecord.mediaKind,
+			fileName: recoveryRecord.fileName,
+			mimeType: recoveryRecord.mimeType,
+			audioData,
+			videoFileName: recoveryRecord.videoFileName,
+			videoMimeType: recoveryRecord.videoMimeType,
+			videoData,
+			durationSeconds: recoveryRecord.durationSeconds,
+			transcript: recoveryRecord.transcript,
 		});
 
 		recoveryRecord = updateDiaryVoiceMemoRecovery(
@@ -1394,6 +1580,12 @@ export async function processDiaryVoiceMemoRecovery(
 
 		const audioData = fs.readFileSync(recoveryRecord.audioPath);
 		const videoData = recoveryRecord.videoPath ? fs.readFileSync(recoveryRecord.videoPath) : null;
+		if (audioData.byteLength === 0) {
+			throw new Error(`Diary recovery ${resolvedMetadataPath} did not receive audio.`);
+		}
+		if (recoveryRecord.mediaKind === 'video' && (!videoData || videoData.byteLength === 0)) {
+			throw new Error(`Diary recovery ${resolvedMetadataPath} did not receive video.`);
+		}
 		recoveryRecord = updateDiaryVoiceMemoRecovery(
 			resolvedMetadataPath,
 			recoveryRecord,
@@ -1406,48 +1598,20 @@ export async function processDiaryVoiceMemoRecovery(
 				audioBytes: audioData.byteLength,
 			},
 		);
-		const locationId = await resolveLocation(db, recoveryRecord.location);
-		const inserted = db.transaction(tx => {
-			const insertedEntry = tx
-				.insert(diaryEntries)
-				.values({
-					createdAt: recoveryRecord.createdAt,
-					notes: recoveryRecord.notes,
-					locationId,
-				})
-				.returning({
-					id: diaryEntries.id,
-				})
-				.get();
-
-			insertEntryTags(tx, insertedEntry.id, recoveryRecord.tagNames);
-
-			const insertedVoiceMemo = tx
-				.insert(diaryVoiceMemos)
-				.values({
-					entryId: insertedEntry.id,
-					createdAt: recoveryRecord.createdAt,
-					mediaKind: recoveryRecord.mediaKind,
-					fileName: recoveryRecord.fileName,
-					mimeType: recoveryRecord.mimeType,
-					audioData,
-					videoFileName: recoveryRecord.videoFileName,
-					videoMimeType: recoveryRecord.videoMimeType,
-					videoData,
-					durationSeconds: recoveryRecord.durationSeconds,
-					transcriptionStatus: 'uploaded',
-					transcript: recoveryRecord.transcript,
-					transcriptLanguage: recoveryRecord.transcript ? 'English' : null,
-				})
-				.returning({
-					id: diaryVoiceMemos.id,
-				})
-				.get();
-
-			return {
-				entryId: insertedEntry.id,
-				voiceMemoId: insertedVoiceMemo.id,
-			};
+		const inserted = await insertDiaryVoiceMemoFromMedia(db, {
+			createdAt: recoveryRecord.createdAt,
+			notes: recoveryRecord.notes,
+			tagNames: recoveryRecord.tagNames,
+			location: recoveryRecord.location,
+			mediaKind: recoveryRecord.mediaKind,
+			fileName: recoveryRecord.fileName,
+			mimeType: recoveryRecord.mimeType,
+			audioData,
+			videoFileName: recoveryRecord.videoFileName,
+			videoMimeType: recoveryRecord.videoMimeType,
+			videoData,
+			durationSeconds: recoveryRecord.durationSeconds,
+			transcript: recoveryRecord.transcript,
 		});
 
 		voiceMemoId = inserted.voiceMemoId;
