@@ -84,6 +84,7 @@ function getDiaryVoiceMemoAudioResponse(req: Request) {
 	const headers = new Headers(getCorsHeaders(req));
 	headers.set('Content-Type', voiceMemo.mimeType || 'application/octet-stream');
 	headers.set('Content-Disposition', `inline; filename="${voiceMemo.fileName.replace(/"/g, '')}"`);
+	headers.set('Cache-Control', 'no-store');
 
 	return new Response(new Uint8Array(voiceMemo.audioData), {
 		status: 200,
@@ -111,6 +112,7 @@ function getDiaryVoiceMemoVideoResponse(req: Request) {
 	headers.set('Content-Type', voiceMemo.mimeType || 'application/octet-stream');
 	headers.set('Content-Disposition', `inline; filename="${voiceMemo.fileName.replace(/"/g, '')}"`);
 	headers.set('Accept-Ranges', 'bytes');
+	headers.set('Cache-Control', 'no-store');
 
 	const videoData = new Uint8Array(voiceMemo.videoData);
 	const range = req.headers.get('range');

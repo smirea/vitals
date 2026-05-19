@@ -433,7 +433,8 @@ export default function LogScreen() {
 	});
 	const deleteVoiceMemoMutation = useMutation({
 		...trpc.diary.deleteVoiceMemo.mutationOptions(),
-		onSuccess: async () => {
+		onSuccess: async (_data, variables) => {
+			setSelectedVideoMemo(previous => (previous?.id === variables.voiceMemoId ? null : previous));
 			await invalidateDiary();
 			setNotice('Voice memo deleted.');
 		},
@@ -444,6 +445,7 @@ export default function LogScreen() {
 		onSuccess: async data => {
 			await invalidateDiary();
 			setSelectedEntry(null);
+			setSelectedVideoMemo(null);
 			setNotice(`${data.deletedCount} entr${data.deletedCount === 1 ? 'y' : 'ies'} deleted.`);
 		},
 		onError: error => setNotice(error.message),
@@ -624,6 +626,11 @@ export default function LogScreen() {
 
 	async function removeLocalVideoDraft(draftId: string) {
 		await replaceLocalVideoDrafts(drafts => drafts.filter(draft => draft.id !== draftId));
+	}
+
+	async function discardLocalVideoDraft(draft: Pick<LocalVideoDraft, 'id' | 'videoUri'>) {
+		await FileSystem.deleteAsync(draft.videoUri, { idempotent: true });
+		await removeLocalVideoDraft(draft.id);
 	}
 
 	async function createEntry() {
@@ -875,7 +882,7 @@ export default function LogScreen() {
 				await processVoiceMemoMutation.mutateAsync({
 					voiceMemoId: draft.serverVoiceMemoId,
 				});
-				await removeLocalVideoDraft(draft.id);
+				await discardLocalVideoDraft(draft);
 				return;
 			}
 
@@ -918,7 +925,7 @@ export default function LogScreen() {
 			await processVoiceMemoMutation.mutateAsync({
 				voiceMemoId: saved.voiceMemoId,
 			});
-			await removeLocalVideoDraft(draft.id);
+			await discardLocalVideoDraft(draft);
 			await invalidateDiary();
 		} catch (error) {
 			await updateLocalVideoDraft(draft.id, {
@@ -968,8 +975,7 @@ export default function LogScreen() {
 		} else if (draft.serverRecoveryId) {
 			await deleteRecoveryMutation.mutateAsync({ recoveryId: draft.serverRecoveryId });
 		}
-		await FileSystem.deleteAsync(draft.videoUri, { idempotent: true });
-		await removeLocalVideoDraft(draft.id);
+		await discardLocalVideoDraft(draft);
 	}
 
 	function deleteEntry(entry: DiaryEntry) {
