@@ -10,6 +10,7 @@ import { useState } from 'react';
 import { useColorScheme } from 'react-native';
 
 import { TRPCProvider, createNativeTrpcClient, createQueryClient } from '@/src/api/trpc';
+import { antTheme } from '@/src/theme/colors';
 
 export { ErrorBoundary } from 'expo-router';
 
@@ -19,14 +20,15 @@ export const unstable_settings = {
 
 export default function RootLayout() {
 	const colorScheme = useColorScheme();
+	const isDark = colorScheme === 'dark';
 	const [queryClient] = useState(() => createQueryClient());
 	const [trpcClient] = useState(() => createNativeTrpcClient());
 
 	return (
-		<AntProvider>
+		<AntProvider theme={antTheme(isDark)}>
 			<QueryClientProvider client={queryClient}>
 				<TRPCProvider queryClient={queryClient} trpcClient={trpcClient}>
-					<ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+					<ThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
 						<Stack>
 							<Stack.Screen name='(tabs)' options={{ headerShown: false }} />
 							<Stack.Screen name='+not-found' />

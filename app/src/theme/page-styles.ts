@@ -1,12 +1,12 @@
 import type { StyleProp, ViewStyle } from 'react-native';
+import { appColors } from '@/src/theme/colors';
 
 export function pageStyles(isDark: boolean) {
-	const text = isDark ? '#f9fafb' : '#111827';
-	const muted = isDark ? '#a1a1aa' : '#71717a';
+	const colors = appColors(isDark);
 
 	return {
 		page: {
-			backgroundColor: isDark ? '#0f172a' : '#f6f7f9',
+			backgroundColor: colors.background,
 			gap: 14,
 			paddingBottom: 94,
 			paddingHorizontal: 14,
@@ -16,27 +16,27 @@ export function pageStyles(isDark: boolean) {
 			gap: 6,
 		},
 		eyebrow: {
-			color: '#1677ff',
+			color: colors.primary,
 			fontSize: 12,
 			fontWeight: '700' as const,
 			textTransform: 'uppercase' as const,
 		},
 		title: {
-			color: text,
+			color: colors.text,
 			fontSize: 26,
 			fontWeight: '800' as const,
 		},
 		body: {
-			color: text,
+			color: colors.text,
 			fontSize: 15,
 			lineHeight: 21,
 		},
 		muted: {
-			color: muted,
+			color: colors.muted,
 			fontSize: 14,
 		},
 		errorText: {
-			color: '#cf1322',
+			color: colors.danger,
 			fontSize: 14,
 			lineHeight: 20,
 		},

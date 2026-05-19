@@ -857,7 +857,7 @@ function LabsOverview({
 }) {
 	return (
 		<View style={styles.stack}>
-			<HorizontalSection title='Categories'>
+			<HorizontalSection title='Categories' styles={styles}>
 				{categoryOverview.map(category => (
 					<View key={category.category} style={styles.categoryPill}>
 						<View style={styles.rowBetween}>
@@ -865,15 +865,15 @@ function LabsOverview({
 							<Text style={styles.muted}>{category.total}</Text>
 						</View>
 						<View style={styles.tallyRow}>
-							<Tally color='#52c41a' count={category.inRange} />
-							<Tally color='#ff4d4f' count={category.outOfRange} />
-							<Tally color='#8c8c8c' count={category.unclassified} />
+							<Tally color='#52c41a' count={category.inRange} styles={styles} />
+							<Tally color='#ff4d4f' count={category.outOfRange} styles={styles} />
+							<Tally color='#8c8c8c' count={category.unclassified} styles={styles} />
 						</View>
 					</View>
 				))}
 			</HorizontalSection>
 
-			<HorizontalSection title='Last 6 months'>
+			<HorizontalSection title='Last 6 months' styles={styles}>
 				{meaningfulChanges.map(change => (
 					<Card key={change.key} style={styles.changeCard}>
 						<Card.Body>
@@ -921,7 +921,7 @@ function LabsOverview({
 				</Card.Body>
 			</Card>
 
-			<HorizontalSection title='Sources'>
+			<HorizontalSection title='Sources' styles={styles}>
 				<Pressable
 					onPress={onClearSources}
 					style={[styles.sourceChip, selectedSourceIds.size === 0 && styles.sourceChipActive]}
@@ -1301,14 +1301,18 @@ function PreviewValueRow({
 	);
 }
 
-function HorizontalSection({ title, children }: { title: string; children: React.ReactNode }) {
+function HorizontalSection({
+	title,
+	children,
+	styles,
+}: {
+	title: string;
+	children: React.ReactNode;
+	styles: ReturnType<typeof labStyles>;
+}) {
 	return (
 		<View style={{ gap: 8 }}>
-			<Text
-				style={{ color: '#71717a', fontSize: 13, fontWeight: '700', textTransform: 'uppercase' }}
-			>
-				{title}
-			</Text>
+			<Text style={styles.sectionLabel}>{title}</Text>
 			<ScrollView
 				horizontal
 				showsHorizontalScrollIndicator={false}
@@ -1329,6 +1333,8 @@ function SegmentButton({
 	children: string;
 	onPress: () => void;
 }) {
+	const isDark = useColorScheme() === 'dark';
+	const muted = isDark ? '#a1a1aa' : '#71717a';
 	return (
 		<Pressable
 			onPress={onPress}
@@ -1341,7 +1347,7 @@ function SegmentButton({
 		>
 			<Text
 				style={{
-					color: active ? '#fff' : '#71717a',
+					color: active ? '#fff' : muted,
 					fontSize: 14,
 					fontWeight: '700',
 					textAlign: 'center',
@@ -1353,12 +1359,20 @@ function SegmentButton({
 	);
 }
 
-function Tally({ color, count }: { color: string; count: number }) {
+function Tally({
+	color,
+	count,
+	styles,
+}: {
+	color: string;
+	count: number;
+	styles: ReturnType<typeof labStyles>;
+}) {
 	if (count === 0) return null;
 	return (
 		<View style={{ alignItems: 'center', flexDirection: 'row', gap: 4 }}>
 			<View style={{ backgroundColor: color, borderRadius: 999, height: 9, width: 28 }} />
-			<Text style={{ color: '#71717a', fontSize: 12 }}>{count}</Text>
+			<Text style={styles.muted}>{count}</Text>
 		</View>
 	);
 }

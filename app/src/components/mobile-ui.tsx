@@ -13,6 +13,7 @@ import {
 	type StyleProp,
 	type ViewStyle,
 } from 'react-native';
+import { appColors } from '@/src/theme/colors';
 
 export function FloatingActionButton({
 	icon,
@@ -70,6 +71,7 @@ export function IconButton({
 	color?: string;
 }) {
 	const isDark = useColorScheme() === 'dark';
+	const colors = appColors(isDark);
 	return (
 		<Pressable
 			accessibilityRole='button'
@@ -78,8 +80,8 @@ export function IconButton({
 			hitSlop={10}
 			style={({ pressed }) => ({
 				alignItems: 'center',
-				backgroundColor: isDark ? '#1f2937' : '#fff',
-				borderColor: isDark ? '#27272a' : '#e5e7eb',
+				backgroundColor: colors.surfaceRaised,
+				borderColor: colors.border,
 				borderRadius: 999,
 				borderWidth: 1,
 				height: 36,
@@ -88,12 +90,7 @@ export function IconButton({
 				width: 36,
 			})}
 		>
-			<SymbolView
-				name={icon}
-				size={19}
-				tintColor={color ?? (isDark ? '#f9fafb' : '#111827')}
-				weight='semibold'
-			/>
+			<SymbolView name={icon} size={19} tintColor={color ?? colors.text} weight='semibold' />
 		</Pressable>
 	);
 }
@@ -112,9 +109,8 @@ export function BottomSheet({
 	footer?: ReactNode;
 }) {
 	const isDark = useColorScheme() === 'dark';
+	const colors = appColors(isDark);
 	const { height } = useWindowDimensions();
-	const surface = isDark ? '#111827' : '#fff';
-	const border = isDark ? '#27272a' : '#e5e7eb';
 	const [mounted, setMounted] = useState(visible);
 	const animation = useRef(new Animated.Value(visible ? 1 : 0)).current;
 
@@ -174,7 +170,7 @@ export function BottomSheet({
 				</Animated.View>
 				<Animated.View
 					style={{
-						backgroundColor: surface,
+						backgroundColor: colors.surface,
 						borderTopLeftRadius: 22,
 						borderTopRightRadius: 22,
 						gap: 14,
@@ -189,7 +185,7 @@ export function BottomSheet({
 						<View
 							style={{
 								alignSelf: 'center',
-								backgroundColor: border,
+								backgroundColor: colors.border,
 								borderRadius: 999,
 								height: 4,
 								width: 42,
@@ -204,7 +200,7 @@ export function BottomSheet({
 						>
 							<Text
 								style={{
-									color: isDark ? '#f9fafb' : '#111827',
+									color: colors.text,
 									fontSize: 18,
 									fontWeight: '800',
 								}}
@@ -229,10 +225,11 @@ export function BottomSheet({
 
 export function SectionLabel({ children }: { children: ReactNode }) {
 	const isDark = useColorScheme() === 'dark';
+	const colors = appColors(isDark);
 	return (
 		<Text
 			style={{
-				color: isDark ? '#a1a1aa' : '#71717a',
+				color: colors.muted,
 				fontSize: 12,
 				fontWeight: '800',
 				textTransform: 'uppercase',

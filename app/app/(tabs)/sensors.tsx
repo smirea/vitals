@@ -385,9 +385,21 @@ export default function SensorsScreen() {
 						onChangeText={updateDefaultStartDate}
 					/>
 					<View style={styles.chipRow}>
-						<Chip label='7 days' onPress={() => updateDefaultStartDate(getDateDaysAgo(7))} />
-						<Chip label='1 month' onPress={() => updateDefaultStartDate(getDateMonthsAgo(1))} />
-						<Chip label='3 months' onPress={() => updateDefaultStartDate(getDateMonthsAgo(3))} />
+						<Chip
+							label='7 days'
+							onPress={() => updateDefaultStartDate(getDateDaysAgo(7))}
+							styles={styles}
+						/>
+						<Chip
+							label='1 month'
+							onPress={() => updateDefaultStartDate(getDateMonthsAgo(1))}
+							styles={styles}
+						/>
+						<Chip
+							label='3 months'
+							onPress={() => updateDefaultStartDate(getDateMonthsAgo(3))}
+							styles={styles}
+						/>
 					</View>
 					<View style={styles.segment}>
 						{outputModes.map(mode => (
@@ -597,6 +609,7 @@ function SensorConfigSheet({
 									label={content}
 									active={voiceMemosConfig.content === content}
 									onPress={() => onVoiceMemosConfigChange({ content })}
+									styles={styles}
 								/>
 							))}
 						</View>
@@ -610,6 +623,7 @@ function SensorConfigSheet({
 									recipeDetails: !macrofactorConfig.recipeDetails,
 								})
 							}
+							styles={styles}
 						/>
 					) : null}
 				</View>
@@ -686,6 +700,7 @@ function LabsConfigView({
 								key={date}
 								label={date}
 								onPress={() => onChange({ ...config, startDate: date })}
+								styles={styles}
 							/>
 						))}
 					</View>
@@ -713,6 +728,7 @@ function LabsConfigView({
 										categories: toggleCategory(config.categories, category.category),
 									})
 								}
+								styles={styles}
 							/>
 						))}
 					</View>
@@ -722,6 +738,7 @@ function LabsConfigView({
 				label='Only latest'
 				active={config.onlyLatest}
 				onPress={() => onChange({ ...config, onlyLatest: !config.onlyLatest })}
+				styles={styles}
 			/>
 		</View>
 	);
@@ -847,14 +864,19 @@ function Chip({
 	label,
 	active = false,
 	onPress,
+	styles,
 }: {
 	label: string;
 	active?: boolean;
 	onPress: () => void;
+	styles: ReturnType<typeof sensorsStyles>;
 }) {
 	return (
-		<Pressable onPress={onPress} style={({ pressed }) => chipStyle(active, pressed)}>
-			<Text style={active ? chipTextActiveStyle : chipTextStyle}>{label}</Text>
+		<Pressable
+			onPress={onPress}
+			style={({ pressed }) => [styles.chip, active && styles.chipActive, pressed && styles.pressed]}
+		>
+			<Text style={active ? styles.chipActiveText : styles.chipText}>{label}</Text>
 		</Pressable>
 	);
 }
@@ -864,30 +886,6 @@ function toggleCategory(categories: string[], category: string) {
 		? categories.filter(value => value !== category)
 		: [...categories, category];
 }
-
-function chipStyle(active: boolean, pressed: boolean) {
-	return {
-		backgroundColor: active ? '#1677ff' : '#fff',
-		borderColor: active ? '#1677ff' : '#e5e7eb',
-		borderRadius: 999,
-		borderWidth: 1,
-		opacity: pressed ? 0.75 : 1,
-		paddingHorizontal: 10,
-		paddingVertical: 6,
-	};
-}
-
-const chipTextStyle = {
-	color: '#71717a',
-	fontSize: 12,
-	fontWeight: '600' as const,
-};
-
-const chipTextActiveStyle = {
-	color: '#fff',
-	fontSize: 12,
-	fontWeight: '700' as const,
-};
 
 function sensorsStyles(isDark: boolean) {
 	const text = isDark ? '#f9fafb' : '#111827';
@@ -1018,6 +1016,31 @@ function sensorsStyles(isDark: boolean) {
 			flexDirection: 'row' as const,
 			flexWrap: 'wrap' as const,
 			gap: 6,
+		},
+		chip: {
+			backgroundColor: surface,
+			borderColor: border,
+			borderRadius: 999,
+			borderWidth: 1,
+			paddingHorizontal: 10,
+			paddingVertical: 6,
+		},
+		chipActive: {
+			backgroundColor: '#1677ff',
+			borderColor: '#1677ff',
+		},
+		chipText: {
+			color: muted,
+			fontSize: 12,
+			fontWeight: '600' as const,
+		},
+		chipActiveText: {
+			color: '#fff',
+			fontSize: 12,
+			fontWeight: '700' as const,
+		},
+		pressed: {
+			opacity: 0.75,
 		},
 		segment: {
 			backgroundColor: isDark ? '#1f2937' : '#e5e7eb',
