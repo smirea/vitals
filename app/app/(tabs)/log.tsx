@@ -13,6 +13,7 @@ import {
 	useAudioRecorder as useExpoAudioRecorder,
 	useAudioRecorderState,
 } from 'expo-audio';
+import { SymbolView } from 'expo-symbols';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -1528,35 +1529,37 @@ export default function LogScreen() {
 				title='New entry'
 				onClose={() => setComposerOpen(false)}
 				footer={
-					<View style={styles.actionRow}>
-						<Button size='small' onPress={refreshLocation}>
-							Locate
-						</Button>
-						<Button
-							size='small'
-							onPress={toggleRecording}
-							disabled={!canRecord}
-							loading={isUploadingRecording}
-						>
-							{recorderState.isRecording ? 'Stop' : 'Record'}
-						</Button>
-						<Button
-							size='small'
-							onPress={() => void openVideoRecorder()}
-							disabled={!canRecordVideo}
-							loading={isVideoSaving}
-						>
-							Video log
-						</Button>
-						<Button
-							type='primary'
-							size='small'
-							onPress={() => void createEntry()}
+					<View style={styles.composerFooter}>
+						<View style={styles.recordActionGroup}>
+							<ComposerActionButton
+								icon={recorderState.isRecording ? 'stop.fill' : 'mic.fill'}
+								label={recorderState.isRecording ? 'Stop' : 'Record'}
+								active={recorderState.isRecording}
+								disabled={!canRecord}
+								loading={isUploadingRecording}
+								tone='audio'
+								styles={styles}
+								onPress={toggleRecording}
+							/>
+							<ComposerActionButton
+								icon='video.fill'
+								label='Video log'
+								disabled={!canRecordVideo}
+								loading={isVideoSaving}
+								tone='video'
+								styles={styles}
+								onPress={() => void openVideoRecorder()}
+							/>
+						</View>
+						<ComposerActionButton
+							icon='plus'
+							label='Add'
 							disabled={!canCreateEntry}
 							loading={createEntryMutation.isPending}
-						>
-							Add
-						</Button>
+							tone='add'
+							styles={styles}
+							onPress={() => void createEntry()}
+						/>
 					</View>
 				}
 			>
@@ -1723,6 +1726,54 @@ export default function LogScreen() {
 				styles={styles}
 			/>
 		</>
+	);
+}
+
+function ComposerActionButton({
+	icon,
+	label,
+	active = false,
+	disabled = false,
+	loading = false,
+	tone,
+	onPress,
+	styles,
+}: {
+	icon: 'mic.fill' | 'stop.fill' | 'video.fill' | 'plus';
+	label: string;
+	active?: boolean;
+	disabled?: boolean;
+	loading?: boolean;
+	tone: 'audio' | 'video' | 'add';
+	onPress: () => void;
+	styles: ReturnType<typeof logStyles>;
+}) {
+	const buttonStyle =
+		tone === 'audio'
+			? styles.composerActionButtonAudio
+			: tone === 'video'
+				? styles.composerActionButtonVideo
+				: styles.composerActionButtonAdd;
+
+	return (
+		<Pressable
+			accessibilityRole='button'
+			accessibilityLabel={label}
+			disabled={disabled || loading}
+			onPress={onPress}
+			style={({ pressed }) => [
+				styles.composerActionButton,
+				buttonStyle,
+				active && styles.composerActionButtonActive,
+				(disabled || loading) && styles.composerActionButtonDisabled,
+				pressed && !(disabled || loading) && styles.composerActionButtonPressed,
+			]}
+		>
+			<View style={styles.composerActionIcon}>
+				<SymbolView name={loading ? 'hourglass' : icon} size={17} tintColor='#fff' weight='bold' />
+			</View>
+			<Text style={styles.composerActionButtonText}>{loading ? 'Saving' : label}</Text>
+		</Pressable>
 	);
 }
 
@@ -2279,6 +2330,65 @@ function logStyles(isDark: boolean) {
 			flexDirection: 'row' as const,
 			gap: 8,
 			justifyContent: 'flex-end' as const,
+		},
+		composerFooter: {
+			alignItems: 'center' as const,
+			flexDirection: 'row' as const,
+			gap: 10,
+			justifyContent: 'space-between' as const,
+		},
+		recordActionGroup: {
+			alignItems: 'center' as const,
+			flex: 1,
+			flexDirection: 'row' as const,
+			gap: 8,
+			justifyContent: 'flex-start' as const,
+		},
+		composerActionButton: {
+			alignItems: 'center' as const,
+			borderColor: 'rgba(255, 255, 255, 0.28)',
+			borderRadius: 999,
+			borderWidth: 1,
+			flexDirection: 'row' as const,
+			gap: 7,
+			minHeight: 38,
+			paddingHorizontal: 12,
+			paddingVertical: 8,
+		},
+		composerActionButtonAudio: {
+			backgroundColor: '#cf1322',
+			boxShadow: '0 6px 16px rgba(207, 19, 34, 0.22)',
+		},
+		composerActionButtonVideo: {
+			backgroundColor: '#1677ff',
+			boxShadow: '0 6px 16px rgba(22, 119, 255, 0.2)',
+		},
+		composerActionButtonAdd: {
+			backgroundColor: '#15803d',
+			boxShadow: '0 6px 16px rgba(21, 128, 61, 0.2)',
+		},
+		composerActionButtonActive: {
+			backgroundColor: '#7f1d1d',
+		},
+		composerActionButtonDisabled: {
+			backgroundColor: isDark ? '#3f3f46' : '#a1a1aa',
+			boxShadow: '0 0 0 rgba(0, 0, 0, 0)',
+			opacity: 0.62,
+		},
+		composerActionButtonPressed: {
+			opacity: 0.78,
+			transform: [{ scale: 0.98 }],
+		},
+		composerActionIcon: {
+			alignItems: 'center' as const,
+			height: 18,
+			justifyContent: 'center' as const,
+			width: 18,
+		},
+		composerActionButtonText: {
+			color: '#fff',
+			fontSize: 13,
+			fontWeight: '800' as const,
 		},
 		notice: {
 			backgroundColor: isDark ? '#102a43' : '#e6f4ff',
