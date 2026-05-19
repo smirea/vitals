@@ -5,7 +5,7 @@ import { Text, useColorScheme } from 'react-native';
 const activeTintColor = '#1677ff';
 
 export const unstable_settings = {
-	initialRouteName: 'labs',
+	initialRouteName: 'log',
 };
 
 function TabIcon({
@@ -35,7 +35,7 @@ export default function TabLayout() {
 
 	return (
 		<Tabs
-			initialRouteName='labs'
+			initialRouteName='log'
 			screenOptions={{
 				headerShown: false,
 				tabBarActiveTintColor: activeTintColor,
