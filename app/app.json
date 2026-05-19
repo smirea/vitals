@@ -57,7 +57,8 @@
 					"cameraPermission": "Allow Vitals to take pill label photos.",
 					"photosPermission": "Allow Vitals to add pill label photos."
 				}
-			]
+			],
+			"expo-video"
 		],
 		"experiments": {
 			"typedRoutes": true

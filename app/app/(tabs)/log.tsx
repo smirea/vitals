@@ -14,6 +14,7 @@ import {
 	useAudioRecorderState,
 } from 'expo-audio';
 import { useAudioRecorder as useStreamingAudioRecorder } from '@siteed/audio-studio';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
 	Animated,
@@ -40,6 +41,10 @@ type DiaryPendingVoiceMemo = RouterOutput['diary']['listPendingVoiceMemos'][numb
 type DiaryPendingVoiceMemoRecovery =
 	RouterOutput['diary']['listPendingVoiceMemoRecoveries'][number];
 type TagRecord = RouterOutput['tags']['list'][number];
+type PlayableVideoMemo = {
+	id: number;
+	fileName: string;
+};
 
 type DiaryLocationInput = {
 	capturedAt: string;
@@ -253,6 +258,7 @@ export default function LogScreen() {
 	const [locationMessage, setLocationMessage] = useState('Requesting location...');
 	const [notice, setNotice] = useState<string | null>(null);
 	const [selectedEntry, setSelectedEntry] = useState<DiaryEntry | null>(null);
+	const [selectedVideoMemo, setSelectedVideoMemo] = useState<PlayableVideoMemo | null>(null);
 	const [isUploadingRecording, setIsUploadingRecording] = useState(false);
 	const [videoRecorderOpen, setVideoRecorderOpen] = useState(false);
 	const [isVideoRecording, setIsVideoRecording] = useState(false);
@@ -753,6 +759,13 @@ export default function LogScreen() {
 		]);
 	}
 
+	function openVideoMemo(memo: Pick<DiaryVoiceMemo, 'id' | 'videoFileName' | 'fileName'>) {
+		setSelectedVideoMemo({
+			id: memo.id,
+			fileName: memo.videoFileName ?? memo.fileName,
+		});
+	}
+
 	if (entriesQuery.isLoading || pendingVoiceMemosQuery.isLoading || tagsQuery.isLoading) {
 		return (
 			<View style={styles.loadingScreen}>
@@ -819,6 +832,7 @@ export default function LogScreen() {
 								}
 								onReprocess={() => processVoiceMemoMutation.mutate({ voiceMemoId: memo.id })}
 								onDelete={() => deleteVoiceMemo(memo)}
+								onPlayVideo={() => openVideoMemo(memo)}
 								styles={styles}
 							/>
 						))}
@@ -848,6 +862,7 @@ export default function LogScreen() {
 								key={entry.id}
 								entry={entry}
 								onOpen={() => setSelectedEntry(entry)}
+								onPlayVideo={openVideoMemo}
 								styles={styles}
 							/>
 						))}
@@ -941,6 +956,7 @@ export default function LogScreen() {
 									}
 									onReprocess={() => processVoiceMemoMutation.mutate({ voiceMemoId: memo.id })}
 									onDelete={() => deleteVoiceMemo(memo)}
+									onPlayVideo={() => openVideoMemo(memo)}
 									styles={styles}
 								/>
 							))}
@@ -1041,6 +1057,12 @@ export default function LogScreen() {
 					});
 				}}
 				onDelete={entry => deleteEntry(entry)}
+				onPlayVideo={openVideoMemo}
+				styles={styles}
+			/>
+			<FullscreenVideoPlayer
+				video={selectedVideoMemo}
+				onClose={() => setSelectedVideoMemo(null)}
 				styles={styles}
 			/>
 		</>
@@ -1071,16 +1093,19 @@ function TotalCard({
 function EntryCard({
 	entry,
 	onOpen,
+	onPlayVideo,
 	styles,
 }: {
 	entry: DiaryEntry;
 	onOpen: () => void;
+	onPlayVideo: (memo: DiaryVoiceMemo) => void;
 	styles: ReturnType<typeof logStyles>;
 }) {
 	const transcript = getEntryTranscriptText(entry);
 	const summary = entry.summary?.trim() ?? '';
-	return (
-		<Pressable onPress={onOpen} style={styles.entryCard}>
+	const videoMemo = entry.voiceMemos.find(memo => memo.mediaKind === 'video') ?? null;
+	const content = (
+		<View style={styles.videoMemoContent}>
 			{summary ? (
 				<MarkdownText value={summary} numberOfLines={2} compact style={styles.summaryText} />
 			) : null}
@@ -1108,6 +1133,23 @@ function EntryCard({
 				) : null}
 			</View>
 			<TagList tags={entry.tags} />
+		</View>
+	);
+
+	if (videoMemo) {
+		return (
+			<View style={[styles.entryCard, styles.videoMemoCard]}>
+				<VideoMemoPreview memo={videoMemo} onPress={() => onPlayVideo(videoMemo)} styles={styles} />
+				<Pressable onPress={onOpen} style={styles.videoMemoContentPressable}>
+					{content}
+				</Pressable>
+			</View>
+		);
+	}
+
+	return (
+		<Pressable onPress={onOpen} style={styles.entryCard}>
+			{content}
 		</Pressable>
 	);
 }
@@ -1121,6 +1163,7 @@ function PendingVoiceMemoCard({
 	onSetTags,
 	onReprocess,
 	onDelete,
+	onPlayVideo,
 	styles,
 }: {
 	memo: DiaryPendingVoiceMemo;
@@ -1131,54 +1174,64 @@ function PendingVoiceMemoCard({
 	onSetTags: (value: string) => void;
 	onReprocess: () => void;
 	onDelete: () => void;
+	onPlayVideo: () => void;
 	styles: ReturnType<typeof logStyles>;
 }) {
-	return (
-		<View style={styles.entryCard}>
-			<View style={styles.stack}>
-				<View style={styles.rowBetween}>
-					<Text style={styles.cardTitle}>{formatDiaryTimestamp(memo.createdAt)}</Text>
-					<Tag small>{memo.transcriptionStatus}</Tag>
-				</View>
-				<Text style={styles.muted}>
-					{memo.mediaKind === 'video' ? (memo.videoFileName ?? memo.fileName) : memo.fileName} -{' '}
-					{formatDuration(memo.durationSeconds)} -{' '}
-					{formatBytes(memo.mediaKind === 'video' ? memo.videoBytes : memo.audioBytes)}
-				</Text>
+	const content = (
+		<View style={styles.videoMemoContent}>
+			<View style={styles.rowBetween}>
+				<Text style={styles.cardTitle}>{formatDiaryTimestamp(memo.createdAt)}</Text>
+				<Tag small>{memo.transcriptionStatus}</Tag>
+			</View>
+			<Text style={styles.muted}>
+				{memo.mediaKind === 'video' ? (memo.videoFileName ?? memo.fileName) : memo.fileName} -{' '}
+				{formatDuration(memo.durationSeconds)} -{' '}
+				{formatBytes(memo.mediaKind === 'video' ? memo.videoBytes : memo.audioBytes)}
+			</Text>
+			{memo.mediaKind === 'audio' ? (
 				<Pressable
 					onPress={() => {
-						void Linking.openURL(
-							memo.mediaKind === 'video' ? voiceMemoVideoUrl(memo.id) : voiceMemoAudioUrl(memo.id),
-						);
+						void Linking.openURL(voiceMemoAudioUrl(memo.id));
 					}}
 				>
-					<Text style={styles.linkText}>Open {memo.mediaKind === 'video' ? 'video' : 'audio'}</Text>
+					<Text style={styles.linkText}>Open audio</Text>
 				</Pressable>
-				<Text style={styles.bodyPreview} numberOfLines={3}>
-					{memo.transcript?.trim() || memo.notes.trim() || 'No transcript yet'}
+			) : null}
+			<Text style={styles.bodyPreview} numberOfLines={3}>
+				{memo.transcript?.trim() || memo.notes.trim() || 'No transcript yet'}
+			</Text>
+			{memo.transcriptionError ? (
+				<Text selectable style={styles.errorText} numberOfLines={4}>
+					{memo.transcriptionError}
 				</Text>
-				{memo.transcriptionError ? (
-					<Text selectable style={styles.errorText} numberOfLines={4}>
-						{memo.transcriptionError}
-					</Text>
-				) : null}
-				<TagSelector
-					value={formatTagNames(memo.tags.map(tag => tag.name))}
-					availableTags={availableTags}
-					onChange={onSetTags}
-					disabled={isSettingTags}
-				/>
-				<View style={styles.actionRow}>
-					<Button size='small' onPress={onReprocess} loading={isProcessing}>
-						Reprocess
-					</Button>
-					<Button size='small' onPress={onDelete} loading={isDeleting}>
-						Delete
-					</Button>
-				</View>
+			) : null}
+			<TagSelector
+				value={formatTagNames(memo.tags.map(tag => tag.name))}
+				availableTags={availableTags}
+				onChange={onSetTags}
+				disabled={isSettingTags}
+			/>
+			<View style={styles.actionRow}>
+				<Button size='small' onPress={onReprocess} loading={isProcessing}>
+					Reprocess
+				</Button>
+				<Button size='small' onPress={onDelete} loading={isDeleting}>
+					Delete
+				</Button>
 			</View>
 		</View>
 	);
+
+	if (memo.mediaKind === 'video') {
+		return (
+			<View style={[styles.entryCard, styles.videoMemoCard]}>
+				<VideoMemoPreview memo={memo} onPress={onPlayVideo} styles={styles} />
+				<View style={styles.videoMemoContentPressable}>{content}</View>
+			</View>
+		);
+	}
+
+	return <View style={styles.entryCard}>{content}</View>;
 }
 
 function RecoveryMemoCard({
@@ -1233,17 +1286,21 @@ function RecoveryMemoCard({
 
 function VoiceMemoButton({
 	memo,
+	onPlayVideo,
 	styles,
 }: {
 	memo: DiaryVoiceMemo;
+	onPlayVideo: (memo: DiaryVoiceMemo) => void;
 	styles: ReturnType<typeof logStyles>;
 }) {
 	return (
 		<Pressable
 			onPress={() => {
-				void Linking.openURL(
-					memo.mediaKind === 'video' ? voiceMemoVideoUrl(memo.id) : voiceMemoAudioUrl(memo.id),
-				);
+				if (memo.mediaKind === 'video') {
+					onPlayVideo(memo);
+					return;
+				}
+				void Linking.openURL(voiceMemoAudioUrl(memo.id));
 			}}
 			style={styles.voiceMemoPill}
 		>
@@ -1252,6 +1309,87 @@ function VoiceMemoButton({
 				{memo.transcriptionStatus}
 			</Text>
 		</Pressable>
+	);
+}
+
+function VideoMemoPreview({
+	memo,
+	onPress,
+	styles,
+}: {
+	memo: Pick<DiaryVoiceMemo, 'id'> | Pick<DiaryPendingVoiceMemo, 'id'>;
+	onPress: () => void;
+	styles: ReturnType<typeof logStyles>;
+}) {
+	const player = useVideoPlayer(voiceMemoVideoUrl(memo.id), videoPlayer => {
+		videoPlayer.muted = true;
+		videoPlayer.loop = false;
+	});
+
+	return (
+		<Pressable onPress={onPress} style={styles.videoThumbnail}>
+			<VideoView
+				player={player}
+				nativeControls={false}
+				contentFit='cover'
+				style={styles.videoThumbnailPlayer}
+			/>
+			<View style={styles.videoPlayBadge}>
+				<Text style={styles.videoPlayGlyph}>▶</Text>
+			</View>
+		</Pressable>
+	);
+}
+
+function FullscreenVideoPlayer({
+	video,
+	onClose,
+	styles,
+}: {
+	video: PlayableVideoMemo | null;
+	onClose: () => void;
+	styles: ReturnType<typeof logStyles>;
+}) {
+	const player = useVideoPlayer(video ? voiceMemoVideoUrl(video.id) : null, videoPlayer => {
+		videoPlayer.loop = false;
+		videoPlayer.muted = false;
+		if (video) {
+			videoPlayer.play();
+		}
+	});
+
+	useEffect(() => {
+		if (video) {
+			player.play();
+			return;
+		}
+		player.pause();
+	}, [player, video]);
+
+	return (
+		<NativeModal visible={video !== null} animationType='fade' presentationStyle='fullScreen'>
+			<View style={styles.fullscreenPlayerScreen}>
+				<VideoView
+					player={player}
+					nativeControls
+					contentFit='contain'
+					allowsPictureInPicture
+					style={styles.fullscreenPlayer}
+				/>
+				<View style={styles.videoTopBar}>
+					<Pressable onPress={onClose} style={styles.videoCloseButton}>
+						<Text style={styles.videoCloseText}>Close</Text>
+					</Pressable>
+				</View>
+				{video ? (
+					<View style={styles.fullscreenVideoTitle}>
+						<Text style={styles.fullscreenVideoTitleText} numberOfLines={1}>
+							{video.fileName}
+						</Text>
+					</View>
+				) : null}
+			</View>
+		</NativeModal>
 	);
 }
 
@@ -1299,6 +1437,7 @@ function EntryDetailSheet({
 	onClose,
 	onSetTags,
 	onDelete,
+	onPlayVideo,
 	styles,
 }: {
 	entry: DiaryEntry | null;
@@ -1308,6 +1447,7 @@ function EntryDetailSheet({
 	onClose: () => void;
 	onSetTags: (value: string) => void;
 	onDelete: (entry: DiaryEntry) => void;
+	onPlayVideo: (memo: DiaryVoiceMemo) => void;
 	styles: ReturnType<typeof logStyles>;
 }) {
 	return (
@@ -1349,7 +1489,12 @@ function EntryDetailSheet({
 						<View style={styles.stack}>
 							<Text style={styles.sectionTitle}>Voice memos</Text>
 							{entry.voiceMemos.map(memo => (
-								<VoiceMemoButton key={memo.id} memo={memo} styles={styles} />
+								<VoiceMemoButton
+									key={memo.id}
+									memo={memo}
+									onPlayVideo={onPlayVideo}
+									styles={styles}
+								/>
 							))}
 						</View>
 					) : null}
@@ -1507,6 +1652,54 @@ function logStyles(isDark: boolean) {
 			gap: 8,
 			padding: 12,
 		},
+		videoMemoCard: {
+			alignItems: 'stretch' as const,
+			flexDirection: 'row' as const,
+			gap: 0,
+			minHeight: 154,
+			overflow: 'hidden' as const,
+			padding: 0,
+		},
+		videoMemoContent: {
+			flex: 1,
+			gap: 8,
+		},
+		videoMemoContentPressable: {
+			flex: 1,
+			padding: 12,
+		},
+		videoThumbnail: {
+			alignItems: 'center' as const,
+			alignSelf: 'stretch' as const,
+			backgroundColor: '#050505',
+			justifyContent: 'center' as const,
+			minHeight: 154,
+			overflow: 'hidden' as const,
+			width: 112,
+		},
+		videoThumbnailPlayer: {
+			bottom: 0,
+			left: 0,
+			position: 'absolute' as const,
+			right: 0,
+			top: 0,
+		},
+		videoPlayBadge: {
+			alignItems: 'center' as const,
+			backgroundColor: 'rgba(0, 0, 0, 0.48)',
+			borderColor: 'rgba(255, 255, 255, 0.62)',
+			borderRadius: 999,
+			borderWidth: 1,
+			height: 38,
+			justifyContent: 'center' as const,
+			width: 38,
+		},
+		videoPlayGlyph: {
+			color: '#fff',
+			fontSize: 18,
+			fontWeight: '900' as const,
+			paddingLeft: 3,
+		},
 		entryMetaRow: {
 			alignItems: 'center' as const,
 			flexDirection: 'row' as const,
@@ -1557,6 +1750,28 @@ function logStyles(isDark: boolean) {
 		videoScreen: {
 			backgroundColor: '#000',
 			flex: 1,
+		},
+		fullscreenPlayerScreen: {
+			backgroundColor: '#000',
+			flex: 1,
+		},
+		fullscreenPlayer: {
+			flex: 1,
+		},
+		fullscreenVideoTitle: {
+			alignItems: 'center' as const,
+			bottom: 34,
+			left: 18,
+			position: 'absolute' as const,
+			right: 18,
+		},
+		fullscreenVideoTitleText: {
+			color: '#fff',
+			fontSize: 13,
+			fontWeight: '700' as const,
+			textShadowColor: 'rgba(0, 0, 0, 0.65)',
+			textShadowOffset: { width: 0, height: 1 },
+			textShadowRadius: 8,
 		},
 		cameraPreview: {
 			flex: 1,

@@ -110,9 +110,51 @@ function getDiaryVoiceMemoVideoResponse(req: Request) {
 	const headers = new Headers(getCorsHeaders(req));
 	headers.set('Content-Type', voiceMemo.mimeType || 'application/octet-stream');
 	headers.set('Content-Disposition', `inline; filename="${voiceMemo.fileName.replace(/"/g, '')}"`);
+	headers.set('Accept-Ranges', 'bytes');
 
-	return new Response(new Uint8Array(voiceMemo.videoData), {
-		status: 200,
+	const videoData = new Uint8Array(voiceMemo.videoData);
+	const range = req.headers.get('range');
+	if (!range) {
+		headers.set('Content-Length', String(videoData.byteLength));
+		return new Response(videoData, {
+			status: 200,
+			headers,
+		});
+	}
+
+	const matchRange = range.match(/^bytes=(\d*)-(\d*)$/);
+	if (!matchRange) {
+		return Response.json({ ok: false, error: 'Invalid range header' }, { status: 416 });
+	}
+
+	const requestedStart = matchRange[1] ? Number.parseInt(matchRange[1], 10) : null;
+	const requestedEnd = matchRange[2] ? Number.parseInt(matchRange[2], 10) : null;
+	const suffixLength = requestedStart === null && requestedEnd !== null ? requestedEnd : null;
+	const start =
+		suffixLength === null
+			? (requestedStart ?? 0)
+			: Math.max(videoData.byteLength - suffixLength, 0);
+	const end =
+		suffixLength === null
+			? requestedEnd === null
+				? videoData.byteLength - 1
+				: Math.min(requestedEnd, videoData.byteLength - 1)
+			: videoData.byteLength - 1;
+
+	if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start) {
+		headers.set('Content-Range', `bytes */${videoData.byteLength}`);
+		return new Response(null, {
+			status: 416,
+			headers,
+		});
+	}
+
+	const chunk = videoData.slice(start, end + 1);
+	headers.set('Content-Length', String(chunk.byteLength));
+	headers.set('Content-Range', `bytes ${start}-${end}/${videoData.byteLength}`);
+
+	return new Response(chunk, {
+		status: 206,
 		headers,
 	});
 }
