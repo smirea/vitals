@@ -1,10 +1,37 @@
 import { QueryClient } from '@tanstack/react-query';
 import { createTRPCClient, httpBatchLink, httpLink, splitLink } from '@trpc/client';
 import { createTRPCContext } from '@trpc/tanstack-react-query';
+import Constants from 'expo-constants';
 
 import type { AppRouter } from 'server/trpc/index.ts';
 
-export const API_BASE_URL = 'http://localhost:6001';
+const API_PORT = '6001';
+
+function getApiBaseUrl() {
+	const hostUri = Constants.expoConfig?.hostUri;
+	if (!hostUri) {
+		throw new Error(
+			'Expo hostUri is missing; start Expo on LAN so Vitals can find the laptop API.',
+		);
+	}
+
+	const expoUrl = new URL(`http://${hostUri}`);
+	if (expoUrl.hostname.endsWith('.exp.direct')) {
+		throw new Error(
+			'Expo tunnel host cannot expose the local Vitals API; use LAN mode or set up an API tunnel.',
+		);
+	}
+
+	expoUrl.protocol = 'http:';
+	expoUrl.port = API_PORT;
+	expoUrl.pathname = '';
+	expoUrl.search = '';
+	expoUrl.hash = '';
+
+	return expoUrl.origin;
+}
+
+export const API_BASE_URL = getApiBaseUrl();
 
 export const { TRPCProvider, useTRPC, useTRPCClient } = createTRPCContext<AppRouter>();
 
