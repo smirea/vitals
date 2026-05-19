@@ -464,6 +464,7 @@ async function getFileSize(uri: string) {
 
 type LogFilter = 'entries' | 'pending' | 'recoveries';
 const MEDIA_UPLOAD_CHUNK_BYTES = 512 * 1024;
+const VIDEO_RECORDER_MODAL_OPEN_DELAY_MS = 280;
 
 export default function LogScreen() {
 	const trpc = useTRPC();
@@ -485,6 +486,7 @@ export default function LogScreen() {
 	const videoCommittedTranscriptRef = useRef('');
 	const videoTranscriptRef = useRef('');
 	const localVideoDraftsRef = useRef<LocalVideoDraft[]>([]);
+	const openingVideoRecorderRef = useRef(false);
 	const [cameraPermission, requestCameraPermission] = useCameraPermissions();
 	const recordPulse = useRef(new Animated.Value(0)).current;
 	const [notes, setNotes] = useState('');
@@ -499,6 +501,7 @@ export default function LogScreen() {
 	const [videoCameraMounted, setVideoCameraMounted] = useState(false);
 	const [isVideoCameraReady, setIsVideoCameraReady] = useState(false);
 	const [isVideoRecording, setIsVideoRecording] = useState(false);
+	const [isOpeningVideoRecorder, setIsOpeningVideoRecorder] = useState(false);
 	const [isVideoStarting, setIsVideoStarting] = useState(false);
 	const [isVideoSaving, setIsVideoSaving] = useState(false);
 	const [videoStartedAt, setVideoStartedAt] = useState<number | null>(null);
@@ -687,6 +690,7 @@ export default function LogScreen() {
 		resetVoiceMemoDraftMutation.isPending ||
 		finishVoiceMemoDraftMutation.isPending ||
 		isUploadingRecording ||
+		isOpeningVideoRecorder ||
 		isVideoStarting ||
 		isVideoSaving ||
 		recorderState.isRecording;
@@ -700,6 +704,7 @@ export default function LogScreen() {
 		!startVoiceMemoDraftMutation.isPending &&
 		!resetVoiceMemoDraftMutation.isPending &&
 		!finishVoiceMemoDraftMutation.isPending &&
+		!isOpeningVideoRecorder &&
 		!isVideoStarting &&
 		!isVideoSaving &&
 		!recorderState.isRecording;
@@ -869,6 +874,10 @@ export default function LogScreen() {
 	}
 
 	async function openVideoRecorder() {
+		if (openingVideoRecorderRef.current || videoRecorderOpen) return;
+		openingVideoRecorderRef.current = true;
+		setIsOpeningVideoRecorder(true);
+
 		try {
 			getRequiredLocation();
 			const permission = cameraPermission?.granted
@@ -883,15 +892,26 @@ export default function LogScreen() {
 				throw new Error('Microphone permission is required for video logs.');
 			}
 
-			videoTranscriptRef.current = '';
-			setVideoTranscript('');
-			setIsVideoCameraReady(false);
-			setVideoCameraMounted(false);
-			setVideoCameraKey(key => key + 1);
-			setVideoRecorderOpen(true);
+			await presentVideoRecorder();
 		} catch (error) {
 			setNotice(error instanceof Error ? error.message : String(error));
+		} finally {
+			openingVideoRecorderRef.current = false;
+			setIsOpeningVideoRecorder(false);
 		}
+	}
+
+	async function presentVideoRecorder() {
+		videoTranscriptRef.current = '';
+		setVideoTranscript('');
+		setIsVideoCameraReady(false);
+		setVideoCameraMounted(false);
+		setVideoCameraKey(key => key + 1);
+		if (composerOpen) {
+			setComposerOpen(false);
+			await new Promise(resolve => setTimeout(resolve, VIDEO_RECORDER_MODAL_OPEN_DELAY_MS));
+		}
+		setVideoRecorderOpen(true);
 	}
 
 	function closeVideoRecorder() {
@@ -1572,7 +1592,7 @@ export default function LogScreen() {
 								icon='video.fill'
 								label='Video log'
 								disabled={!canRecordVideo}
-								loading={isVideoSaving}
+								loading={isVideoSaving || isOpeningVideoRecorder}
 								intent='video'
 								size='small'
 								onPress={() => void openVideoRecorder()}
