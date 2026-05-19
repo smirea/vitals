@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { generateText } from 'ai';
+import { generateText, type FinishReason } from 'ai';
 import { asc, desc, eq, inArray, isNull, ne, or } from 'drizzle-orm';
 import { z } from 'zod';
 
@@ -1175,7 +1175,7 @@ async function summarizeDiaryEntry(input: { notes: string; transcript?: string |
 		].join('\n'),
 		temperature: 0,
 		maxRetries: 2,
-		maxOutputTokens: 1_000,
+		maxOutputTokens: 2_000,
 		timeout: { totalMs: 45_000 },
 	});
 	const summary = result.text.trim();
@@ -1183,8 +1183,40 @@ async function summarizeDiaryEntry(input: { notes: string; transcript?: string |
 	if (!summary) {
 		throw new Error('Summary model returned an empty response.');
 	}
+	assertCompleteDiarySummary({
+		summary,
+		finishReason: result.finishReason,
+		rawFinishReason: result.rawFinishReason,
+	});
 
 	return summary;
+}
+
+function assertCompleteDiarySummary(input: {
+	summary: string;
+	finishReason: FinishReason;
+	rawFinishReason: string | undefined;
+}) {
+	if (input.finishReason !== 'stop') {
+		throw new Error(
+			`Summary model did not finish cleanly: ${input.finishReason}${
+				input.rawFinishReason ? ` (${input.rawFinishReason})` : ''
+			}.`,
+		);
+	}
+
+	if (hasUnbalancedStrongMarkdown(input.summary) || endsWithDanglingBullet(input.summary)) {
+		throw new Error(`Summary model returned incomplete markdown: ${input.summary.slice(-160)}`);
+	}
+}
+
+function hasUnbalancedStrongMarkdown(value: string) {
+	return (value.match(/\*\*/g) ?? []).length % 2 !== 0;
+}
+
+function endsWithDanglingBullet(value: string) {
+	const lastLine = value.trimEnd().split('\n').at(-1)?.trim() ?? '';
+	return /^[-*]\s+(?:\*\*)?[^.!?:;]+$/.test(lastLine);
 }
 
 export async function listDiaryEntries(db: VitalsDatabase) {
