@@ -496,9 +496,13 @@ export default function LogScreen() {
 	const [selectedVideoMemo, setSelectedVideoMemo] = useState<PlayableVideoMemo | null>(null);
 	const [isUploadingRecording, setIsUploadingRecording] = useState(false);
 	const [videoRecorderOpen, setVideoRecorderOpen] = useState(false);
+	const [videoCameraMounted, setVideoCameraMounted] = useState(false);
+	const [isVideoCameraReady, setIsVideoCameraReady] = useState(false);
 	const [isVideoRecording, setIsVideoRecording] = useState(false);
+	const [isVideoStarting, setIsVideoStarting] = useState(false);
 	const [isVideoSaving, setIsVideoSaving] = useState(false);
 	const [videoStartedAt, setVideoStartedAt] = useState<number | null>(null);
+	const [videoCameraKey, setVideoCameraKey] = useState(0);
 	const [videoTranscript, setVideoTranscript] = useState('');
 	const [localVideoDrafts, setLocalVideoDrafts] = useState<LocalVideoDraft[]>([]);
 	const [composerOpen, setComposerOpen] = useState(false);
@@ -671,6 +675,11 @@ export default function LogScreen() {
 	useEffect(() => {
 		if (!filterOptions.some(option => option.key === activeFilter)) setActiveFilter('entries');
 	}, [activeFilter, filterOptions]);
+	useEffect(() => {
+		if (videoRecorderOpen) return;
+		setVideoCameraMounted(false);
+		setIsVideoCameraReady(false);
+	}, [videoRecorderOpen]);
 
 	const isBusy =
 		createEntryMutation.isPending ||
@@ -678,6 +687,7 @@ export default function LogScreen() {
 		resetVoiceMemoDraftMutation.isPending ||
 		finishVoiceMemoDraftMutation.isPending ||
 		isUploadingRecording ||
+		isVideoStarting ||
 		isVideoSaving ||
 		recorderState.isRecording;
 	const canCreateEntry = notes.trim().length > 0 && currentLocation !== null && !isBusy;
@@ -690,6 +700,7 @@ export default function LogScreen() {
 		!startVoiceMemoDraftMutation.isPending &&
 		!resetVoiceMemoDraftMutation.isPending &&
 		!finishVoiceMemoDraftMutation.isPending &&
+		!isVideoStarting &&
 		!isVideoSaving &&
 		!recorderState.isRecording;
 	const error =
@@ -874,10 +885,20 @@ export default function LogScreen() {
 
 			videoTranscriptRef.current = '';
 			setVideoTranscript('');
+			setIsVideoCameraReady(false);
+			setVideoCameraMounted(false);
+			setVideoCameraKey(key => key + 1);
 			setVideoRecorderOpen(true);
 		} catch (error) {
 			setNotice(error instanceof Error ? error.message : String(error));
 		}
+	}
+
+	function closeVideoRecorder() {
+		if (isVideoRecording || isVideoStarting || isVideoSaving) return;
+		setVideoRecorderOpen(false);
+		setVideoCameraMounted(false);
+		setIsVideoCameraReady(false);
 	}
 
 	async function toggleVideoRecording() {
@@ -890,9 +911,13 @@ export default function LogScreen() {
 
 	async function startVideoRecording() {
 		try {
+			setIsVideoStarting(true);
 			const location = getRequiredLocation();
 			if (!cameraRef.current) {
 				throw new Error('Camera is not ready.');
+			}
+			if (!isVideoCameraReady) {
+				throw new Error('Camera preview is still starting.');
 			}
 
 			const streamingAudioRecorder = await createStreamingAudioRecorder();
@@ -953,11 +978,13 @@ export default function LogScreen() {
 			videoTranscriptRef.current = '';
 			setVideoTranscript('');
 			setIsVideoRecording(true);
+			setIsVideoStarting(false);
 			videoRecordingPromiseRef.current = cameraRef.current.recordAsync({
 				maxDuration: 10 * 60,
 			});
 		} catch (error) {
 			setIsVideoRecording(false);
+			setIsVideoStarting(false);
 			videoRecordingPromiseRef.current = null;
 			videoRecordingSessionRef.current = null;
 			videoSttSocketRef.current?.close();
@@ -1640,24 +1667,42 @@ export default function LogScreen() {
 				visible={videoRecorderOpen}
 				animationType='slide'
 				presentationStyle='fullScreen'
-				onRequestClose={() => {
-					if (!isVideoRecording && !isVideoSaving) setVideoRecorderOpen(false);
+				onShow={() => setVideoCameraMounted(true)}
+				onDismiss={() => {
+					setVideoCameraMounted(false);
+					setIsVideoCameraReady(false);
 				}}
+				onRequestClose={closeVideoRecorder}
 			>
 				<View style={styles.videoScreen}>
-					<CameraView
-						ref={cameraRef}
-						active={videoRecorderOpen}
-						facing='front'
-						mirror
-						mode='video'
-						style={styles.cameraPreview}
-						videoQuality='720p'
-					/>
+					{videoCameraMounted ? (
+						<CameraView
+							key={videoCameraKey}
+							ref={cameraRef}
+							active={videoRecorderOpen && videoCameraMounted}
+							facing='front'
+							mirror
+							mode='video'
+							onCameraReady={() => setIsVideoCameraReady(true)}
+							onMountError={event => {
+								setIsVideoCameraReady(false);
+								setNotice(event.message);
+							}}
+							style={styles.cameraPreview}
+							videoQuality='720p'
+						/>
+					) : (
+						<View style={styles.cameraPreview} />
+					)}
+					{!isVideoCameraReady ? (
+						<View pointerEvents='none' style={styles.cameraStartingOverlay}>
+							<Text style={styles.cameraStartingText}>Starting camera...</Text>
+						</View>
+					) : null}
 					<View style={styles.videoTopBar}>
 						<Pressable
-							disabled={isVideoRecording || isVideoSaving}
-							onPress={() => setVideoRecorderOpen(false)}
+							disabled={isVideoRecording || isVideoStarting || isVideoSaving}
+							onPress={closeVideoRecorder}
 							style={styles.videoCloseButton}
 						>
 							<Text style={styles.videoCloseText}>Close</Text>
@@ -1669,9 +1714,15 @@ export default function LogScreen() {
 							styles={styles}
 						/>
 						<Pressable
-							disabled={isVideoSaving}
+							disabled={
+								isVideoSaving || isVideoStarting || (!isVideoRecording && !isVideoCameraReady)
+							}
 							onPress={() => void toggleVideoRecording()}
-							style={styles.recordButtonShell}
+							style={[
+								styles.recordButtonShell,
+								(isVideoSaving || isVideoStarting || (!isVideoRecording && !isVideoCameraReady)) &&
+									styles.recordButtonShellDisabled,
+							]}
 						>
 							<Animated.View
 								style={[
@@ -1695,9 +1746,13 @@ export default function LogScreen() {
 						<Text style={styles.videoStatus}>
 							{isVideoSaving
 								? 'Saving...'
-								: isVideoRecording && videoStartedAt
-									? formatDuration((Date.now() - videoStartedAt) / 1000)
-									: 'Tap to record'}
+								: isVideoStarting
+									? 'Starting...'
+									: isVideoRecording && videoStartedAt
+										? formatDuration((Date.now() - videoStartedAt) / 1000)
+										: isVideoCameraReady
+											? 'Tap to record'
+											: 'Starting camera...'}
 						</Text>
 					</View>
 				</View>
@@ -2518,6 +2573,27 @@ function logStyles(isDark: boolean) {
 		cameraPreview: {
 			flex: 1,
 		},
+		cameraStartingOverlay: {
+			alignItems: 'center' as const,
+			bottom: 0,
+			justifyContent: 'center' as const,
+			left: 0,
+			position: 'absolute' as const,
+			right: 0,
+			top: 0,
+		},
+		cameraStartingText: {
+			backgroundColor: 'rgba(0, 0, 0, 0.42)',
+			borderColor: 'rgba(255, 255, 255, 0.26)',
+			borderRadius: 999,
+			borderWidth: 1,
+			color: '#fff',
+			fontSize: 14,
+			fontWeight: '800' as const,
+			overflow: 'hidden' as const,
+			paddingHorizontal: 14,
+			paddingVertical: 8,
+		},
 		videoTopBar: {
 			left: 0,
 			paddingHorizontal: 18,
@@ -2577,6 +2653,9 @@ function logStyles(isDark: boolean) {
 			height: 90,
 			justifyContent: 'center' as const,
 			width: 90,
+		},
+		recordButtonShellDisabled: {
+			opacity: 0.62,
 		},
 		recordButton: {
 			alignItems: 'center' as const,
