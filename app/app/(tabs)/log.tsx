@@ -318,20 +318,15 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
 }
 
 async function createStreamingAudioRecorder() {
-	let audioStudio: {
-		AudioStudioModule: NativeAudioStudioModule;
-	};
-	try {
-		audioStudio = await import('@siteed/audio-studio');
-	} catch (error) {
-		const detail = error instanceof Error ? error.message : String(error);
+	const { LegacyEventEmitter, requireOptionalNativeModule } = await import('expo-modules-core');
+	const audioStudioModule = requireOptionalNativeModule<NativeAudioStudioModule>('AudioStudio');
+	if (!audioStudioModule) {
 		throw new Error(
-			`AudioStudio native module is not available in this iOS build. Rebuild and reinstall the Expo dev client so @siteed/audio-studio is linked, then start Expo with --dev-client. ${detail}`,
+			'AudioStudio native module is not available in this iOS build. Video logs need the development client, not Expo Go. Rebuild and reinstall the app with `bunx expo run:ios`, then start Metro with `bunx expo start --dev-client`.',
 		);
 	}
-	const { LegacyEventEmitter } = await import('expo-modules-core');
 	const emitter = new LegacyEventEmitter(
-		audioStudio.AudioStudioModule as ConstructorParameters<typeof LegacyEventEmitter>[0],
+		audioStudioModule as ConstructorParameters<typeof LegacyEventEmitter>[0],
 	);
 	let subscription: { remove: () => void } | null = null;
 	let onAudioStream: StreamingAudioConfig['onAudioStream'] | null = null;
@@ -355,11 +350,11 @@ async function createStreamingAudioRecorder() {
 					streamError = error instanceof Error ? error : new Error(String(error));
 				});
 			});
-			await audioStudio.AudioStudioModule.startRecording(nativeConfig);
+			await audioStudioModule.startRecording(nativeConfig);
 		},
 		async stopRecording() {
 			try {
-				const recording = await audioStudio.AudioStudioModule.stopRecording();
+				const recording = await audioStudioModule.stopRecording();
 				if (streamError) {
 					throw streamError;
 				}
@@ -1025,6 +1020,8 @@ export default function LogScreen() {
 					return;
 				}
 			}
+			videoTranscriptRef.current = message;
+			setVideoTranscript(message);
 			setNotice(message);
 		}
 	}
