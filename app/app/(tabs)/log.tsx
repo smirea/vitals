@@ -13,7 +13,6 @@ import {
 	useAudioRecorder as useExpoAudioRecorder,
 	useAudioRecorderState,
 } from 'expo-audio';
-import { useAudioRecorder as useStreamingAudioRecorder } from '@siteed/audio-studio';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -79,6 +78,49 @@ type StreamingTranscriptDeferred = {
 	resolve: (transcript: string) => void;
 	reject: (error: Error) => void;
 	isSettled: boolean;
+};
+type StreamingAudioEvent = {
+	data: string | Float32Array | Int16Array;
+	fileUri?: string;
+	position?: number;
+	eventDataSize?: number;
+	totalSize?: number;
+};
+type StreamingAudioRecording = {
+	fileUri?: string | null;
+};
+type StreamingAudioConfig = {
+	sampleRate: 16_000 | 44_100 | 48_000;
+	channels: 1 | 2;
+	encoding: 'pcm_16bit';
+	interval: number;
+	streamFormat: 'raw';
+	filename: string;
+	outputDirectory: string;
+	output: {
+		primary: {
+			enabled: boolean;
+			format: 'wav';
+		};
+	};
+	onAudioStream: (event: StreamingAudioEvent) => Promise<void>;
+};
+type StreamingAudioRecorder = {
+	startRecording: (config: StreamingAudioConfig) => Promise<void>;
+	stopRecording: () => Promise<StreamingAudioRecording | null>;
+};
+type NativeAudioStudioModule = {
+	startRecording: (config: Omit<StreamingAudioConfig, 'onAudioStream'>) => Promise<unknown>;
+	stopRecording: () => Promise<StreamingAudioRecording | null>;
+};
+type NativeAudioEvent = {
+	encoded?: string;
+	data?: string | Float32Array | Int16Array;
+	fileUri?: string;
+	position?: number;
+	deltaSize?: number;
+	eventDataSize?: number;
+	totalSize?: number;
 };
 
 type DiaryLocationInput = {
@@ -274,6 +316,62 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
 	});
 }
 
+async function createStreamingAudioRecorder() {
+	let audioStudio: {
+		AudioStudioModule: NativeAudioStudioModule;
+	};
+	try {
+		audioStudio = await import('@siteed/audio-studio');
+	} catch (error) {
+		const detail = error instanceof Error ? error.message : String(error);
+		throw new Error(
+			`AudioStudio native module is not available in this iOS build. Rebuild and reinstall the Expo dev client so @siteed/audio-studio is linked, then start Expo with --dev-client. ${detail}`,
+		);
+	}
+	const { LegacyEventEmitter } = await import('expo-modules-core');
+	const emitter = new LegacyEventEmitter(
+		audioStudio.AudioStudioModule as ConstructorParameters<typeof LegacyEventEmitter>[0],
+	);
+	let subscription: { remove: () => void } | null = null;
+	let onAudioStream: StreamingAudioConfig['onAudioStream'] | null = null;
+	let streamError: Error | null = null;
+
+	return {
+		async startRecording(config) {
+			const { onAudioStream: streamHandler, ...nativeConfig } = config;
+			onAudioStream = streamHandler;
+			streamError = null;
+			subscription = emitter.addListener('AudioData', (event: NativeAudioEvent) => {
+				const data = event.encoded ?? event.data;
+				if (!data || !onAudioStream) return;
+				void onAudioStream({
+					data,
+					fileUri: event.fileUri,
+					position: event.position,
+					eventDataSize: event.deltaSize ?? event.eventDataSize,
+					totalSize: event.totalSize,
+				}).catch(error => {
+					streamError = error instanceof Error ? error : new Error(String(error));
+				});
+			});
+			await audioStudio.AudioStudioModule.startRecording(nativeConfig);
+		},
+		async stopRecording() {
+			try {
+				const recording = await audioStudio.AudioStudioModule.stopRecording();
+				if (streamError) {
+					throw streamError;
+				}
+				return recording;
+			} finally {
+				subscription?.remove();
+				subscription = null;
+				onAudioStream = null;
+			}
+		},
+	} satisfies StreamingAudioRecorder;
+}
+
 function audioExtensionFromUri(uri: string) {
 	const path = uri.split('?')[0] ?? uri;
 	const extension = path
@@ -373,9 +471,9 @@ export default function LogScreen() {
 	const styles = logStyles(isDark);
 	const sharedStyles = pageStyles(isDark);
 	const audioRecorder = useExpoAudioRecorder(RecordingPresets.HIGH_QUALITY);
-	const streamingAudioRecorder = useStreamingAudioRecorder();
 	const recorderState = useAudioRecorderState(audioRecorder);
 	const cameraRef = useRef<CameraView>(null);
+	const streamingAudioRecorderRef = useRef<StreamingAudioRecorder | null>(null);
 	const videoRecordingPromiseRef = useRef<Promise<{ uri: string } | undefined> | null>(null);
 	const videoSttSocketRef = useRef<WebSocket | null>(null);
 	const pendingVideoAudioChunksRef = useRef<string[]>([]);
@@ -796,6 +894,8 @@ export default function LogScreen() {
 				throw new Error('Camera is not ready.');
 			}
 
+			const streamingAudioRecorder = await createStreamingAudioRecorder();
+			streamingAudioRecorderRef.current = streamingAudioRecorder;
 			const startedAt = new Date();
 			const audioDirectory = localVideoAudioDirectory();
 			await ensureDirectory(audioDirectory);
@@ -862,8 +962,22 @@ export default function LogScreen() {
 			videoSttSocketRef.current?.close();
 			videoSttSocketRef.current = null;
 			videoTranscriptDoneRef.current = null;
-			await streamingAudioRecorder.stopRecording().catch(() => null);
-			setNotice(error instanceof Error ? error.message : String(error));
+			const cleanupRecorder = streamingAudioRecorderRef.current;
+			streamingAudioRecorderRef.current = null;
+			const message = error instanceof Error ? error.message : String(error);
+			if (cleanupRecorder) {
+				try {
+					await cleanupRecorder.stopRecording();
+				} catch (cleanupError) {
+					setNotice(
+						`${message} AudioStudio cleanup also failed: ${
+							cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+						}`,
+					);
+					return;
+				}
+			}
+			setNotice(message);
 		}
 	}
 
@@ -876,8 +990,13 @@ export default function LogScreen() {
 			if (!session) {
 				throw new Error('Video recording session is missing.');
 			}
+			const streamingAudioRecorder = streamingAudioRecorderRef.current;
+			if (!streamingAudioRecorder) {
+				throw new Error('Video audio recorder is missing.');
+			}
 			cameraRef.current?.stopRecording();
 			const audio = await streamingAudioRecorder.stopRecording();
+			streamingAudioRecorderRef.current = null;
 			if (videoSttSocketRef.current?.readyState === WebSocket.OPEN) {
 				videoSttSocketRef.current.send(JSON.stringify({ type: 'audio.done' }));
 			}
@@ -955,6 +1074,7 @@ export default function LogScreen() {
 			videoSttSocketRef.current?.close();
 			videoSttSocketRef.current = null;
 			videoTranscriptDoneRef.current = null;
+			streamingAudioRecorderRef.current = null;
 		}
 	}
 
