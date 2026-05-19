@@ -108,11 +108,14 @@ export function Button({
 					opacity: disabledOrLoading ? 0.62 : pressed ? 0.82 : 1,
 					paddingHorizontal: iconOnly ? 0 : resolvedSize.paddingHorizontal,
 					paddingVertical: resolvedSize.paddingVertical,
-					transform: pressed && !disabledOrLoading ? [{ scale: 0.98 }] : undefined,
 					width: fullWidth ? '100%' : undefined,
 				};
+				const pressedStyle: ViewStyle | undefined =
+					pressed && !disabledOrLoading ? { transform: [{ scale: 0.98 }] } : undefined;
 
-				return [buttonStyle, style] as StyleProp<ViewStyle>;
+				return pressedStyle
+					? ([buttonStyle, pressedStyle, style] as StyleProp<ViewStyle>)
+					: ([buttonStyle, style] as StyleProp<ViewStyle>);
 			},
 		},
 		loading
