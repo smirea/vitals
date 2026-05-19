@@ -849,6 +849,7 @@ export default function LogScreen() {
 			await uploadLocalVideoDraft(savedDraft);
 			setNotes('');
 			setTagText('');
+			setComposerOpen(false);
 			setNotice(`Video log uploaded for processing: ${videoFileName}`);
 		} catch (error) {
 			if (savedDraft) {
@@ -1016,6 +1017,7 @@ export default function LogScreen() {
 		setIsVideoSaving(true);
 		void uploadLocalVideoDraft(draft)
 			.then(() => {
+				setComposerOpen(false);
 				setNotice('Local video log reprocessed.');
 			})
 			.catch(error => {
