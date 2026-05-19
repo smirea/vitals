@@ -1,7 +1,7 @@
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from 'server/trpc/index.ts';
 import { API_BASE_URL, useTRPC } from '@/src/api/trpc';
-import { ActivityIndicator, Modal, Tag } from '@ant-design/react-native';
+import { ActivityIndicator, Modal, Steps, Tag } from '@ant-design/react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -67,6 +67,7 @@ type VideoRecordingSession = {
 	localId: string;
 	startedAt: string;
 };
+type VideoProgressStep = 'upload' | 'transcribe' | 'summarize' | 'done';
 
 type DiaryLocationInput = {
 	capturedAt: string;
@@ -204,6 +205,41 @@ function videoMimeTypeFromUri(uri: string) {
 
 function formatRecorderDuration(milliseconds: number) {
 	return formatDuration(Math.max(milliseconds, 0) / 1000);
+}
+
+function videoProgressStepIndex(step: VideoProgressStep) {
+	if (step === 'transcribe') return 1;
+	if (step === 'summarize') return 2;
+	if (step === 'done') return 3;
+	return 0;
+}
+
+function videoProgressFromLocalDraft(draft: LocalVideoDraft) {
+	if (draft.status === 'failed') {
+		return {
+			step: draft.serverVoiceMemoId ? ('transcribe' as const) : ('upload' as const),
+			failed: true,
+		};
+	}
+	if (draft.status === 'processing' || draft.serverVoiceMemoId) {
+		return { step: 'transcribe' as const, failed: false };
+	}
+	return { step: 'upload' as const, failed: false };
+}
+
+function videoProgressFromVoiceMemoStatus(status: DiaryPendingVoiceMemo['transcriptionStatus']) {
+	if (status === 'summarizing') return { step: 'summarize' as const, failed: false };
+	if (status === 'completed') return { step: 'done' as const, failed: false };
+	if (status === 'failed') return { step: 'transcribe' as const, failed: true };
+	return { step: 'transcribe' as const, failed: false };
+}
+
+function videoProgressFromRecovery(recovery: DiaryPendingVoiceMemoRecovery) {
+	if (recovery.status === 'summarizing') return { step: 'summarize' as const, failed: false };
+	if (recovery.status === 'completed') return { step: 'done' as const, failed: false };
+	if (recovery.status === 'transcribing') return { step: 'transcribe' as const, failed: false };
+	if (recovery.status === 'failed') return { step: 'upload' as const, failed: true };
+	return { step: 'upload' as const, failed: false };
 }
 
 function audioExtensionFromUri(uri: string) {
@@ -411,7 +447,6 @@ export default function LogScreen() {
 		...trpc.diary.processVoiceMemo.mutationOptions(),
 		onSuccess: async () => {
 			await invalidateDiary();
-			setNotice('Voice memo reprocessed.');
 		},
 		onError: error => setNotice(error.message),
 	});
@@ -419,7 +454,6 @@ export default function LogScreen() {
 		...trpc.diary.processVoiceMemoRecovery.mutationOptions(),
 		onSuccess: async () => {
 			await invalidateDiary();
-			setNotice('Recovery memo reprocessed.');
 		},
 		onError: error => setNotice(error.message),
 	});
@@ -817,7 +851,6 @@ export default function LogScreen() {
 			setIsVideoCameraReady(false);
 			setComposerOpen(true);
 			setActiveFilter('recoveries');
-			setNotice('Saving video locally...');
 			const video = await videoRecordingPromiseRef.current;
 			if (!video?.uri) {
 				throw new Error('Video recording finished without a file URI.');
@@ -850,7 +883,6 @@ export default function LogScreen() {
 			setNotes('');
 			setTagText('');
 			setComposerOpen(false);
-			setNotice(`Video log uploaded for processing: ${videoFileName}`);
 		} catch (error) {
 			if (savedDraft) {
 				await updateLocalVideoDraft(savedDraft.id, {
@@ -1018,7 +1050,6 @@ export default function LogScreen() {
 		void uploadLocalVideoDraft(draft)
 			.then(() => {
 				setComposerOpen(false);
-				setNotice('Local video log reprocessed.');
 			})
 			.catch(error => {
 				setNotice(error instanceof Error ? error.message : String(error));
@@ -1530,13 +1561,19 @@ function PendingVoiceMemoCard({
 		<View style={styles.videoMemoContent}>
 			<View style={styles.rowBetween}>
 				<Text style={styles.cardTitle}>{formatDiaryTimestamp(memo.createdAt)}</Text>
-				<Tag small>{memo.transcriptionStatus}</Tag>
+				{memo.mediaKind === 'audio' ? <Tag small>{memo.transcriptionStatus}</Tag> : null}
 			</View>
 			<Text style={styles.muted}>
 				{memo.mediaKind === 'video' ? (memo.videoFileName ?? memo.fileName) : memo.fileName} -{' '}
 				{formatDuration(memo.durationSeconds)} -{' '}
 				{formatBytes(memo.mediaKind === 'video' ? memo.videoBytes : memo.audioBytes)}
 			</Text>
+			{memo.mediaKind === 'video' ? (
+				<VideoProgressSteps
+					progress={videoProgressFromVoiceMemoStatus(memo.transcriptionStatus)}
+					styles={styles}
+				/>
+			) : null}
 			{memo.mediaKind === 'audio' ? (
 				<Pressable
 					onPress={() => {
@@ -1587,15 +1624,40 @@ function VideoProcessingCard({ styles }: { styles: ReturnType<typeof logStyles> 
 	return (
 		<View style={styles.entryCard}>
 			<View style={styles.stack}>
-				<View style={styles.rowBetween}>
-					<Text style={styles.cardTitle}>Video log</Text>
-					<Tag small>processing</Tag>
-				</View>
-				<View style={styles.processingRow}>
-					<ActivityIndicator size='small' />
-					<Text style={styles.bodyPreview}>Saving video locally and queuing upload.</Text>
-				</View>
+				<Text style={styles.cardTitle}>Video log</Text>
+				<VideoProgressSteps progress={{ step: 'upload', failed: false }} styles={styles} />
 			</View>
+		</View>
+	);
+}
+
+function VideoProgressSteps({
+	progress,
+	styles,
+}: {
+	progress: { step: VideoProgressStep; failed: boolean };
+	styles: ReturnType<typeof logStyles>;
+}) {
+	const current = videoProgressStepIndex(progress.step);
+	return (
+		<View style={styles.videoProgress}>
+			<Steps direction='horizontal' size='small' current={current}>
+				{(['Upload', 'Transcribe', 'Summarize', 'Done'] as const).map((title, index) => (
+					<Steps.Step
+						key={title}
+						title={title}
+						status={
+							progress.failed && index === current
+								? 'error'
+								: index < current
+									? 'finish'
+									: index === current
+										? 'process'
+										: 'wait'
+						}
+					/>
+				))}
+			</Steps>
 		</View>
 	);
 }
@@ -1620,12 +1682,12 @@ function LocalVideoDraftCard({
 				<View style={styles.videoMemoContent}>
 					<View style={styles.rowBetween}>
 						<Text style={styles.cardTitle}>{formatDiaryTimestamp(draft.createdAt)}</Text>
-						<Tag small>{draft.status}</Tag>
 					</View>
 					<Text style={styles.muted}>
 						{draft.videoFileName} - {formatDuration(draft.durationSeconds)} -{' '}
 						{formatBytes(draft.videoBytes)}
 					</Text>
+					<VideoProgressSteps progress={videoProgressFromLocalDraft(draft)} styles={styles} />
 					<Text style={styles.bodyPreview} numberOfLines={3}>
 						{draft.notes.trim() || 'Local video waiting to process'}
 					</Text>
@@ -1668,7 +1730,7 @@ function RecoveryMemoCard({
 			<View style={styles.stack}>
 				<View style={styles.rowBetween}>
 					<Text style={styles.cardTitle}>{formatDiaryTimestamp(recovery.createdAt)}</Text>
-					<Tag small>{recovery.status}</Tag>
+					{recovery.mediaKind === 'audio' ? <Tag small>{recovery.status}</Tag> : null}
 				</View>
 				<Text style={styles.muted}>
 					{recovery.mediaKind === 'video'
@@ -1677,6 +1739,9 @@ function RecoveryMemoCard({
 					- {formatDuration(recovery.durationSeconds)} -{' '}
 					{formatBytes(recovery.mediaKind === 'video' ? recovery.videoBytes : recovery.audioBytes)}
 				</Text>
+				{recovery.mediaKind === 'video' ? (
+					<VideoProgressSteps progress={videoProgressFromRecovery(recovery)} styles={styles} />
+				) : null}
 				<Text style={styles.bodyPreview} numberOfLines={4}>
 					{recovery.transcript?.trim() || 'No transcript yet'}
 				</Text>
@@ -1957,10 +2022,8 @@ function logStyles(isDark: boolean) {
 			gap: 8,
 			justifyContent: 'flex-end' as const,
 		},
-		processingRow: {
-			alignItems: 'center' as const,
-			flexDirection: 'row' as const,
-			gap: 8,
+		videoProgress: {
+			paddingTop: 2,
 		},
 		composerFooter: {
 			alignItems: 'center' as const,
