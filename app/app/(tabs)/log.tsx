@@ -45,7 +45,7 @@ type PlayableVideoMemo = {
 	id: number;
 	fileName: string;
 };
-type LocalVideoDraftStatus = 'local_saved' | 'uploading' | 'server_saved' | 'failed';
+type LocalVideoDraftStatus = 'local_saved' | 'uploading' | 'processing' | 'server_saved' | 'failed';
 type LocalVideoDraft = {
 	id: string;
 	createdAt: string;
@@ -326,6 +326,7 @@ export default function LogScreen() {
 	const [isVideoStarting, setIsVideoStarting] = useState(false);
 	const [isVideoSaving, setIsVideoSaving] = useState(false);
 	const [videoStartedAt, setVideoStartedAt] = useState<number | null>(null);
+	const [videoElapsedMs, setVideoElapsedMs] = useState(0);
 	const [videoCameraKey, setVideoCameraKey] = useState(0);
 	const [localVideoDrafts, setLocalVideoDrafts] = useState<LocalVideoDraft[]>([]);
 	const [composerOpen, setComposerOpen] = useState(false);
@@ -351,7 +352,8 @@ export default function LogScreen() {
 				{
 					key: 'recoveries',
 					label: 'Recoveries',
-					value: pendingVoiceMemoRecoveries.length + localVideoDrafts.length,
+					value:
+						pendingVoiceMemoRecoveries.length + localVideoDrafts.length + (isVideoSaving ? 1 : 0),
 				},
 			].filter(option => option.key === 'entries' || option.value > 0) as Array<{
 				key: LogFilter;
@@ -360,6 +362,7 @@ export default function LogScreen() {
 			}>,
 		[
 			entries.length,
+			isVideoSaving,
 			localVideoDrafts.length,
 			pendingVoiceMemoRecoveries.length,
 			pendingVoiceMemos.length,
@@ -495,6 +498,17 @@ export default function LogScreen() {
 		animation.start();
 		return () => animation.stop();
 	}, [isVideoRecording, recordPulse]);
+	useEffect(() => {
+		if (!isVideoRecording || !videoStartedAt) {
+			setVideoElapsedMs(0);
+			return;
+		}
+
+		const updateElapsed = () => setVideoElapsedMs(Date.now() - videoStartedAt);
+		updateElapsed();
+		const interval = setInterval(updateElapsed, 250);
+		return () => clearInterval(interval);
+	}, [isVideoRecording, videoStartedAt]);
 	useEffect(() => {
 		if (!filterOptions.some(option => option.key === activeFilter)) setActiveFilter('entries');
 	}, [activeFilter, filterOptions]);
@@ -763,6 +777,7 @@ export default function LogScreen() {
 				localId: `video-${startedAt.toISOString().replace(/[:.]/g, '-')}`,
 				startedAt: startedAt.toISOString(),
 			};
+			setVideoElapsedMs(0);
 			setVideoStartedAt(Date.now());
 			setIsVideoRecording(true);
 			setIsVideoStarting(false);
@@ -789,6 +804,13 @@ export default function LogScreen() {
 				throw new Error('Video recording session is missing.');
 			}
 			cameraRef.current?.stopRecording();
+			setIsVideoRecording(false);
+			setVideoRecorderOpen(false);
+			setVideoCameraMounted(false);
+			setIsVideoCameraReady(false);
+			setComposerOpen(true);
+			setActiveFilter('recoveries');
+			setNotice('Saving video locally...');
 			const video = await videoRecordingPromiseRef.current;
 			if (!video?.uri) {
 				throw new Error('Video recording finished without a file URI.');
@@ -802,7 +824,7 @@ export default function LogScreen() {
 				id: session.localId,
 				createdAt: session.startedAt,
 				updatedAt: new Date().toISOString(),
-				status: 'local_saved',
+				status: 'uploading',
 				error: null,
 				notes,
 				tagNames,
@@ -816,11 +838,10 @@ export default function LogScreen() {
 				serverVoiceMemoId: null,
 			};
 			await saveLocalVideoDraft(savedDraft);
+			setActiveFilter('recoveries');
 			await uploadLocalVideoDraft(savedDraft);
 			setNotes('');
 			setTagText('');
-			setComposerOpen(false);
-			setVideoRecorderOpen(false);
 			setNotice(`Video log uploaded for processing: ${videoFileName}`);
 		} catch (error) {
 			if (savedDraft) {
@@ -834,6 +855,7 @@ export default function LogScreen() {
 			setIsVideoRecording(false);
 			setIsVideoSaving(false);
 			setVideoStartedAt(null);
+			setVideoElapsedMs(0);
 			videoRecordingPromiseRef.current = null;
 			videoRecordingSessionRef.current = null;
 		}
@@ -847,6 +869,9 @@ export default function LogScreen() {
 
 		try {
 			if (draft.serverVoiceMemoId) {
+				await updateLocalVideoDraft(draft.id, {
+					status: 'processing',
+				});
 				await processVoiceMemoMutation.mutateAsync({
 					voiceMemoId: draft.serverVoiceMemoId,
 				});
@@ -886,7 +911,7 @@ export default function LogScreen() {
 				durationSeconds: draft.durationSeconds,
 			});
 			await updateLocalVideoDraft(draft.id, {
-				status: 'server_saved',
+				status: 'processing',
 				serverVoiceMemoId: saved.voiceMemoId,
 				error: null,
 			});
@@ -1093,6 +1118,9 @@ export default function LogScreen() {
 
 				{activeFilter === 'recoveries' ? (
 					<View style={styles.listStack}>
+						{isVideoSaving && localVideoDrafts.length === 0 ? (
+							<VideoProcessingCard styles={styles} />
+						) : null}
 						{localVideoDrafts.map(draft => (
 							<LocalVideoDraftCard
 								key={draft.id}
@@ -1203,9 +1231,13 @@ export default function LogScreen() {
 					) : null}
 					{pendingVoiceMemos.length > 0 ||
 					pendingVoiceMemoRecoveries.length > 0 ||
-					localVideoDrafts.length > 0 ? (
+					localVideoDrafts.length > 0 ||
+					isVideoSaving ? (
 						<View style={styles.stack}>
 							<Text style={styles.sectionTitle}>Unprocessed recordings</Text>
+							{isVideoSaving && localVideoDrafts.length === 0 ? (
+								<VideoProcessingCard styles={styles} />
+							) : null}
 							{localVideoDrafts.slice(0, 2).map(draft => (
 								<LocalVideoDraftCard
 									key={draft.id}
@@ -1309,23 +1341,32 @@ export default function LogScreen() {
 									styles.recordButtonShellDisabled,
 							]}
 						>
+							{isVideoRecording ? (
+								<Animated.View
+									pointerEvents='none'
+									style={[
+										styles.recordPulseRing,
+										{
+											opacity: recordPulse.interpolate({
+												inputRange: [0, 1],
+												outputRange: [0.32, 0],
+											}),
+											transform: [
+												{
+													scale: recordPulse.interpolate({
+														inputRange: [0, 1],
+														outputRange: [1, 1.28],
+													}),
+												},
+											],
+										},
+									]}
+								/>
+							) : null}
 							<Animated.View
-								style={[
-									styles.recordButton,
-									isVideoRecording && styles.recordButtonActive,
-									{
-										transform: [
-											{
-												scale: recordPulse.interpolate({
-													inputRange: [0, 1],
-													outputRange: [1, 1.08],
-												}),
-											},
-										],
-									},
-								]}
+								style={[styles.recordButton, isVideoRecording && styles.recordButtonActive]}
 							>
-								<View style={isVideoRecording ? styles.stopIcon : styles.recordButtonCore} />
+								{isVideoRecording ? <View style={styles.stopIcon} /> : null}
 							</Animated.View>
 						</Pressable>
 						<Text style={styles.videoStatus}>
@@ -1334,7 +1375,7 @@ export default function LogScreen() {
 								: isVideoStarting
 									? 'Starting...'
 									: isVideoRecording && videoStartedAt
-										? formatDuration((Date.now() - videoStartedAt) / 1000)
+										? formatDuration(videoElapsedMs / 1000)
 										: isVideoCameraReady
 											? 'Tap to record'
 											: 'Starting camera...'}
@@ -1532,6 +1573,23 @@ function PendingVoiceMemoCard({
 	}
 
 	return <View style={styles.entryCard}>{content}</View>;
+}
+
+function VideoProcessingCard({ styles }: { styles: ReturnType<typeof logStyles> }) {
+	return (
+		<View style={styles.entryCard}>
+			<View style={styles.stack}>
+				<View style={styles.rowBetween}>
+					<Text style={styles.cardTitle}>Video log</Text>
+					<Tag small>processing</Tag>
+				</View>
+				<View style={styles.processingRow}>
+					<ActivityIndicator size='small' />
+					<Text style={styles.bodyPreview}>Saving video locally and queuing upload.</Text>
+				</View>
+			</View>
+		</View>
+	);
 }
 
 function LocalVideoDraftCard({
@@ -1891,6 +1949,11 @@ function logStyles(isDark: boolean) {
 			gap: 8,
 			justifyContent: 'flex-end' as const,
 		},
+		processingRow: {
+			alignItems: 'center' as const,
+			flexDirection: 'row' as const,
+			gap: 8,
+		},
 		composerFooter: {
 			alignItems: 'center' as const,
 			flexDirection: 'row' as const,
@@ -2186,10 +2249,20 @@ function logStyles(isDark: boolean) {
 			borderWidth: 4,
 			height: 90,
 			justifyContent: 'center' as const,
+			position: 'relative' as const,
 			width: 90,
 		},
 		recordButtonShellDisabled: {
 			opacity: 0.62,
+		},
+		recordPulseRing: {
+			backgroundColor: 'rgba(239, 35, 60, 0.16)',
+			borderColor: 'rgba(239, 35, 60, 0.78)',
+			borderRadius: 999,
+			borderWidth: 3,
+			height: 90,
+			position: 'absolute' as const,
+			width: 90,
 		},
 		recordButton: {
 			alignItems: 'center' as const,
@@ -2200,13 +2273,7 @@ function logStyles(isDark: boolean) {
 			width: 68,
 		},
 		recordButtonActive: {
-			borderRadius: 22,
-		},
-		recordButtonCore: {
-			backgroundColor: '#ef233c',
-			borderRadius: 999,
-			height: 54,
-			width: 54,
+			backgroundColor: '#d90429',
 		},
 		stopIcon: {
 			backgroundColor: '#fff',
