@@ -12,6 +12,7 @@ import {
 	Card,
 	Input,
 	Alert,
+	Modal,
 	Popconfirm,
 	Select,
 	Space,
@@ -80,6 +81,11 @@ type DiaryErrorDetails = {
 	details: string;
 };
 
+type PlayableDiaryVideoMemo = {
+	id: number;
+	fileName: string;
+};
+
 function DiaryRouteComponent() {
 	const trpc = useTRPC();
 	const queryClient = useQueryClient();
@@ -99,6 +105,7 @@ function DiaryRouteComponent() {
 	const [addingTagsEntryId, setAddingTagsEntryId] = useState<number | null>(null);
 	const [addingTagsVoiceMemoId, setAddingTagsVoiceMemoId] = useState<number | null>(null);
 	const [errorDetails, setErrorDetails] = useState<DiaryErrorDetails | null>(null);
+	const [selectedVideoMemo, setSelectedVideoMemo] = useState<PlayableDiaryVideoMemo | null>(null);
 	const mediaRecorderRef = useRef<MediaRecorder | null>(null);
 	const mediaStreamRef = useRef<MediaStream | null>(null);
 	const sttWebSocketRef = useRef<WebSocket | null>(null);
@@ -723,6 +730,13 @@ function DiaryRouteComponent() {
 		deleteVoiceMemoMutation.mutate({ voiceMemoId });
 	}
 
+	function openVideoMemo(memo: DiaryVoiceMemo | DiaryPendingVoiceMemo) {
+		setSelectedVideoMemo({
+			id: memo.id,
+			fileName: getMemoDisplayFileName(memo),
+		});
+	}
+
 	function handleAddTagsToEntry(entryId: number, nextTagNames: string[]) {
 		const names = nextTagNames.map(name => name.trim()).filter(Boolean);
 		if (names.length === 0) {
@@ -910,6 +924,27 @@ function DiaryRouteComponent() {
 						}}
 					/>
 				</Card>
+
+				<Modal
+					open={selectedVideoMemo !== null}
+					footer={null}
+					width='100vw'
+					title={selectedVideoMemo?.fileName ?? 'Video memo'}
+					className='diary-video-modal'
+					destroyOnHidden
+					style={{ top: 0, paddingBottom: 0 }}
+					onCancel={() => setSelectedVideoMemo(null)}
+				>
+					{selectedVideoMemo ? (
+						<video
+							controls
+							autoPlay
+							playsInline
+							src={voiceMemoVideoUrl(selectedVideoMemo.id)}
+							className='diary-video-player'
+						/>
+					) : null}
+				</Modal>
 			</div>
 		</main>
 	);
@@ -1054,11 +1089,11 @@ function DiaryRouteComponent() {
 				),
 			},
 			{
-				title: 'Audio',
-				key: 'audio',
-				width: 300,
+				title: 'Media',
+				key: 'media',
+				width: 360,
 				render: (_: unknown, row: DiaryPendingVoiceMemo) => (
-					<audio controls src={`/api/diary/voice-memos/${row.id}/audio`} className='diary-audio' />
+					<PendingVoiceMemoMedia memo={row} onPlayVideo={() => openVideoMemo(row)} />
 				),
 			},
 			{
@@ -1067,10 +1102,10 @@ function DiaryRouteComponent() {
 				width: 300,
 				render: (_: unknown, row: DiaryPendingVoiceMemo) => (
 					<Space direction='vertical' size={0}>
-						<Typography.Text>{row.fileName}</Typography.Text>
-						<Typography.Text type='secondary'>{row.mimeType}</Typography.Text>
+						<Typography.Text>{getMemoDisplayFileName(row)}</Typography.Text>
+						<Typography.Text type='secondary'>{getMemoDisplayMimeType(row)}</Typography.Text>
 						<Typography.Text type='secondary'>
-							{formatDuration(row.durationSeconds)} · {formatBytes(row.audioBytes)}
+							{formatDuration(row.durationSeconds)} · {formatBytes(getMemoDisplayBytes(row))}
 						</Typography.Text>
 						{row.processedAt ? (
 							<Typography.Text type='secondary'>
@@ -1120,7 +1155,7 @@ function DiaryRouteComponent() {
 						</Button>
 						<Popconfirm
 							title='Delete pending memo?'
-							description='This removes the pending audio memo and its diary entry if it is empty.'
+							description='This removes the pending memo and its diary entry if it is empty.'
 							okText='Delete'
 							okButtonProps={{ danger: true }}
 							onConfirm={() => handleDeleteVoiceMemo(row.id)}
@@ -1201,8 +1236,10 @@ function DiaryRouteComponent() {
 			{
 				title: 'Voice memos',
 				key: 'voiceMemos',
-				width: 300,
-				render: (_: unknown, row: DiaryEntry) => <VoiceMemosCell memos={row.voiceMemos} />,
+				width: 360,
+				render: (_: unknown, row: DiaryEntry) => (
+					<VoiceMemosCell memos={row.voiceMemos} onPlayVideo={openVideoMemo} />
+				),
 			},
 			{
 				title: 'Summary',
@@ -1326,19 +1363,82 @@ function TranscriptPreview(props: { entry: DiaryEntry; onClick: () => void }) {
 	);
 }
 
-function VoiceMemosCell(props: { memos: DiaryVoiceMemo[] }) {
+function VoiceMemosCell(props: {
+	memos: DiaryVoiceMemo[];
+	onPlayVideo: (memo: DiaryVoiceMemo) => void;
+}) {
 	if (props.memos.length === 0) {
 		return <Typography.Text type='secondary'>None</Typography.Text>;
 	}
 
 	return (
 		<Space direction='vertical' size={8} style={{ width: '100%' }}>
-			{props.memos.map(memo => (
-				<div key={memo.id} className='diary-voice-memo'>
-					<audio controls src={`/api/diary/voice-memos/${memo.id}/audio`} className='diary-audio' />
-				</div>
-			))}
+			{props.memos.map(memo =>
+				memo.mediaKind === 'video' ? (
+					<DiaryVideoMemoItem
+						key={memo.id}
+						memo={memo}
+						onPlayVideo={() => props.onPlayVideo(memo)}
+					/>
+				) : (
+					<div key={memo.id} className='diary-voice-memo'>
+						<audio controls src={voiceMemoAudioUrl(memo.id)} className='diary-audio' />
+					</div>
+				),
+			)}
 		</Space>
+	);
+}
+
+function PendingVoiceMemoMedia(props: { memo: DiaryPendingVoiceMemo; onPlayVideo: () => void }) {
+	if (props.memo.mediaKind === 'video') {
+		return <DiaryVideoMemoItem memo={props.memo} onPlayVideo={props.onPlayVideo} />;
+	}
+
+	return (
+		<div className='diary-voice-memo'>
+			<audio controls src={voiceMemoAudioUrl(props.memo.id)} className='diary-audio' />
+		</div>
+	);
+}
+
+function DiaryVideoMemoItem(props: {
+	memo: DiaryVoiceMemo | DiaryPendingVoiceMemo;
+	onPlayVideo: () => void;
+}) {
+	const fileName = getMemoDisplayFileName(props.memo);
+
+	return (
+		<button
+			type='button'
+			className='diary-video-memo'
+			aria-label={`Play ${fileName}`}
+			onClick={props.onPlayVideo}
+		>
+			<span className='diary-video-thumb-wrap'>
+				<video
+					muted
+					playsInline
+					preload='metadata'
+					src={`${voiceMemoVideoUrl(props.memo.id)}#t=0.001`}
+					className='diary-video-thumb'
+				/>
+			</span>
+			<span className='diary-video-memo-info'>
+				<Typography.Text strong ellipsis>
+					{fileName}
+				</Typography.Text>
+				<Typography.Text type='secondary'>
+					{formatDuration(props.memo.durationSeconds)}
+				</Typography.Text>
+				<Typography.Text type='secondary'>{props.memo.transcriptionStatus}</Typography.Text>
+				{props.memo.processedAt ? (
+					<Typography.Text type='secondary'>
+						processed {formatDiaryTime(props.memo.processedAt)}
+					</Typography.Text>
+				) : null}
+			</span>
+		</button>
 	);
 }
 
@@ -1647,6 +1747,32 @@ function extensionFromMimeType(mimeType: string) {
 	}
 
 	return subtype;
+}
+
+function voiceMemoAudioUrl(voiceMemoId: number) {
+	return `/api/diary/voice-memos/${voiceMemoId}/audio`;
+}
+
+function voiceMemoVideoUrl(voiceMemoId: number) {
+	return `/api/diary/voice-memos/${voiceMemoId}/video`;
+}
+
+function getMemoDisplayFileName(
+	memo: Pick<DiaryVoiceMemo | DiaryPendingVoiceMemo, 'mediaKind' | 'fileName' | 'videoFileName'>,
+) {
+	return memo.mediaKind === 'video' ? (memo.videoFileName ?? memo.fileName) : memo.fileName;
+}
+
+function getMemoDisplayMimeType(
+	memo: Pick<DiaryPendingVoiceMemo, 'mediaKind' | 'mimeType' | 'videoMimeType'>,
+) {
+	return memo.mediaKind === 'video' ? (memo.videoMimeType ?? memo.mimeType) : memo.mimeType;
+}
+
+function getMemoDisplayBytes(
+	memo: Pick<DiaryPendingVoiceMemo, 'mediaKind' | 'audioBytes' | 'videoBytes'>,
+) {
+	return memo.mediaKind === 'video' ? memo.videoBytes : memo.audioBytes;
 }
 
 function formatBytes(value: number) {

@@ -493,6 +493,85 @@ body,
 	max-width: 260px;
 }
 
+.diary-video-memo {
+	display: grid;
+	width: 100%;
+	min-height: 108px;
+	grid-template-columns: 112px minmax(0, 1fr);
+	overflow: hidden;
+	padding: 0;
+	border: 1px solid #d9d9d9;
+	border-radius: 8px;
+	background: #fff;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	appearance: none;
+	cursor: pointer;
+	transition:
+		border-color 160ms ease,
+		box-shadow 160ms ease;
+}
+
+.diary-video-memo:hover,
+.diary-video-memo:focus-visible {
+	border-color: #1677ff;
+	box-shadow: 0 0 0 2px rgb(22 119 255 / 12%);
+	outline: none;
+}
+
+.diary-video-thumb-wrap {
+	display: block;
+	min-height: 108px;
+	background: #111;
+}
+
+.diary-video-thumb {
+	display: block;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.diary-video-memo-info {
+	display: flex;
+	min-width: 0;
+	flex-direction: column;
+	justify-content: center;
+	gap: 4px;
+	padding: 10px 12px;
+}
+
+.diary-video-modal.ant-modal {
+	max-width: none;
+	margin: 0;
+	padding-bottom: 0;
+}
+
+.diary-video-modal .ant-modal-content {
+	display: flex;
+	min-height: 100vh;
+	flex-direction: column;
+	border-radius: 0;
+}
+
+.diary-video-modal .ant-modal-body {
+	display: flex;
+	flex: 1;
+	align-items: center;
+	justify-content: center;
+	padding-top: 8px;
+	background: #000;
+}
+
+.diary-video-player {
+	display: block;
+	width: 100%;
+	max-height: calc(100vh - 96px);
+	border-radius: 8px;
+	background: #000;
+}
+
 .pills-image-error.ant-alert {
 	margin-top: 8px;
 }
