@@ -1,7 +1,7 @@
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from 'server/trpc/index.ts';
 import { API_BASE_URL, useTRPC } from '@/src/api/trpc';
-import { ActivityIndicator, Button, Modal, Tag } from '@ant-design/react-native';
+import { ActivityIndicator, Modal, Tag } from '@ant-design/react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -13,7 +13,6 @@ import {
 	useAudioRecorder as useExpoAudioRecorder,
 	useAudioRecorderState,
 } from 'expo-audio';
-import { SymbolView } from 'expo-symbols';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -28,7 +27,8 @@ import {
 	View,
 	useColorScheme,
 } from 'react-native';
-import { BottomSheet, FloatingActionButton } from '@/src/components/mobile-ui';
+import { Button, FloatingActionButton } from '@/src/components/button';
+import { BottomSheet } from '@/src/components/mobile-ui';
 import { MarkdownText } from '@/src/components/markdown-text';
 import { formatTagNames, TagChips, TagSelector } from '@/src/components/tag-selector';
 import { pageStyles } from '@/src/theme/page-styles';
@@ -1531,33 +1531,33 @@ export default function LogScreen() {
 				footer={
 					<View style={styles.composerFooter}>
 						<View style={styles.recordActionGroup}>
-							<ComposerActionButton
+							<Button
 								icon={recorderState.isRecording ? 'stop.fill' : 'mic.fill'}
 								label={recorderState.isRecording ? 'Stop' : 'Record'}
 								active={recorderState.isRecording}
 								disabled={!canRecord}
 								loading={isUploadingRecording}
-								tone='audio'
-								styles={styles}
+								intent='audio'
+								size='small'
 								onPress={toggleRecording}
 							/>
-							<ComposerActionButton
+							<Button
 								icon='video.fill'
 								label='Video log'
 								disabled={!canRecordVideo}
 								loading={isVideoSaving}
-								tone='video'
-								styles={styles}
+								intent='video'
+								size='small'
 								onPress={() => void openVideoRecorder()}
 							/>
 						</View>
-						<ComposerActionButton
+						<Button
 							icon='plus'
 							label='Add'
 							disabled={!canCreateEntry}
 							loading={createEntryMutation.isPending}
-							tone='add'
-							styles={styles}
+							intent='success'
+							size='small'
 							onPress={() => void createEntry()}
 						/>
 					</View>
@@ -1726,54 +1726,6 @@ export default function LogScreen() {
 				styles={styles}
 			/>
 		</>
-	);
-}
-
-function ComposerActionButton({
-	icon,
-	label,
-	active = false,
-	disabled = false,
-	loading = false,
-	tone,
-	onPress,
-	styles,
-}: {
-	icon: 'mic.fill' | 'stop.fill' | 'video.fill' | 'plus';
-	label: string;
-	active?: boolean;
-	disabled?: boolean;
-	loading?: boolean;
-	tone: 'audio' | 'video' | 'add';
-	onPress: () => void;
-	styles: ReturnType<typeof logStyles>;
-}) {
-	const buttonStyle =
-		tone === 'audio'
-			? styles.composerActionButtonAudio
-			: tone === 'video'
-				? styles.composerActionButtonVideo
-				: styles.composerActionButtonAdd;
-
-	return (
-		<Pressable
-			accessibilityRole='button'
-			accessibilityLabel={label}
-			disabled={disabled || loading}
-			onPress={onPress}
-			style={({ pressed }) => [
-				styles.composerActionButton,
-				buttonStyle,
-				active && styles.composerActionButtonActive,
-				(disabled || loading) && styles.composerActionButtonDisabled,
-				pressed && !(disabled || loading) && styles.composerActionButtonPressed,
-			]}
-		>
-			<View style={styles.composerActionIcon}>
-				<SymbolView name={loading ? 'hourglass' : icon} size={17} tintColor='#fff' weight='bold' />
-			</View>
-			<Text style={styles.composerActionButtonText}>{loading ? 'Saving' : label}</Text>
-		</Pressable>
 	);
 }
 
@@ -2343,52 +2295,6 @@ function logStyles(isDark: boolean) {
 			flexDirection: 'row' as const,
 			gap: 8,
 			justifyContent: 'flex-start' as const,
-		},
-		composerActionButton: {
-			alignItems: 'center' as const,
-			borderColor: 'rgba(255, 255, 255, 0.28)',
-			borderRadius: 999,
-			borderWidth: 1,
-			flexDirection: 'row' as const,
-			gap: 7,
-			minHeight: 38,
-			paddingHorizontal: 12,
-			paddingVertical: 8,
-		},
-		composerActionButtonAudio: {
-			backgroundColor: '#cf1322',
-			boxShadow: '0 6px 16px rgba(207, 19, 34, 0.22)',
-		},
-		composerActionButtonVideo: {
-			backgroundColor: '#1677ff',
-			boxShadow: '0 6px 16px rgba(22, 119, 255, 0.2)',
-		},
-		composerActionButtonAdd: {
-			backgroundColor: '#15803d',
-			boxShadow: '0 6px 16px rgba(21, 128, 61, 0.2)',
-		},
-		composerActionButtonActive: {
-			backgroundColor: '#7f1d1d',
-		},
-		composerActionButtonDisabled: {
-			backgroundColor: isDark ? '#3f3f46' : '#a1a1aa',
-			boxShadow: '0 0 0 rgba(0, 0, 0, 0)',
-			opacity: 0.62,
-		},
-		composerActionButtonPressed: {
-			opacity: 0.78,
-			transform: [{ scale: 0.98 }],
-		},
-		composerActionIcon: {
-			alignItems: 'center' as const,
-			height: 18,
-			justifyContent: 'center' as const,
-			width: 18,
-		},
-		composerActionButtonText: {
-			color: '#fff',
-			fontSize: 13,
-			fontWeight: '800' as const,
 		},
 		notice: {
 			backgroundColor: isDark ? '#102a43' : '#e6f4ff',

@@ -1,11 +1,12 @@
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from 'server/trpc/index.ts';
-import { ActivityIndicator, Button, Card, Tag } from '@ant-design/react-native';
+import { ActivityIndicator, Card, Tag } from '@ant-design/react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View, useColorScheme } from 'react-native';
 import { useTRPC } from '@/src/api/trpc';
-import { BottomSheet, FloatingActionButton } from '@/src/components/mobile-ui';
+import { Button, FloatingActionButton } from '@/src/components/button';
+import { BottomSheet } from '@/src/components/mobile-ui';
 import { pageStyles } from '@/src/theme/page-styles';
 
 type RouterOutput = inferRouterOutputs<AppRouter>;

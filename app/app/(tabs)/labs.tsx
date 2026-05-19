@@ -1,6 +1,6 @@
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from 'server/trpc/index.ts';
-import { ActivityIndicator, Button, Card, Checkbox, Switch, Tag } from '@ant-design/react-native';
+import { ActivityIndicator, Card, Checkbox, Switch, Tag } from '@ant-design/react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -18,7 +18,8 @@ import {
 	useColorScheme,
 } from 'react-native';
 import { API_BASE_URL, useTRPC } from '@/src/api/trpc';
-import { BottomSheet, FloatingActionButton, IconButton } from '@/src/components/mobile-ui';
+import { Button, FloatingActionButton, IconButton } from '@/src/components/button';
+import { BottomSheet } from '@/src/components/mobile-ui';
 import { pageStyles } from '@/src/theme/page-styles';
 
 type RouterOutput = inferRouterOutputs<AppRouter>;

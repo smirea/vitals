@@ -1,4 +1,3 @@
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
 	Animated,
@@ -10,90 +9,8 @@ import {
 	View,
 	useColorScheme,
 	useWindowDimensions,
-	type StyleProp,
-	type ViewStyle,
 } from 'react-native';
 import { appColors } from '@/src/theme/colors';
-
-export function FloatingActionButton({
-	icon,
-	label,
-	onPress,
-	loading = false,
-	style,
-}: {
-	icon: SymbolViewProps['name'];
-	label: string;
-	onPress: () => void;
-	loading?: boolean;
-	style?: StyleProp<ViewStyle>;
-}) {
-	return (
-		<Pressable
-			accessibilityRole='button'
-			accessibilityLabel={label}
-			onPress={onPress}
-			disabled={loading}
-			style={({ pressed }) => [
-				{
-					alignItems: 'center',
-					backgroundColor: loading ? '#91caff' : '#1677ff',
-					borderRadius: 999,
-					bottom: 18,
-					boxShadow: '0 8px 22px rgba(22, 119, 255, 0.28)',
-					flexDirection: 'row',
-					gap: 8,
-					paddingHorizontal: 18,
-					paddingVertical: 13,
-					position: 'absolute',
-					right: 16,
-					zIndex: 20,
-					opacity: pressed ? 0.82 : 1,
-				},
-				style,
-			]}
-		>
-			<SymbolView name={icon} size={20} tintColor='#fff' weight='bold' />
-			<Text style={{ color: '#fff', fontSize: 15, fontWeight: '800' }}>{label}</Text>
-		</Pressable>
-	);
-}
-
-export function IconButton({
-	icon,
-	label,
-	onPress,
-	color,
-}: {
-	icon: SymbolViewProps['name'];
-	label: string;
-	onPress: () => void;
-	color?: string;
-}) {
-	const isDark = useColorScheme() === 'dark';
-	const colors = appColors(isDark);
-	return (
-		<Pressable
-			accessibilityRole='button'
-			accessibilityLabel={label}
-			onPress={onPress}
-			hitSlop={10}
-			style={({ pressed }) => ({
-				alignItems: 'center',
-				backgroundColor: colors.surfaceRaised,
-				borderColor: colors.border,
-				borderRadius: 999,
-				borderWidth: 1,
-				height: 36,
-				justifyContent: 'center',
-				opacity: pressed ? 0.7 : 1,
-				width: 36,
-			})}
-		>
-			<SymbolView name={icon} size={19} tintColor={color ?? colors.text} weight='semibold' />
-		</Pressable>
-	);
-}
 
 export function BottomSheet({
 	visible,

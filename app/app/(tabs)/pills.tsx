@@ -1,7 +1,7 @@
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from 'server/trpc/index.ts';
 import { API_BASE_URL, useTRPC } from '@/src/api/trpc';
-import { ActivityIndicator, Button, Card, Modal } from '@ant-design/react-native';
+import { ActivityIndicator, Card, Modal } from '@ant-design/react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
@@ -17,7 +17,8 @@ import {
 } from 'react-native';
 import * as Sharing from 'expo-sharing';
 import { useEffect, useMemo, useState } from 'react';
-import { BottomSheet, FloatingActionButton } from '@/src/components/mobile-ui';
+import { Button, FloatingActionButton } from '@/src/components/button';
+import { BottomSheet } from '@/src/components/mobile-ui';
 import { TagSelector } from '@/src/components/tag-selector';
 import { pageStyles } from '@/src/theme/page-styles';
 
