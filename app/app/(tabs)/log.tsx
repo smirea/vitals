@@ -10,9 +10,10 @@ import {
 	RecordingPresets,
 	requestRecordingPermissionsAsync,
 	setAudioModeAsync,
-	useAudioRecorder,
+	useAudioRecorder as useExpoAudioRecorder,
 	useAudioRecorderState,
 } from 'expo-audio';
+import { useAudioRecorder as useStreamingAudioRecorder } from '@siteed/audio-studio';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
 	Animated,
@@ -142,6 +143,15 @@ function voiceMemoVideoUrl(voiceMemoId: number) {
 	return `${API_BASE_URL}/diary/voice-memos/${voiceMemoId}/video`;
 }
 
+function diaryLiveSttUrl() {
+	const url = new URL(API_BASE_URL);
+	url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+	url.pathname = '/diary/stt/live';
+	url.search = '';
+	url.hash = '';
+	return url.toString();
+}
+
 function audioFileNameFromUri(uri: string) {
 	const extension = audioExtensionFromUri(uri);
 	return `diary-${new Date().toISOString().replace(/[:.]/g, '-')}.${extension}`;
@@ -172,6 +182,16 @@ function videoMimeTypeFromUri(uri: string) {
 
 function formatRecorderDuration(milliseconds: number) {
 	return formatDuration(Math.max(milliseconds, 0) / 1000);
+}
+
+function appendTranscript(existingText: string, nextText: string) {
+	const existing = existingText.replace(/\s+/g, ' ').trim();
+	const next = nextText.replace(/\s+/g, ' ').trim();
+
+	if (!existing) return next;
+	if (!next || existing.endsWith(next)) return existing;
+	if (next.startsWith(existing)) return next;
+	return `${existing} ${next}`;
 }
 
 function audioExtensionFromUri(uri: string) {
@@ -217,10 +237,14 @@ export default function LogScreen() {
 	const isDark = useColorScheme() === 'dark';
 	const styles = logStyles(isDark);
 	const sharedStyles = pageStyles(isDark);
-	const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+	const audioRecorder = useExpoAudioRecorder(RecordingPresets.HIGH_QUALITY);
+	const streamingAudioRecorder = useStreamingAudioRecorder();
 	const recorderState = useAudioRecorderState(audioRecorder);
 	const cameraRef = useRef<CameraView>(null);
 	const videoRecordingPromiseRef = useRef<Promise<{ uri: string } | undefined> | null>(null);
+	const videoSttSocketRef = useRef<WebSocket | null>(null);
+	const pendingVideoAudioChunksRef = useRef<string[]>([]);
+	const videoCommittedTranscriptRef = useRef('');
 	const [cameraPermission, requestCameraPermission] = useCameraPermissions();
 	const recordPulse = useRef(new Animated.Value(0)).current;
 	const [notes, setNotes] = useState('');
@@ -544,12 +568,27 @@ export default function LogScreen() {
 				throw new Error('Camera is not ready.');
 			}
 
-			await setAudioModeAsync({
-				allowsRecording: true,
-				playsInSilentMode: true,
+			videoCommittedTranscriptRef.current = '';
+			const sttSocket = openVideoSttSocket();
+			videoSttSocketRef.current = sttSocket;
+			await streamingAudioRecorder.startRecording({
+				sampleRate: 16_000,
+				channels: 1,
+				encoding: 'pcm_16bit',
+				interval: 100,
+				streamFormat: 'raw',
+				onAudioStream: async event => {
+					if (typeof event.data !== 'string') {
+						throw new Error('Expected native PCM audio chunks as base64.');
+					}
+					const socket = videoSttSocketRef.current;
+					if (socket?.readyState === WebSocket.OPEN) {
+						socket.send(JSON.stringify({ type: 'audio.chunk', dataBase64: event.data }));
+					} else {
+						pendingVideoAudioChunksRef.current.push(event.data);
+					}
+				},
 			});
-			await audioRecorder.prepareToRecordAsync();
-			audioRecorder.record();
 			setVideoStartedAt(Date.now());
 			setVideoTranscript('');
 			setIsVideoRecording(true);
@@ -568,12 +607,15 @@ export default function LogScreen() {
 		try {
 			setIsVideoSaving(true);
 			cameraRef.current?.stopRecording();
-			await audioRecorder.stop();
+			const audio = await streamingAudioRecorder.stopRecording();
+			if (videoSttSocketRef.current?.readyState === WebSocket.OPEN) {
+				videoSttSocketRef.current.send(JSON.stringify({ type: 'audio.done' }));
+			}
 			const video = await videoRecordingPromiseRef.current;
-			const audioUri = audioRecorder.uri ?? recorderState.url;
 			if (!video?.uri) {
 				throw new Error('Video recording finished without a file URI.');
 			}
+			const audioUri = audio?.fileUri;
 			if (!audioUri) {
 				throw new Error('Video log audio finished without a file URI.');
 			}
@@ -612,11 +654,57 @@ export default function LogScreen() {
 			setIsVideoSaving(false);
 			setVideoStartedAt(null);
 			videoRecordingPromiseRef.current = null;
-			await setAudioModeAsync({
-				allowsRecording: false,
-				playsInSilentMode: true,
-			});
+			videoSttSocketRef.current?.close();
+			videoSttSocketRef.current = null;
 		}
+	}
+
+	function openVideoSttSocket() {
+		const socket = new WebSocket(diaryLiveSttUrl());
+		pendingVideoAudioChunksRef.current = [];
+		socket.onopen = () => {
+			for (const dataBase64 of pendingVideoAudioChunksRef.current) {
+				socket.send(JSON.stringify({ type: 'audio.chunk', dataBase64 }));
+			}
+			pendingVideoAudioChunksRef.current = [];
+		};
+		socket.onmessage = event => {
+			const payload = JSON.parse(String(event.data)) as {
+				type?: string;
+				text?: string;
+				is_final?: boolean;
+				message?: string;
+			};
+			if (payload.type === 'transcript.partial') {
+				const text = payload.text?.trim() ?? '';
+				if (!text) return;
+				if (payload.is_final) {
+					videoCommittedTranscriptRef.current = appendTranscript(
+						videoCommittedTranscriptRef.current,
+						text,
+					);
+					setVideoTranscript(videoCommittedTranscriptRef.current);
+					return;
+				}
+				setVideoTranscript(appendTranscript(videoCommittedTranscriptRef.current, text));
+				return;
+			}
+			if (payload.type === 'transcript.done') {
+				const transcript = payload.text?.trim();
+				if (transcript) {
+					videoCommittedTranscriptRef.current = transcript;
+					setVideoTranscript(transcript);
+				}
+				return;
+			}
+			if (payload.type === 'error') {
+				setNotice(payload.message ?? 'Live transcription failed.');
+			}
+		};
+		socket.onerror = () => {
+			setNotice('Live ElevenLabs transcription connection failed.');
+		};
+		return socket;
 	}
 
 	async function persistVideoLog(uri: string) {

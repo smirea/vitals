@@ -165,9 +165,13 @@ function handleDiarySttClientMessage(
 	message: string | Buffer,
 ) {
 	if (typeof message === 'string') {
-		const payload = JSON.parse(message) as { type?: string };
+		const payload = JSON.parse(message) as { type?: string; dataBase64?: string };
 		if (payload.type === 'audio.done') {
 			requestDiarySttCommit(ws);
+			return;
+		}
+		if (payload.type === 'audio.chunk' && payload.dataBase64) {
+			queueDiarySttAudio(ws, Buffer.from(payload.dataBase64, 'base64'));
 			return;
 		}
 

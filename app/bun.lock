@@ -8,6 +8,7 @@
         "@ant-design/icons-react-native": "^2.3.2",
         "@ant-design/react-native": "^5.4.3",
         "@react-navigation/native": "^7.1.8",
+        "@siteed/audio-studio": "3.2.0",
         "@tanstack/react-query": "5.91.2",
         "@trpc/client": "11.13.4",
         "@trpc/server": "11.13.4",
@@ -492,6 +493,8 @@
     "@sinonjs/commons": ["@sinonjs/commons@3.0.1", "", { "dependencies": { "type-detect": "4.0.8" } }, "sha512-K3mCHKQ9sVh8o1C9cxkwxaOmXoAMlDxC1mYyHrjqOWEcBjYr76t96zL2zlj5dUGZ3HSw240X1qgH3Mjf1yJWpQ=="],
 
     "@sinonjs/fake-timers": ["@sinonjs/fake-timers@10.3.0", "", { "dependencies": { "@sinonjs/commons": "^3.0.0" } }, "sha512-V4BG07kuYSUkTCSBHG8G8TNhM+F19jXFWnQtzj+we8DrkpSBCee9Z3Ms8yiGer/dlmhe35/Xdgyo3/0rQKg7YA=="],
+
+    "@siteed/audio-studio": ["@siteed/audio-studio@3.2.0", "", { "peerDependencies": { "@expo/config-plugins": ">=7.0.0", "expo": ">=52.0.0", "react": "*", "react-native": "*" } }, "sha512-fU4aTIrwoo/DNLhbxsHlKyxw9NoC/rr6EuuBZHU8MRViL/M9qNQNDiWphXAF8G09eDJBk/uXxzU1+DamzNNmsQ=="],
 
     "@tanstack/query-core": ["@tanstack/query-core@5.91.2", "", {}, "sha512-Uz2pTgPC1mhqrrSGg18RKCWT/pkduAYtxbcyIyKBhw7dTWjXZIzqmpzO2lBkyWr4hlImQgpu1m1pei3UnkFRWw=="],
 
