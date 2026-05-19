@@ -44,7 +44,6 @@
 					"microphonePermission": "Allow Vitals to record video log audio."
 				}
 			],
-			"@siteed/audio-studio",
 			[
 				"expo-location",
 				{

@@ -269,6 +269,76 @@ function getDiaryRecoveryVideoPath(createdAt: string, fileName: string) {
 	return path.join(dirPath, fileName);
 }
 
+async function extractAudioFromVideoFile(videoPath: string, audioPath: string) {
+	const proc = Bun.spawn({
+		cmd: [
+			'ffmpeg',
+			'-hide_banner',
+			'-loglevel',
+			'error',
+			'-y',
+			'-i',
+			videoPath,
+			'-vn',
+			'-ac',
+			'1',
+			'-ar',
+			'16000',
+			'-c:a',
+			'aac',
+			'-b:a',
+			'64k',
+			audioPath,
+		],
+		stdout: 'ignore',
+		stderr: 'pipe',
+	});
+	const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+
+	if (exitCode !== 0) {
+		throw new Error(
+			`ffmpeg failed to extract diary video audio: ${stderr.trim() || `exit ${exitCode}`}`,
+		);
+	}
+
+	const audioData = fs.readFileSync(audioPath);
+	if (audioData.byteLength === 0) {
+		throw new Error(`ffmpeg extracted an empty audio file from diary video: ${videoPath}`);
+	}
+
+	return audioData;
+}
+
+async function readDiaryRecoveryMediaForDatabase(
+	recoveryRecord: DiaryVoiceMemoRecoveryRecord,
+	recoveryLabel: string,
+) {
+	if (!recoveryRecord.audioPath) {
+		throw new Error(`Diary recovery ${recoveryLabel} no longer has an audio path.`);
+	}
+
+	let audioData = fs.readFileSync(recoveryRecord.audioPath);
+	const videoData = recoveryRecord.videoPath ? fs.readFileSync(recoveryRecord.videoPath) : null;
+	if (recoveryRecord.mediaKind === 'video') {
+		if (!recoveryRecord.videoPath || !videoData || videoData.byteLength === 0) {
+			throw new Error(`Diary recovery ${recoveryLabel} did not receive video.`);
+		}
+		if (audioData.byteLength === 0) {
+			audioData = await extractAudioFromVideoFile(
+				recoveryRecord.videoPath,
+				recoveryRecord.audioPath,
+			);
+		}
+	} else if (audioData.byteLength === 0) {
+		throw new Error(`Diary recovery ${recoveryLabel} did not receive audio.`);
+	}
+
+	return {
+		audioData,
+		videoData,
+	};
+}
+
 function writeDiaryRecoveryRecord(metadataPath: string, record: DiaryVoiceMemoRecoveryRecord) {
 	fs.writeFileSync(metadataPath, `${JSON.stringify(record, null, 2)}\n`);
 }
@@ -1459,18 +1529,10 @@ export async function finishDiaryVoiceMemoDraft(
 	const recovery = findDiaryRecoveryById(input.recoveryId);
 	let recoveryRecord = recovery.record;
 	try {
-		if (!recoveryRecord.audioPath) {
-			throw new Error(`Diary recovery ${input.recoveryId} no longer has an audio path.`);
-		}
-
-		const audioData = fs.readFileSync(recoveryRecord.audioPath);
-		const videoData = recoveryRecord.videoPath ? fs.readFileSync(recoveryRecord.videoPath) : null;
-		if (audioData.byteLength === 0) {
-			throw new Error(`Diary recovery ${input.recoveryId} did not receive audio.`);
-		}
-		if (recoveryRecord.mediaKind === 'video' && (!videoData || videoData.byteLength === 0)) {
-			throw new Error(`Diary recovery ${input.recoveryId} did not receive video.`);
-		}
+		const { audioData, videoData } = await readDiaryRecoveryMediaForDatabase(
+			recoveryRecord,
+			input.recoveryId,
+		);
 
 		recoveryRecord = updateDiaryVoiceMemoRecovery(
 			recovery.metadataPath,
@@ -1478,11 +1540,13 @@ export async function finishDiaryVoiceMemoDraft(
 			'saving_to_database',
 			{
 				audioBytes: audioData.byteLength,
+				videoBytes: videoData?.byteLength ?? 0,
 				durationSeconds: nullableNumber(input.durationSeconds),
 				transcript: normalizeOptionalText(input.transcript) ?? recoveryRecord.transcript,
 			},
 			{
 				audioBytes: audioData.byteLength,
+				videoBytes: videoData?.byteLength ?? 0,
 			},
 		);
 		const inserted = await insertDiaryVoiceMemoFromMedia(db, {
@@ -1574,28 +1638,22 @@ export async function processDiaryVoiceMemoRecovery(
 	let voiceMemoId = recoveryRecord.voiceMemoId;
 
 	if (!voiceMemoId) {
-		if (!recoveryRecord.audioPath) {
-			throw new Error(`Diary recovery ${resolvedMetadataPath} has no audio path.`);
-		}
-
-		const audioData = fs.readFileSync(recoveryRecord.audioPath);
-		const videoData = recoveryRecord.videoPath ? fs.readFileSync(recoveryRecord.videoPath) : null;
-		if (audioData.byteLength === 0) {
-			throw new Error(`Diary recovery ${resolvedMetadataPath} did not receive audio.`);
-		}
-		if (recoveryRecord.mediaKind === 'video' && (!videoData || videoData.byteLength === 0)) {
-			throw new Error(`Diary recovery ${resolvedMetadataPath} did not receive video.`);
-		}
+		const { audioData, videoData } = await readDiaryRecoveryMediaForDatabase(
+			recoveryRecord,
+			resolvedMetadataPath,
+		);
 		recoveryRecord = updateDiaryVoiceMemoRecovery(
 			resolvedMetadataPath,
 			recoveryRecord,
 			'saving_to_database',
 			{
 				audioBytes: audioData.byteLength,
+				videoBytes: videoData?.byteLength ?? 0,
 			},
 			{
 				audioPath: recoveryRecord.audioPath,
 				audioBytes: audioData.byteLength,
+				videoBytes: videoData?.byteLength ?? 0,
 			},
 		);
 		const inserted = await insertDiaryVoiceMemoFromMedia(db, {

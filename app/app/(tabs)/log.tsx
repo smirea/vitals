@@ -55,12 +55,7 @@ type LocalVideoDraft = {
 	notes: string;
 	tagNames: string[];
 	location: DiaryLocationInput;
-	transcript: string | null;
 	durationSeconds: number;
-	audioUri: string;
-	audioFileName: string;
-	audioMimeType: string;
-	audioBytes: number;
 	videoUri: string;
 	videoFileName: string;
 	videoMimeType: string;
@@ -71,57 +66,6 @@ type LocalVideoDraft = {
 type VideoRecordingSession = {
 	localId: string;
 	startedAt: string;
-	audioFileName: string;
-	recoveryId: string;
-};
-type StreamingTranscriptDeferred = {
-	promise: Promise<string>;
-	resolve: (transcript: string) => void;
-	reject: (error: Error) => void;
-	isSettled: boolean;
-};
-type StreamingAudioEvent = {
-	data: string | Float32Array | Int16Array;
-	fileUri?: string;
-	position?: number;
-	eventDataSize?: number;
-	totalSize?: number;
-};
-type StreamingAudioRecording = {
-	fileUri?: string | null;
-};
-type StreamingAudioConfig = {
-	sampleRate: 16_000 | 44_100 | 48_000;
-	channels: 1 | 2;
-	encoding: 'pcm_16bit';
-	interval: number;
-	streamFormat: 'raw';
-	filename: string;
-	outputDirectory: string;
-	output: {
-		primary: {
-			enabled: boolean;
-			format: 'wav';
-		};
-	};
-	onAudioStream: (event: StreamingAudioEvent) => Promise<void>;
-};
-type StreamingAudioRecorder = {
-	startRecording: (config: StreamingAudioConfig) => Promise<void>;
-	stopRecording: () => Promise<StreamingAudioRecording | null>;
-};
-type NativeAudioStudioModule = {
-	startRecording: (config: Omit<StreamingAudioConfig, 'onAudioStream'>) => Promise<unknown>;
-	stopRecording: () => Promise<StreamingAudioRecording | null>;
-};
-type NativeAudioEvent = {
-	encoded?: string;
-	data?: string | Float32Array | Int16Array;
-	fileUri?: string;
-	position?: number;
-	deltaSize?: number;
-	eventDataSize?: number;
-	totalSize?: number;
 };
 
 type DiaryLocationInput = {
@@ -226,27 +170,18 @@ function voiceMemoVideoUrl(voiceMemoId: number) {
 	return `${API_BASE_URL}/diary/voice-memos/${voiceMemoId}/video`;
 }
 
-function diaryLiveSttUrl() {
-	const url = new URL(API_BASE_URL);
-	url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-	url.pathname = '/diary/stt/live';
-	url.search = '';
-	url.hash = '';
-	return url.toString();
-}
-
 function audioFileNameFromUri(uri: string) {
 	const extension = audioExtensionFromUri(uri);
 	return `diary-${new Date().toISOString().replace(/[:.]/g, '-')}.${extension}`;
 }
 
-function videoAudioFileNameFromDate(value: Date) {
-	return `diary-video-audio-${value.toISOString().replace(/[:.]/g, '-')}.wav`;
-}
-
 function videoFileNameFromUri(uri: string) {
 	const extension = videoExtensionFromUri(uri);
 	return `diary-video-${new Date().toISOString().replace(/[:.]/g, '-')}.${extension}`;
+}
+
+function videoAudioFileNameFromVideoFileName(fileName: string) {
+	return `${fileName.replace(/\.[^.]+$/, '') || 'diary-video-audio'}.m4a`;
 }
 
 function audioMimeTypeFromUri(uri: string) {
@@ -269,103 +204,6 @@ function videoMimeTypeFromUri(uri: string) {
 
 function formatRecorderDuration(milliseconds: number) {
 	return formatDuration(Math.max(milliseconds, 0) / 1000);
-}
-
-function appendTranscript(existingText: string, nextText: string) {
-	const existing = existingText.replace(/\s+/g, ' ').trim();
-	const next = nextText.replace(/\s+/g, ' ').trim();
-
-	if (!existing) return next;
-	if (!next || existing.endsWith(next)) return existing;
-	if (next.startsWith(existing)) return next;
-	return `${existing} ${next}`;
-}
-
-function createStreamingTranscriptDeferred(): StreamingTranscriptDeferred {
-	let resolveDeferred: StreamingTranscriptDeferred['resolve'] | null = null;
-	let rejectDeferred: StreamingTranscriptDeferred['reject'] | null = null;
-	const promise = new Promise<string>((resolve, reject) => {
-		resolveDeferred = resolve;
-		rejectDeferred = reject;
-	});
-
-	if (!resolveDeferred || !rejectDeferred) {
-		throw new Error('Failed to create streaming transcript promise.');
-	}
-
-	return {
-		promise,
-		resolve: resolveDeferred,
-		reject: rejectDeferred,
-		isSettled: false,
-	};
-}
-
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string) {
-	return new Promise<T>((resolve, reject) => {
-		const timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
-		promise.then(
-			value => {
-				clearTimeout(timeout);
-				resolve(value);
-			},
-			error => {
-				clearTimeout(timeout);
-				reject(error);
-			},
-		);
-	});
-}
-
-async function createStreamingAudioRecorder() {
-	const { LegacyEventEmitter, requireOptionalNativeModule } = await import('expo-modules-core');
-	const audioStudioModule = requireOptionalNativeModule<NativeAudioStudioModule>('AudioStudio');
-	if (!audioStudioModule) {
-		throw new Error(
-			'AudioStudio native module is not available in this iOS build. Video logs need the development client, not Expo Go. Rebuild and reinstall the app with `bunx expo run:ios`, then start Metro with `bunx expo start --dev-client`.',
-		);
-	}
-	const emitter = new LegacyEventEmitter(
-		audioStudioModule as ConstructorParameters<typeof LegacyEventEmitter>[0],
-	);
-	let subscription: { remove: () => void } | null = null;
-	let onAudioStream: StreamingAudioConfig['onAudioStream'] | null = null;
-	let streamError: Error | null = null;
-
-	return {
-		async startRecording(config) {
-			const { onAudioStream: streamHandler, ...nativeConfig } = config;
-			onAudioStream = streamHandler;
-			streamError = null;
-			subscription = emitter.addListener('AudioData', (event: NativeAudioEvent) => {
-				const data = event.encoded ?? event.data;
-				if (!data || !onAudioStream) return;
-				void onAudioStream({
-					data,
-					fileUri: event.fileUri,
-					position: event.position,
-					eventDataSize: event.deltaSize ?? event.eventDataSize,
-					totalSize: event.totalSize,
-				}).catch(error => {
-					streamError = error instanceof Error ? error : new Error(String(error));
-				});
-			});
-			await audioStudioModule.startRecording(nativeConfig);
-		},
-		async stopRecording() {
-			try {
-				const recording = await audioStudioModule.stopRecording();
-				if (streamError) {
-					throw streamError;
-				}
-				return recording;
-			} finally {
-				subscription?.remove();
-				subscription = null;
-				onAudioStream = null;
-			}
-		},
-	} satisfies StreamingAudioRecorder;
 }
 
 function audioExtensionFromUri(uri: string) {
@@ -413,10 +251,6 @@ function requireDocumentDirectory() {
 
 function localVideoLogsDirectory() {
 	return `${requireDocumentDirectory()}video-logs/`;
-}
-
-function localVideoAudioDirectory() {
-	return `${localVideoLogsDirectory()}audio/`;
 }
 
 function localVideoDraftManifestPath() {
@@ -470,16 +304,8 @@ export default function LogScreen() {
 	const audioRecorder = useExpoAudioRecorder(RecordingPresets.HIGH_QUALITY);
 	const recorderState = useAudioRecorderState(audioRecorder);
 	const cameraRef = useRef<CameraView>(null);
-	const streamingAudioRecorderRef = useRef<StreamingAudioRecorder | null>(null);
 	const videoRecordingPromiseRef = useRef<Promise<{ uri: string } | undefined> | null>(null);
-	const videoSttSocketRef = useRef<WebSocket | null>(null);
-	const pendingVideoAudioChunksRef = useRef<string[]>([]);
 	const videoRecordingSessionRef = useRef<VideoRecordingSession | null>(null);
-	const videoDraftUploadPromiseRef = useRef<Promise<void>>(Promise.resolve());
-	const videoDraftUploadErrorRef = useRef<Error | null>(null);
-	const videoTranscriptDoneRef = useRef<StreamingTranscriptDeferred | null>(null);
-	const videoCommittedTranscriptRef = useRef('');
-	const videoTranscriptRef = useRef('');
 	const localVideoDraftsRef = useRef<LocalVideoDraft[]>([]);
 	const openingVideoRecorderRef = useRef(false);
 	const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -501,7 +327,6 @@ export default function LogScreen() {
 	const [isVideoSaving, setIsVideoSaving] = useState(false);
 	const [videoStartedAt, setVideoStartedAt] = useState<number | null>(null);
 	const [videoCameraKey, setVideoCameraKey] = useState(0);
-	const [videoTranscript, setVideoTranscript] = useState('');
 	const [localVideoDrafts, setLocalVideoDrafts] = useState<LocalVideoDraft[]>([]);
 	const [composerOpen, setComposerOpen] = useState(false);
 	const [activeFilter, setActiveFilter] = useState<LogFilter>('entries');
@@ -897,8 +722,6 @@ export default function LogScreen() {
 	}
 
 	async function presentVideoRecorder() {
-		videoTranscriptRef.current = '';
-		setVideoTranscript('');
 		setIsVideoCameraReady(false);
 		setVideoCameraMounted(false);
 		setVideoCameraKey(key => key + 1);
@@ -927,7 +750,7 @@ export default function LogScreen() {
 	async function startVideoRecording() {
 		try {
 			setIsVideoStarting(true);
-			const location = getRequiredLocation();
+			getRequiredLocation();
 			if (!cameraRef.current) {
 				throw new Error('Camera is not ready.');
 			}
@@ -935,63 +758,12 @@ export default function LogScreen() {
 				throw new Error('Camera preview is still starting.');
 			}
 
-			const streamingAudioRecorder = await createStreamingAudioRecorder();
-			streamingAudioRecorderRef.current = streamingAudioRecorder;
 			const startedAt = new Date();
-			const audioDirectory = localVideoAudioDirectory();
-			await ensureDirectory(audioDirectory);
-			const audioFileName = videoAudioFileNameFromDate(startedAt);
-			const serverDraft = await startVoiceMemoDraftMutation.mutateAsync({
-				mediaKind: 'video',
-				notes,
-				transcript: '',
-				fileName: audioFileName,
-				mimeType: 'audio/wav',
-				tagNames,
-				location,
-			});
 			videoRecordingSessionRef.current = {
-				localId: serverDraft.recoveryId,
+				localId: `video-${startedAt.toISOString().replace(/[:.]/g, '-')}`,
 				startedAt: startedAt.toISOString(),
-				audioFileName,
-				recoveryId: serverDraft.recoveryId,
 			};
-			videoDraftUploadPromiseRef.current = Promise.resolve();
-			videoDraftUploadErrorRef.current = null;
-			videoCommittedTranscriptRef.current = '';
-			videoTranscriptRef.current = '';
-			const sttSocket = openVideoSttSocket();
-			videoSttSocketRef.current = sttSocket;
-			await streamingAudioRecorder.startRecording({
-				sampleRate: 16_000,
-				channels: 1,
-				encoding: 'pcm_16bit',
-				interval: 100,
-				streamFormat: 'raw',
-				filename: audioFileName,
-				outputDirectory: audioDirectory,
-				output: {
-					primary: {
-						enabled: true,
-						format: 'wav',
-					},
-				},
-				onAudioStream: async event => {
-					if (typeof event.data !== 'string') {
-						throw new Error('Expected native PCM audio chunks as base64.');
-					}
-					queueVideoDraftAudioChunk(event.data);
-					const socket = videoSttSocketRef.current;
-					if (socket?.readyState === WebSocket.OPEN) {
-						socket.send(JSON.stringify({ type: 'audio.chunk', dataBase64: event.data }));
-					} else {
-						pendingVideoAudioChunksRef.current.push(event.data);
-					}
-				},
-			});
 			setVideoStartedAt(Date.now());
-			videoTranscriptRef.current = '';
-			setVideoTranscript('');
 			setIsVideoRecording(true);
 			setIsVideoStarting(false);
 			videoRecordingPromiseRef.current = cameraRef.current.recordAsync({
@@ -1002,26 +774,7 @@ export default function LogScreen() {
 			setIsVideoStarting(false);
 			videoRecordingPromiseRef.current = null;
 			videoRecordingSessionRef.current = null;
-			videoSttSocketRef.current?.close();
-			videoSttSocketRef.current = null;
-			videoTranscriptDoneRef.current = null;
-			const cleanupRecorder = streamingAudioRecorderRef.current;
-			streamingAudioRecorderRef.current = null;
 			const message = error instanceof Error ? error.message : String(error);
-			if (cleanupRecorder) {
-				try {
-					await cleanupRecorder.stopRecording();
-				} catch (cleanupError) {
-					setNotice(
-						`${message} AudioStudio cleanup also failed: ${
-							cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
-						}`,
-					);
-					return;
-				}
-			}
-			videoTranscriptRef.current = message;
-			setVideoTranscript(message);
 			setNotice(message);
 		}
 	}
@@ -1035,38 +788,16 @@ export default function LogScreen() {
 			if (!session) {
 				throw new Error('Video recording session is missing.');
 			}
-			const streamingAudioRecorder = streamingAudioRecorderRef.current;
-			if (!streamingAudioRecorder) {
-				throw new Error('Video audio recorder is missing.');
-			}
 			cameraRef.current?.stopRecording();
-			const audio = await streamingAudioRecorder.stopRecording();
-			streamingAudioRecorderRef.current = null;
-			if (videoSttSocketRef.current?.readyState === WebSocket.OPEN) {
-				videoSttSocketRef.current.send(JSON.stringify({ type: 'audio.done' }));
-			}
 			const video = await videoRecordingPromiseRef.current;
 			if (!video?.uri) {
 				throw new Error('Video recording finished without a file URI.');
 			}
-			const audioUri = audio?.fileUri;
-			if (!audioUri) {
-				throw new Error('Video log audio finished without a file URI.');
-			}
 
 			const savedVideo = await persistVideoLog(video.uri);
 			const savedVideoUri = savedVideo.uri;
-			const savedAudioUri = await persistVideoAudioLog(audioUri, session.audioFileName);
 			const videoFileName = savedVideo.fileName;
-			const [audioBytes, videoBytes] = await Promise.all([
-				getFileSize(savedAudioUri),
-				getFileSize(savedVideoUri),
-			]);
-			const transcript = await waitForVideoStreamingTranscript().catch(error => {
-				const message = error instanceof Error ? error.message : String(error);
-				setNotice(`${message} Saved audio will be transcribed by ElevenLabs during processing.`);
-				return videoCommittedTranscriptRef.current || videoTranscriptRef.current || null;
-			});
+			const videoBytes = await getFileSize(savedVideoUri);
 			savedDraft = {
 				id: session.localId,
 				createdAt: session.startedAt,
@@ -1076,30 +807,21 @@ export default function LogScreen() {
 				notes,
 				tagNames,
 				location: getRequiredLocation(),
-				transcript,
 				durationSeconds,
-				audioUri: savedAudioUri,
-				audioFileName: session.audioFileName,
-				audioMimeType: audioMimeTypeFromUri(savedAudioUri),
-				audioBytes,
 				videoUri: savedVideoUri,
 				videoFileName,
 				videoMimeType: videoMimeTypeFromUri(savedVideoUri),
 				videoBytes,
-				serverRecoveryId: session.recoveryId,
+				serverRecoveryId: null,
 				serverVoiceMemoId: null,
 			};
 			await saveLocalVideoDraft(savedDraft);
-			await videoDraftUploadPromiseRef.current;
-			if (videoDraftUploadErrorRef.current) {
-				throw videoDraftUploadErrorRef.current;
-			}
-			await uploadLocalVideoDraft(savedDraft, { reuseServerDraftAudio: true });
+			await uploadLocalVideoDraft(savedDraft);
 			setNotes('');
 			setTagText('');
 			setComposerOpen(false);
 			setVideoRecorderOpen(false);
-			setNotice(`Video log saved locally and uploaded: ${videoFileName}`);
+			setNotice(`Video log uploaded for processing: ${videoFileName}`);
 		} catch (error) {
 			if (savedDraft) {
 				await updateLocalVideoDraft(savedDraft.id, {
@@ -1114,137 +836,10 @@ export default function LogScreen() {
 			setVideoStartedAt(null);
 			videoRecordingPromiseRef.current = null;
 			videoRecordingSessionRef.current = null;
-			videoDraftUploadPromiseRef.current = Promise.resolve();
-			videoDraftUploadErrorRef.current = null;
-			videoSttSocketRef.current?.close();
-			videoSttSocketRef.current = null;
-			videoTranscriptDoneRef.current = null;
-			streamingAudioRecorderRef.current = null;
 		}
 	}
 
-	function queueVideoDraftAudioChunk(dataBase64: string) {
-		const session = videoRecordingSessionRef.current;
-		if (!session) {
-			throw new Error('Video recording session is missing.');
-		}
-
-		videoDraftUploadPromiseRef.current = videoDraftUploadPromiseRef.current
-			.catch(() => undefined)
-			.then(async () => {
-				await appendVoiceMemoDraftMutation.mutateAsync({
-					recoveryId: session.recoveryId,
-					mediaKind: 'audio',
-					encoding: 'pcm_s16le',
-					dataBase64,
-				});
-			});
-		void videoDraftUploadPromiseRef.current.catch(error => {
-			videoDraftUploadErrorRef.current = error instanceof Error ? error : new Error(String(error));
-			setNotice(videoDraftUploadErrorRef.current.message);
-		});
-	}
-
-	function openVideoSttSocket() {
-		const socket = new WebSocket(diaryLiveSttUrl());
-		videoTranscriptDoneRef.current = createStreamingTranscriptDeferred();
-		pendingVideoAudioChunksRef.current = [];
-		socket.onopen = () => {
-			for (const dataBase64 of pendingVideoAudioChunksRef.current) {
-				socket.send(JSON.stringify({ type: 'audio.chunk', dataBase64 }));
-			}
-			pendingVideoAudioChunksRef.current = [];
-		};
-		socket.onmessage = event => {
-			const payload = JSON.parse(String(event.data)) as {
-				type?: string;
-				text?: string;
-				is_final?: boolean;
-				message?: string;
-			};
-			if (payload.type === 'transcript.partial') {
-				const text = payload.text?.trim() ?? '';
-				if (!text) return;
-				if (payload.is_final) {
-					videoCommittedTranscriptRef.current = appendTranscript(
-						videoCommittedTranscriptRef.current,
-						text,
-					);
-					videoTranscriptRef.current = videoCommittedTranscriptRef.current;
-					setVideoTranscript(videoCommittedTranscriptRef.current);
-					return;
-				}
-				const nextTranscript = appendTranscript(videoCommittedTranscriptRef.current, text);
-				videoTranscriptRef.current = nextTranscript;
-				setVideoTranscript(nextTranscript);
-				return;
-			}
-			if (payload.type === 'transcript.done') {
-				const transcript = payload.text?.trim();
-				if (transcript) {
-					videoCommittedTranscriptRef.current = transcript;
-					videoTranscriptRef.current = transcript;
-					setVideoTranscript(transcript);
-				}
-				resolveVideoStreamingTranscript(
-					transcript || videoCommittedTranscriptRef.current || videoTranscriptRef.current,
-				);
-				return;
-			}
-			if (payload.type === 'error') {
-				const error = new Error(payload.message ?? 'Live transcription failed.');
-				rejectVideoStreamingTranscript(error);
-				setNotice(error.message);
-			}
-		};
-		socket.onerror = () => {
-			const error = new Error('Live ElevenLabs transcription connection failed.');
-			rejectVideoStreamingTranscript(error);
-			setNotice(error.message);
-		};
-		socket.onclose = () => {
-			rejectVideoStreamingTranscript(new Error('Live ElevenLabs transcription connection closed.'));
-		};
-		return socket;
-	}
-
-	function resolveVideoStreamingTranscript(transcript: string) {
-		const deferred = videoTranscriptDoneRef.current;
-		if (!deferred || deferred.isSettled) {
-			return;
-		}
-
-		deferred.isSettled = true;
-		deferred.resolve(transcript);
-	}
-
-	function rejectVideoStreamingTranscript(error: Error) {
-		const deferred = videoTranscriptDoneRef.current;
-		if (!deferred || deferred.isSettled) {
-			return;
-		}
-
-		deferred.isSettled = true;
-		deferred.reject(error);
-	}
-
-	async function waitForVideoStreamingTranscript() {
-		const deferred = videoTranscriptDoneRef.current;
-		if (!deferred) {
-			return videoCommittedTranscriptRef.current || videoTranscriptRef.current || null;
-		}
-
-		return await withTimeout(
-			deferred.promise,
-			12_000,
-			'Timed out waiting for live ElevenLabs transcript.',
-		);
-	}
-
-	async function uploadLocalVideoDraft(
-		draft: LocalVideoDraft,
-		options: { reuseServerDraftAudio?: boolean } = {},
-	) {
+	async function uploadLocalVideoDraft(draft: LocalVideoDraft) {
 		await updateLocalVideoDraft(draft.id, {
 			status: 'uploading',
 			error: null,
@@ -1254,46 +849,40 @@ export default function LogScreen() {
 			if (draft.serverVoiceMemoId) {
 				await processVoiceMemoMutation.mutateAsync({
 					voiceMemoId: draft.serverVoiceMemoId,
-					transcript: draft.transcript ?? undefined,
 				});
 				await removeLocalVideoDraft(draft.id);
 				return;
 			}
 
-			let recoveryId = options.reuseServerDraftAudio ? draft.serverRecoveryId : null;
-			if (!recoveryId) {
-				if (draft.serverRecoveryId) {
-					await resetVoiceMemoDraftMutation.mutateAsync({
-						recoveryId: draft.serverRecoveryId,
-					});
-					recoveryId = draft.serverRecoveryId;
-				} else {
-					const serverDraft = await startVoiceMemoDraftMutation.mutateAsync({
-						mediaKind: 'video',
-						notes: draft.notes,
-						transcript: draft.transcript ?? '',
-						fileName: draft.audioFileName,
-						mimeType: draft.audioMimeType,
-						tagNames: draft.tagNames,
-						location: draft.location,
-					});
-					recoveryId = serverDraft.recoveryId;
-					await updateLocalVideoDraft(draft.id, {
-						serverRecoveryId: recoveryId,
-					});
-				}
-				await uploadFileToVoiceMemoDraft(recoveryId, 'audio', draft.audioUri);
+			let recoveryId = draft.serverRecoveryId;
+			if (recoveryId) {
+				await resetVoiceMemoDraftMutation.mutateAsync({ recoveryId });
+				await setVoiceMemoDraftVideoMutation.mutateAsync({
+					recoveryId,
+					videoFileName: draft.videoFileName,
+					videoMimeType: draft.videoMimeType,
+				});
+			} else {
+				const serverDraft = await startVoiceMemoDraftMutation.mutateAsync({
+					mediaKind: 'video',
+					notes: draft.notes,
+					transcript: '',
+					fileName: videoAudioFileNameFromVideoFileName(draft.videoFileName),
+					mimeType: 'audio/mp4',
+					videoFileName: draft.videoFileName,
+					videoMimeType: draft.videoMimeType,
+					tagNames: draft.tagNames,
+					location: draft.location,
+				});
+				recoveryId = serverDraft.recoveryId;
+				await updateLocalVideoDraft(draft.id, {
+					serverRecoveryId: recoveryId,
+				});
 			}
 
-			await setVoiceMemoDraftVideoMutation.mutateAsync({
-				recoveryId,
-				videoFileName: draft.videoFileName,
-				videoMimeType: draft.videoMimeType,
-			});
 			await uploadFileToVoiceMemoDraft(recoveryId, 'video', draft.videoUri);
 			const saved = await finishVoiceMemoDraftMutation.mutateAsync({
 				recoveryId,
-				transcript: draft.transcript ?? '',
 				durationSeconds: draft.durationSeconds,
 			});
 			await updateLocalVideoDraft(draft.id, {
@@ -1303,7 +892,6 @@ export default function LogScreen() {
 			});
 			await processVoiceMemoMutation.mutateAsync({
 				voiceMemoId: saved.voiceMemoId,
-				transcript: draft.transcript ?? undefined,
 			});
 			await removeLocalVideoDraft(draft.id);
 			await invalidateDiary();
@@ -1337,19 +925,6 @@ export default function LogScreen() {
 		}
 	}
 
-	async function persistVideoAudioLog(uri: string, fileName: string) {
-		const directory = localVideoAudioDirectory();
-		await ensureDirectory(directory);
-		const destination = `${directory}${fileName}`;
-		if (uri !== destination) {
-			const existing = await FileSystem.getInfoAsync(destination);
-			if (!existing.exists) {
-				await FileSystem.copyAsync({ from: uri, to: destination });
-			}
-		}
-		return destination;
-	}
-
 	async function persistVideoLog(uri: string) {
 		const directory = localVideoLogsDirectory();
 		await ensureDirectory(directory);
@@ -1368,10 +943,7 @@ export default function LogScreen() {
 		} else if (draft.serverRecoveryId) {
 			await deleteRecoveryMutation.mutateAsync({ recoveryId: draft.serverRecoveryId });
 		}
-		await Promise.all([
-			FileSystem.deleteAsync(draft.audioUri, { idempotent: true }),
-			FileSystem.deleteAsync(draft.videoUri, { idempotent: true }),
-		]);
+		await FileSystem.deleteAsync(draft.videoUri, { idempotent: true });
 		await removeLocalVideoDraft(draft.id);
 	}
 
@@ -1564,7 +1136,7 @@ export default function LogScreen() {
 				label={
 					recorderState.isRecording
 						? formatRecorderDuration(recorderState.durationMillis)
-						: 'Audio Log'
+						: 'Record'
 				}
 				onPress={() => setComposerOpen(true)}
 			/>
@@ -1726,10 +1298,6 @@ export default function LogScreen() {
 						</Pressable>
 					</View>
 					<View style={styles.videoControls}>
-						<AnimatedTranscript
-							text={videoTranscript || (isVideoRecording ? 'Listening...' : '')}
-							styles={styles}
-						/>
 						<Pressable
 							disabled={
 								isVideoSaving || isVideoStarting || (!isVideoRecording && !isVideoCameraReady)
@@ -1993,7 +1561,7 @@ function LocalVideoDraftCard({
 						{formatBytes(draft.videoBytes)}
 					</Text>
 					<Text style={styles.bodyPreview} numberOfLines={3}>
-						{draft.transcript?.trim() || draft.notes.trim() || 'Local video waiting to process'}
+						{draft.notes.trim() || 'Local video waiting to process'}
 					</Text>
 					{draft.error ? (
 						<Text selectable style={styles.errorText} numberOfLines={4}>
@@ -2191,38 +1759,6 @@ function FullscreenVideoPlayer({
 				) : null}
 			</View>
 		</NativeModal>
-	);
-}
-
-function AnimatedTranscript({
-	text,
-	styles,
-}: {
-	text: string;
-	styles: ReturnType<typeof logStyles>;
-}) {
-	const words = text.trim().split(/\s+/).filter(Boolean).slice(-26);
-
-	if (words.length === 0) {
-		return <View style={styles.liveTranscriptBox} />;
-	}
-
-	return (
-		<View style={styles.liveTranscriptBox}>
-			<Text style={styles.liveTranscriptText} numberOfLines={3}>
-				{words.map((word, index) => (
-					<Text
-						key={`${word}-${index}`}
-						style={[
-							styles.liveTranscriptWord,
-							{ opacity: 0.28 + ((index + 1) / words.length) * 0.72 },
-						]}
-					>
-						{word}{' '}
-					</Text>
-				))}
-			</Text>
-		</View>
 	);
 }
 
@@ -2641,25 +2177,6 @@ function logStyles(isDark: boolean) {
 			paddingHorizontal: 24,
 			position: 'absolute' as const,
 			right: 0,
-		},
-		liveTranscriptBox: {
-			alignItems: 'center' as const,
-			height: 82,
-			justifyContent: 'flex-end' as const,
-			paddingHorizontal: 8,
-		},
-		liveTranscriptText: {
-			color: '#fff',
-			fontSize: 19,
-			fontWeight: '800' as const,
-			lineHeight: 27,
-			textAlign: 'center' as const,
-			textShadowColor: 'rgba(0, 0, 0, 0.55)',
-			textShadowOffset: { width: 0, height: 1 },
-			textShadowRadius: 8,
-		},
-		liveTranscriptWord: {
-			color: '#fff',
 		},
 		recordButtonShell: {
 			alignItems: 'center' as const,
