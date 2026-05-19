@@ -1567,7 +1567,7 @@ export default function LogScreen() {
 				label={
 					recorderState.isRecording
 						? formatRecorderDuration(recorderState.durationMillis)
-						: 'Record'
+						: 'Audio Log'
 				}
 				onPress={() => setComposerOpen(true)}
 			/>
@@ -1579,16 +1579,6 @@ export default function LogScreen() {
 					<View style={styles.composerFooter}>
 						<View style={styles.recordActionGroup}>
 							<Button
-								icon={recorderState.isRecording ? 'stop.fill' : 'mic.fill'}
-								label={recorderState.isRecording ? 'Stop' : 'Record'}
-								active={recorderState.isRecording}
-								disabled={!canRecord}
-								loading={isUploadingRecording}
-								intent='audio'
-								size='small'
-								onPress={toggleRecording}
-							/>
-							<Button
 								icon='video.fill'
 								label='Video log'
 								disabled={!canRecordVideo}
@@ -1596,6 +1586,16 @@ export default function LogScreen() {
 								intent='video'
 								size='small'
 								onPress={() => void openVideoRecorder()}
+							/>
+							<Button
+								icon={recorderState.isRecording ? 'stop.fill' : 'mic.fill'}
+								label={recorderState.isRecording ? 'Stop' : 'Audio Log'}
+								active={recorderState.isRecording}
+								disabled={!canRecord}
+								loading={isUploadingRecording}
+								intent='audio'
+								size='small'
+								onPress={toggleRecording}
 							/>
 						</View>
 						<Button
