@@ -27,6 +27,7 @@ const voiceMemoStatusValues = [
 	'completed',
 	'failed',
 ] as const;
+const diaryMemoKindValues = ['audio', 'video'] as const;
 
 export const labDocuments = sqliteTable(
 	'lab_documents',
@@ -249,9 +250,13 @@ export const diaryVoiceMemos = sqliteTable(
 			.notNull()
 			.references(() => diaryEntries.id, { onDelete: 'cascade' }),
 		createdAt: text('created_at').notNull(),
+		mediaKind: text('media_kind', { enum: diaryMemoKindValues }).notNull().default('audio'),
 		fileName: text('file_name').notNull(),
 		mimeType: text('mime_type').notNull(),
 		audioData: blob('audio_data', { mode: 'buffer' }).notNull(),
+		videoFileName: text('video_file_name'),
+		videoMimeType: text('video_mime_type'),
+		videoData: blob('video_data', { mode: 'buffer' }),
 		durationSeconds: real('duration_seconds'),
 		transcriptionStatus: text('transcription_status', { enum: voiceMemoStatusValues })
 			.notNull()

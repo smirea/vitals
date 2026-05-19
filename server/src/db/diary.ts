@@ -61,16 +61,48 @@ export const diaryCreateEntryInputSchema = z.object({
 	location: diaryLocationInputSchema,
 });
 
-export const diaryUploadVoiceMemoInputSchema = z.object({
-	notes: z.string().trim().optional().default(''),
-	transcript: z.string().trim().optional().default(''),
-	fileName: z.string().trim().min(1),
-	mimeType: z.string().trim().min(1),
-	dataBase64: z.string().trim().min(1),
-	durationSeconds: z.number().finite().positive().nullable().optional(),
-	tagNames: z.array(z.string().trim().min(1)).max(50).default([]),
-	location: diaryLocationInputSchema,
-});
+export const diaryUploadVoiceMemoInputSchema = z
+	.object({
+		mediaKind: z.enum(['audio', 'video']).optional().default('audio'),
+		notes: z.string().trim().optional().default(''),
+		transcript: z.string().trim().optional().default(''),
+		fileName: z.string().trim().min(1),
+		mimeType: z.string().trim().min(1),
+		dataBase64: z.string().trim().min(1),
+		videoFileName: z.string().trim().min(1).optional(),
+		videoMimeType: z.string().trim().min(1).optional(),
+		videoDataBase64: z.string().trim().min(1).optional(),
+		durationSeconds: z.number().finite().positive().nullable().optional(),
+		tagNames: z.array(z.string().trim().min(1)).max(50).default([]),
+		location: diaryLocationInputSchema,
+	})
+	.superRefine((input, ctx) => {
+		if (input.mediaKind !== 'video') {
+			return;
+		}
+
+		if (!input.videoFileName) {
+			ctx.addIssue({
+				code: 'custom',
+				message: 'Video file name is required for video diary memos.',
+				path: ['videoFileName'],
+			});
+		}
+		if (!input.videoMimeType) {
+			ctx.addIssue({
+				code: 'custom',
+				message: 'Video MIME type is required for video diary memos.',
+				path: ['videoMimeType'],
+			});
+		}
+		if (!input.videoDataBase64) {
+			ctx.addIssue({
+				code: 'custom',
+				message: 'Video data is required for video diary memos.',
+				path: ['videoDataBase64'],
+			});
+		}
+	});
 
 export const diaryStartVoiceMemoDraftInputSchema = diaryUploadVoiceMemoInputSchema.omit({
 	dataBase64: true,
@@ -89,6 +121,10 @@ export const diaryFinishVoiceMemoDraftInputSchema = z.object({
 });
 
 export const diaryProcessVoiceMemoRecoveryInputSchema = z.object({
+	recoveryId: z.string().trim().min(1),
+});
+
+export const diaryDeleteVoiceMemoRecoveryInputSchema = z.object({
 	recoveryId: z.string().trim().min(1),
 });
 
@@ -143,12 +179,18 @@ type DiaryVoiceMemoRecoveryRecord = {
 		| 'summarizing'
 		| 'completed'
 		| 'failed';
+	mediaKind: 'audio' | 'video';
 	audioPath: string | null;
 	audioDeletedAt: string | null;
+	videoPath: string | null;
+	videoDeletedAt: string | null;
 	fileName: string;
 	mimeType: string;
+	videoFileName: string | null;
+	videoMimeType: string | null;
 	durationSeconds: number | null;
 	audioBytes: number;
+	videoBytes: number;
 	notes: string;
 	tagNames: string[];
 	location: z.infer<typeof diaryLocationInputSchema>;
@@ -192,6 +234,12 @@ function getDiaryRecoveryPaths(createdAt: string, fileName: string) {
 	};
 }
 
+function getDiaryRecoveryVideoPath(createdAt: string, fileName: string) {
+	const day = createdAt.slice(0, 10);
+	const dirPath = path.join(DIARY_RECOVERY_ROOT, day);
+	return path.join(dirPath, fileName);
+}
+
 function writeDiaryRecoveryRecord(metadataPath: string, record: DiaryVoiceMemoRecoveryRecord) {
 	fs.writeFileSync(metadataPath, `${JSON.stringify(record, null, 2)}\n`);
 }
@@ -202,20 +250,34 @@ function createDiaryVoiceMemoRecovery(
 ) {
 	const createdAt = new Date().toISOString();
 	const paths = getDiaryRecoveryPaths(createdAt, input.fileName.trim());
+	const videoData = input.videoDataBase64 ? Buffer.from(input.videoDataBase64, 'base64') : null;
+	const videoPath =
+		input.mediaKind === 'video' && input.videoFileName
+			? getDiaryRecoveryVideoPath(createdAt, input.videoFileName.trim())
+			: null;
 	fs.mkdirSync(paths.dirPath, { recursive: true });
 	fs.writeFileSync(paths.audioPath, audioData);
+	if (videoPath && videoData) {
+		fs.writeFileSync(videoPath, videoData);
+	}
 
 	const record: DiaryVoiceMemoRecoveryRecord = {
 		id: paths.id,
 		createdAt,
 		updatedAt: createdAt,
 		status: 'audio_saved',
+		mediaKind: input.mediaKind,
 		audioPath: paths.audioPath,
 		audioDeletedAt: null,
+		videoPath,
+		videoDeletedAt: null,
 		fileName: input.fileName.trim(),
 		mimeType: input.mimeType.trim(),
+		videoFileName: input.videoFileName?.trim() ?? null,
+		videoMimeType: input.videoMimeType?.trim() ?? null,
 		durationSeconds: nullableNumber(input.durationSeconds),
 		audioBytes: audioData.byteLength,
+		videoBytes: videoData?.byteLength ?? 0,
 		notes: input.notes.trim(),
 		tagNames: input.tagNames,
 		location: input.location,
@@ -231,6 +293,8 @@ function createDiaryVoiceMemoRecovery(
 				details: {
 					audioPath: paths.audioPath,
 					audioBytes: audioData.byteLength,
+					videoPath,
+					videoBytes: videoData?.byteLength ?? 0,
 				},
 			},
 		],
@@ -256,12 +320,18 @@ function createDiaryVoiceMemoDraftRecovery(
 		createdAt,
 		updatedAt: createdAt,
 		status: 'recording',
+		mediaKind: input.mediaKind,
 		audioPath: paths.audioPath,
 		audioDeletedAt: null,
+		videoPath: null,
+		videoDeletedAt: null,
 		fileName: input.fileName.trim(),
 		mimeType: input.mimeType.trim(),
+		videoFileName: null,
+		videoMimeType: null,
 		durationSeconds: null,
 		audioBytes: 0,
+		videoBytes: 0,
 		notes: input.notes.trim(),
 		tagNames: input.tagNames,
 		location: input.location,
@@ -332,6 +402,26 @@ function deleteDiaryRecoveryAudio(
 		},
 		{
 			deletedAudioPath: audioPath,
+		},
+	);
+}
+
+function deleteDiaryRecoveryVideo(
+	metadataPath: string,
+	record: DiaryVoiceMemoRecoveryRecord,
+	videoPath: string,
+) {
+	fs.unlinkSync(videoPath);
+	return updateDiaryVoiceMemoRecovery(
+		metadataPath,
+		record,
+		'database_saved',
+		{
+			videoPath: null,
+			videoDeletedAt: new Date().toISOString(),
+		},
+		{
+			deletedVideoPath: videoPath,
 		},
 	);
 }
@@ -423,7 +513,7 @@ function getDiaryRecoveryMetadataRecords() {
 function buildDiaryPayload(args: {
 	entryRows: DiaryEntryRow[];
 	locationRows: LocationRow[];
-	voiceMemoRows: Array<Omit<DiaryVoiceMemoRow, 'audioData'>>;
+	voiceMemoRows: Array<Omit<DiaryVoiceMemoRow, 'audioData' | 'videoData'>>;
 	entryTagRows: DiaryEntryTagRow[];
 	tagRows: TagRow[];
 }) {
@@ -434,8 +524,11 @@ function buildDiaryPayload(args: {
 		Array<{
 			id: number;
 			createdAt: string;
+			mediaKind: DiaryVoiceMemoRow['mediaKind'];
 			fileName: string;
 			mimeType: string;
+			videoFileName: string | null;
+			videoMimeType: string | null;
 			durationSeconds: number | null;
 			transcriptionStatus: DiaryVoiceMemoRow['transcriptionStatus'];
 			transcript: string | null;
@@ -452,8 +545,11 @@ function buildDiaryPayload(args: {
 		list.push({
 			id: row.id,
 			createdAt: row.createdAt,
+			mediaKind: row.mediaKind,
 			fileName: row.fileName,
 			mimeType: row.mimeType,
+			videoFileName: row.videoFileName,
+			videoMimeType: row.videoMimeType,
 			durationSeconds: row.durationSeconds,
 			transcriptionStatus: row.transcriptionStatus,
 			transcript: row.transcript,
@@ -539,8 +635,11 @@ function getDiaryRecords(db: DiaryReadDb, entryIds?: number[]) {
 			id: diaryVoiceMemos.id,
 			entryId: diaryVoiceMemos.entryId,
 			createdAt: diaryVoiceMemos.createdAt,
+			mediaKind: diaryVoiceMemos.mediaKind,
 			fileName: diaryVoiceMemos.fileName,
 			mimeType: diaryVoiceMemos.mimeType,
+			videoFileName: diaryVoiceMemos.videoFileName,
+			videoMimeType: diaryVoiceMemos.videoMimeType,
 			durationSeconds: diaryVoiceMemos.durationSeconds,
 			transcriptionStatus: diaryVoiceMemos.transcriptionStatus,
 			transcript: diaryVoiceMemos.transcript,
@@ -663,9 +762,13 @@ function getPendingVoiceMemoRecords(db: DiaryReadDb) {
 			id: row.id,
 			entryId: row.entryId,
 			createdAt: row.createdAt,
+			mediaKind: row.mediaKind,
 			fileName: row.fileName,
 			mimeType: row.mimeType,
+			videoFileName: row.videoFileName,
+			videoMimeType: row.videoMimeType,
 			audioBytes: row.audioData.byteLength,
+			videoBytes: row.videoData?.byteLength ?? 0,
 			durationSeconds: row.durationSeconds,
 			transcriptionStatus: row.transcriptionStatus,
 			transcript: row.transcript,
@@ -889,11 +992,16 @@ export function listPendingDiaryVoiceMemoRecoveries(_db: VitalsDatabase) {
 			createdAt: record.createdAt,
 			updatedAt: record.updatedAt,
 			status: record.status,
+			mediaKind: record.mediaKind,
 			fileName: record.fileName,
 			mimeType: record.mimeType,
+			videoFileName: record.videoFileName,
+			videoMimeType: record.videoMimeType,
 			durationSeconds: record.durationSeconds,
 			audioBytes: record.audioBytes,
+			videoBytes: record.videoBytes,
 			audioPath: record.audioPath,
+			videoPath: record.videoPath,
 			transcript: record.transcript,
 			error: record.error,
 			steps: record.steps,
@@ -987,6 +1095,7 @@ export async function saveDiaryVoiceMemo(
 	input: z.infer<typeof diaryUploadVoiceMemoInputSchema>,
 ) {
 	const audioData = Buffer.from(input.dataBase64, 'base64');
+	const videoData = input.videoDataBase64 ? Buffer.from(input.videoDataBase64, 'base64') : null;
 	const recovery = createDiaryVoiceMemoRecovery(input, audioData);
 	let recoveryRecord = recovery.record;
 
@@ -1017,9 +1126,13 @@ export async function saveDiaryVoiceMemo(
 				.values({
 					entryId: insertedEntry.id,
 					createdAt: new Date().toISOString(),
+					mediaKind: input.mediaKind,
 					fileName: input.fileName.trim(),
 					mimeType: input.mimeType.trim(),
 					audioData,
+					videoFileName: input.videoFileName?.trim() ?? null,
+					videoMimeType: input.videoMimeType?.trim() ?? null,
+					videoData,
 					durationSeconds: nullableNumber(input.durationSeconds),
 					transcriptionStatus: 'uploaded',
 					transcript: normalizeOptionalText(input.transcript),
@@ -1054,6 +1167,13 @@ export async function saveDiaryVoiceMemo(
 				recovery.metadataPath,
 				recoveryRecord,
 				recovery.audioPath,
+			);
+		}
+		if (recoveryRecord.videoPath && fs.existsSync(recoveryRecord.videoPath)) {
+			recoveryRecord = deleteDiaryRecoveryVideo(
+				recovery.metadataPath,
+				recoveryRecord,
+				recoveryRecord.videoPath,
 			);
 		}
 
@@ -1133,6 +1253,7 @@ export async function finishDiaryVoiceMemoDraft(
 		}
 
 		const audioData = fs.readFileSync(recoveryRecord.audioPath);
+		const videoData = recoveryRecord.videoPath ? fs.readFileSync(recoveryRecord.videoPath) : null;
 		if (audioData.byteLength === 0) {
 			throw new Error(`Diary recovery ${input.recoveryId} did not receive audio.`);
 		}
@@ -1171,9 +1292,13 @@ export async function finishDiaryVoiceMemoDraft(
 				.values({
 					entryId: insertedEntry.id,
 					createdAt: recoveryRecord.createdAt,
+					mediaKind: recoveryRecord.mediaKind,
 					fileName: recoveryRecord.fileName,
 					mimeType: recoveryRecord.mimeType,
 					audioData,
+					videoFileName: recoveryRecord.videoFileName,
+					videoMimeType: recoveryRecord.videoMimeType,
+					videoData,
 					durationSeconds: recoveryRecord.durationSeconds,
 					transcriptionStatus: 'uploaded',
 					transcript: recoveryRecord.transcript,
@@ -1203,6 +1328,10 @@ export async function finishDiaryVoiceMemoDraft(
 		const audioPath = recoveryRecord.audioPath;
 		if (audioPath && fs.existsSync(audioPath)) {
 			recoveryRecord = deleteDiaryRecoveryAudio(recovery.metadataPath, recoveryRecord, audioPath);
+		}
+		const videoPath = recoveryRecord.videoPath;
+		if (videoPath && fs.existsSync(videoPath)) {
+			recoveryRecord = deleteDiaryRecoveryVideo(recovery.metadataPath, recoveryRecord, videoPath);
 		}
 
 		return {
@@ -1264,6 +1393,7 @@ export async function processDiaryVoiceMemoRecovery(
 		}
 
 		const audioData = fs.readFileSync(recoveryRecord.audioPath);
+		const videoData = recoveryRecord.videoPath ? fs.readFileSync(recoveryRecord.videoPath) : null;
 		recoveryRecord = updateDiaryVoiceMemoRecovery(
 			resolvedMetadataPath,
 			recoveryRecord,
@@ -1297,9 +1427,13 @@ export async function processDiaryVoiceMemoRecovery(
 				.values({
 					entryId: insertedEntry.id,
 					createdAt: recoveryRecord.createdAt,
+					mediaKind: recoveryRecord.mediaKind,
 					fileName: recoveryRecord.fileName,
 					mimeType: recoveryRecord.mimeType,
 					audioData,
+					videoFileName: recoveryRecord.videoFileName,
+					videoMimeType: recoveryRecord.videoMimeType,
+					videoData,
 					durationSeconds: recoveryRecord.durationSeconds,
 					transcriptionStatus: 'uploaded',
 					transcript: recoveryRecord.transcript,
@@ -1331,6 +1465,10 @@ export async function processDiaryVoiceMemoRecovery(
 		if (audioPath && fs.existsSync(audioPath)) {
 			recoveryRecord = deleteDiaryRecoveryAudio(resolvedMetadataPath, recoveryRecord, audioPath);
 		}
+		const videoPath = recoveryRecord.videoPath;
+		if (videoPath && fs.existsSync(videoPath)) {
+			recoveryRecord = deleteDiaryRecoveryVideo(resolvedMetadataPath, recoveryRecord, videoPath);
+		}
 	}
 
 	await processDiaryVoiceMemo(db, voiceMemoId, recoveryRecord.transcript ?? undefined);
@@ -1350,6 +1488,26 @@ export async function processDiaryVoiceMemoRecovery(
 	}
 
 	return record;
+}
+
+export function deleteDiaryVoiceMemoRecovery(
+	_db: VitalsDatabase,
+	input: z.infer<typeof diaryDeleteVoiceMemoRecoveryInputSchema>,
+) {
+	const recovery = findDiaryRecoveryById(input.recoveryId);
+	if (recovery.record.voiceMemoId) {
+		throw new Error(`Diary recovery ${input.recoveryId} already belongs to a saved memo.`);
+	}
+
+	if (recovery.record.audioPath && fs.existsSync(recovery.record.audioPath)) {
+		fs.unlinkSync(recovery.record.audioPath);
+	}
+	if (recovery.record.videoPath && fs.existsSync(recovery.record.videoPath)) {
+		fs.unlinkSync(recovery.record.videoPath);
+	}
+	fs.unlinkSync(recovery.metadataPath);
+
+	return listPendingDiaryVoiceMemoRecoveries(_db);
 }
 
 export function failDiaryVoiceMemo(
@@ -1651,6 +1809,21 @@ export function getDiaryVoiceMemoAudio(db: VitalsDatabase, voiceMemoId: number) 
 				fileName: diaryVoiceMemos.fileName,
 				mimeType: diaryVoiceMemos.mimeType,
 				audioData: diaryVoiceMemos.audioData,
+			})
+			.from(diaryVoiceMemos)
+			.where(eq(diaryVoiceMemos.id, voiceMemoId))
+			.get() ?? null
+	);
+}
+
+export function getDiaryVoiceMemoVideo(db: VitalsDatabase, voiceMemoId: number) {
+	return (
+		db
+			.select({
+				id: diaryVoiceMemos.id,
+				fileName: diaryVoiceMemos.videoFileName,
+				mimeType: diaryVoiceMemos.videoMimeType,
+				videoData: diaryVoiceMemos.videoData,
 			})
 			.from(diaryVoiceMemos)
 			.where(eq(diaryVoiceMemos.id, voiceMemoId))

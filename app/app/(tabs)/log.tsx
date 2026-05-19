@@ -3,6 +3,7 @@ import type { AppRouter } from 'server/trpc/index.ts';
 import { API_BASE_URL, useTRPC } from '@/src/api/trpc';
 import { ActivityIndicator, Button, Modal, Tag } from '@ant-design/react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Location from 'expo-location';
 import {
@@ -12,9 +13,12 @@ import {
 	useAudioRecorder,
 	useAudioRecorderState,
 } from 'expo-audio';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+	Animated,
+	Easing,
 	Linking,
+	Modal as NativeModal,
 	Pressable,
 	ScrollView,
 	Text,
@@ -134,9 +138,18 @@ function voiceMemoAudioUrl(voiceMemoId: number) {
 	return `${API_BASE_URL}/diary/voice-memos/${voiceMemoId}/audio`;
 }
 
+function voiceMemoVideoUrl(voiceMemoId: number) {
+	return `${API_BASE_URL}/diary/voice-memos/${voiceMemoId}/video`;
+}
+
 function audioFileNameFromUri(uri: string) {
 	const extension = audioExtensionFromUri(uri);
 	return `diary-${new Date().toISOString().replace(/[:.]/g, '-')}.${extension}`;
+}
+
+function videoFileNameFromUri(uri: string) {
+	const extension = videoExtensionFromUri(uri);
+	return `diary-video-${new Date().toISOString().replace(/[:.]/g, '-')}.${extension}`;
 }
 
 function audioMimeTypeFromUri(uri: string) {
@@ -147,6 +160,14 @@ function audioMimeTypeFromUri(uri: string) {
 	if (extension === 'webm') return 'audio/webm';
 	if (extension === 'ogg') return 'audio/ogg';
 	return `audio/${extension}`;
+}
+
+function videoMimeTypeFromUri(uri: string) {
+	const extension = videoExtensionFromUri(uri);
+	if (extension === 'mov' || extension === 'qt') return 'video/quicktime';
+	if (extension === 'm4v') return 'video/x-m4v';
+	if (extension === 'webm') return 'video/webm';
+	return `video/${extension}`;
 }
 
 function formatRecorderDuration(milliseconds: number) {
@@ -167,6 +188,27 @@ function audioExtensionFromUri(uri: string) {
 	return extension;
 }
 
+function videoExtensionFromUri(uri: string) {
+	const path = uri.split('?')[0] ?? uri;
+	const extension = path
+		.split('.')
+		.at(-1)
+		?.toLowerCase()
+		.replace(/[^a-z0-9]/g, '');
+	if (!extension) {
+		throw new Error(`Video URI has no file extension: ${uri}`);
+	}
+
+	return extension === 'quicktime' ? 'mov' : extension;
+}
+
+async function ensureDirectory(path: string) {
+	const info = await FileSystem.getInfoAsync(path);
+	if (!info.exists) {
+		await FileSystem.makeDirectoryAsync(path, { intermediates: true });
+	}
+}
+
 type LogFilter = 'entries' | 'pending' | 'recoveries';
 
 export default function LogScreen() {
@@ -177,6 +219,10 @@ export default function LogScreen() {
 	const sharedStyles = pageStyles(isDark);
 	const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
 	const recorderState = useAudioRecorderState(audioRecorder);
+	const cameraRef = useRef<CameraView>(null);
+	const videoRecordingPromiseRef = useRef<Promise<{ uri: string } | undefined> | null>(null);
+	const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+	const recordPulse = useRef(new Animated.Value(0)).current;
 	const [notes, setNotes] = useState('');
 	const [tagText, setTagText] = useState('');
 	const [currentLocation, setCurrentLocation] = useState<DiaryLocationInput | null>(null);
@@ -184,6 +230,11 @@ export default function LogScreen() {
 	const [notice, setNotice] = useState<string | null>(null);
 	const [selectedEntry, setSelectedEntry] = useState<DiaryEntry | null>(null);
 	const [isUploadingRecording, setIsUploadingRecording] = useState(false);
+	const [videoRecorderOpen, setVideoRecorderOpen] = useState(false);
+	const [isVideoRecording, setIsVideoRecording] = useState(false);
+	const [isVideoSaving, setIsVideoSaving] = useState(false);
+	const [videoStartedAt, setVideoStartedAt] = useState<number | null>(null);
+	const [videoTranscript, setVideoTranscript] = useState('');
 	const [composerOpen, setComposerOpen] = useState(false);
 	const [activeFilter, setActiveFilter] = useState<LogFilter>('entries');
 
@@ -258,6 +309,14 @@ export default function LogScreen() {
 		},
 		onError: error => setNotice(error.message),
 	});
+	const deleteRecoveryMutation = useMutation({
+		...trpc.diary.deleteVoiceMemoRecovery.mutationOptions(),
+		onSuccess: async () => {
+			await invalidateDiary();
+			setNotice('Recovery recording deleted.');
+		},
+		onError: error => setNotice(error.message),
+	});
 	const deleteVoiceMemoMutation = useMutation({
 		...trpc.diary.deleteVoiceMemo.mutationOptions(),
 		onSuccess: async () => {
@@ -297,6 +356,32 @@ export default function LogScreen() {
 		void refreshLocation();
 	}, []);
 	useEffect(() => {
+		if (!isVideoRecording) {
+			recordPulse.stopAnimation();
+			recordPulse.setValue(0);
+			return;
+		}
+
+		const animation = Animated.loop(
+			Animated.sequence([
+				Animated.timing(recordPulse, {
+					toValue: 1,
+					duration: 700,
+					easing: Easing.out(Easing.quad),
+					useNativeDriver: true,
+				}),
+				Animated.timing(recordPulse, {
+					toValue: 0,
+					duration: 700,
+					easing: Easing.in(Easing.quad),
+					useNativeDriver: true,
+				}),
+			]),
+		);
+		animation.start();
+		return () => animation.stop();
+	}, [isVideoRecording, recordPulse]);
+	useEffect(() => {
 		if (!filterOptions.some(option => option.key === activeFilter)) setActiveFilter('entries');
 	}, [activeFilter, filterOptions]);
 
@@ -304,10 +389,17 @@ export default function LogScreen() {
 		createEntryMutation.isPending ||
 		uploadVoiceMemoMutation.isPending ||
 		isUploadingRecording ||
+		isVideoSaving ||
 		recorderState.isRecording;
 	const canCreateEntry = notes.trim().length > 0 && currentLocation !== null && !isBusy;
 	const canRecord =
 		currentLocation !== null && !createEntryMutation.isPending && !isUploadingRecording;
+	const canRecordVideo =
+		currentLocation !== null &&
+		!createEntryMutation.isPending &&
+		!isUploadingRecording &&
+		!isVideoSaving &&
+		!recorderState.isRecording;
 	const error =
 		entriesQuery.error ??
 		pendingVoiceMemosQuery.error ??
@@ -415,6 +507,130 @@ export default function LogScreen() {
 		}
 	}
 
+	async function openVideoRecorder() {
+		try {
+			getRequiredLocation();
+			const permission = cameraPermission?.granted
+				? cameraPermission
+				: await requestCameraPermission();
+			if (!permission.granted) {
+				throw new Error('Camera permission is required for video logs.');
+			}
+
+			const microphonePermission = await requestRecordingPermissionsAsync();
+			if (!microphonePermission.granted) {
+				throw new Error('Microphone permission is required for video logs.');
+			}
+
+			setVideoTranscript('');
+			setVideoRecorderOpen(true);
+		} catch (error) {
+			setNotice(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	async function toggleVideoRecording() {
+		if (isVideoRecording) {
+			await stopVideoRecording();
+			return;
+		}
+		await startVideoRecording();
+	}
+
+	async function startVideoRecording() {
+		try {
+			getRequiredLocation();
+			if (!cameraRef.current) {
+				throw new Error('Camera is not ready.');
+			}
+
+			await setAudioModeAsync({
+				allowsRecording: true,
+				playsInSilentMode: true,
+			});
+			await audioRecorder.prepareToRecordAsync();
+			audioRecorder.record();
+			setVideoStartedAt(Date.now());
+			setVideoTranscript('');
+			setIsVideoRecording(true);
+			videoRecordingPromiseRef.current = cameraRef.current.recordAsync({
+				maxDuration: 10 * 60,
+			});
+		} catch (error) {
+			setIsVideoRecording(false);
+			videoRecordingPromiseRef.current = null;
+			setNotice(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	async function stopVideoRecording() {
+		const durationSeconds = Math.max((Date.now() - (videoStartedAt ?? Date.now())) / 1000, 0.1);
+		try {
+			setIsVideoSaving(true);
+			cameraRef.current?.stopRecording();
+			await audioRecorder.stop();
+			const video = await videoRecordingPromiseRef.current;
+			const audioUri = audioRecorder.uri ?? recorderState.url;
+			if (!video?.uri) {
+				throw new Error('Video recording finished without a file URI.');
+			}
+			if (!audioUri) {
+				throw new Error('Video log audio finished without a file URI.');
+			}
+
+			const savedVideoUri = await persistVideoLog(video.uri);
+			const [audioDataBase64, videoDataBase64] = await Promise.all([
+				FileSystem.readAsStringAsync(audioUri, {
+					encoding: FileSystem.EncodingType.Base64,
+				}),
+				FileSystem.readAsStringAsync(savedVideoUri, {
+					encoding: FileSystem.EncodingType.Base64,
+				}),
+			]);
+			const audioFileName = audioFileNameFromUri(audioUri);
+			const videoFileName = videoFileNameFromUri(savedVideoUri);
+			await uploadVoiceMemoMutation.mutateAsync({
+				mediaKind: 'video',
+				notes,
+				transcript: videoTranscript,
+				fileName: audioFileName,
+				mimeType: audioMimeTypeFromUri(audioUri),
+				dataBase64: audioDataBase64,
+				videoFileName,
+				videoMimeType: videoMimeTypeFromUri(savedVideoUri),
+				videoDataBase64,
+				durationSeconds,
+				tagNames,
+				location: getRequiredLocation(),
+			});
+			setVideoRecorderOpen(false);
+			setNotice(`Video log saved locally and uploaded: ${videoFileName}`);
+		} catch (error) {
+			setNotice(error instanceof Error ? error.message : String(error));
+		} finally {
+			setIsVideoRecording(false);
+			setIsVideoSaving(false);
+			setVideoStartedAt(null);
+			videoRecordingPromiseRef.current = null;
+			await setAudioModeAsync({
+				allowsRecording: false,
+				playsInSilentMode: true,
+			});
+		}
+	}
+
+	async function persistVideoLog(uri: string) {
+		if (!FileSystem.documentDirectory) {
+			throw new Error('Expo document directory is not available.');
+		}
+
+		const directory = `${FileSystem.documentDirectory}video-logs/`;
+		await ensureDirectory(directory);
+		const destination = `${directory}${videoFileNameFromUri(uri)}`;
+		await FileSystem.copyAsync({ from: uri, to: destination });
+		return destination;
+	}
+
 	function deleteEntry(entry: DiaryEntry) {
 		Modal.alert('Delete diary entry?', formatDiaryTimestamp(entry.createdAt), [
 			{ text: 'Cancel' },
@@ -435,6 +651,16 @@ export default function LogScreen() {
 			{
 				text: 'Delete',
 				onPress: () => deleteVoiceMemoMutation.mutate({ voiceMemoId: memo.id }),
+			},
+		]);
+	}
+
+	function deleteVoiceMemoRecovery(recovery: DiaryPendingVoiceMemoRecovery) {
+		Modal.alert('Delete recovery recording?', recovery.fileName, [
+			{ text: 'Cancel' },
+			{
+				text: 'Delete',
+				onPress: () => deleteRecoveryMutation.mutate({ recoveryId: recovery.id }),
 			},
 		]);
 	}
@@ -518,7 +744,9 @@ export default function LogScreen() {
 								key={recovery.id}
 								recovery={recovery}
 								isProcessing={processRecoveryMutation.isPending}
+								isDeleting={deleteRecoveryMutation.isPending}
 								onReprocess={() => processRecoveryMutation.mutate({ recoveryId: recovery.id })}
+								onDelete={() => deleteVoiceMemoRecovery(recovery)}
 								styles={styles}
 							/>
 						))}
@@ -565,6 +793,14 @@ export default function LogScreen() {
 							{recorderState.isRecording ? 'Stop' : 'Record'}
 						</Button>
 						<Button
+							size='small'
+							onPress={() => void openVideoRecorder()}
+							disabled={!canRecordVideo}
+							loading={isVideoSaving}
+						>
+							Video log
+						</Button>
+						<Button
 							type='primary'
 							size='small'
 							onPress={() => void createEntry()}
@@ -598,8 +834,110 @@ export default function LogScreen() {
 							Recording {formatRecorderDuration(recorderState.durationMillis)}
 						</Text>
 					) : null}
+					{pendingVoiceMemos.length > 0 || pendingVoiceMemoRecoveries.length > 0 ? (
+						<View style={styles.stack}>
+							<Text style={styles.sectionTitle}>Unprocessed recordings</Text>
+							{pendingVoiceMemos.slice(0, 3).map(memo => (
+								<PendingVoiceMemoCard
+									key={memo.id}
+									memo={memo}
+									availableTags={availableTags}
+									isSettingTags={setVoiceMemoTagsMutation.isPending}
+									isProcessing={processVoiceMemoMutation.isPending}
+									isDeleting={deleteVoiceMemoMutation.isPending}
+									onSetTags={value =>
+										setVoiceMemoTagsMutation.mutate({
+											voiceMemoId: memo.id,
+											tagNames: parseTagText(value),
+										})
+									}
+									onReprocess={() => processVoiceMemoMutation.mutate({ voiceMemoId: memo.id })}
+									onDelete={() => deleteVoiceMemo(memo)}
+									styles={styles}
+								/>
+							))}
+							{pendingVoiceMemoRecoveries.slice(0, 2).map(recovery => (
+								<RecoveryMemoCard
+									key={recovery.id}
+									recovery={recovery}
+									isProcessing={processRecoveryMutation.isPending}
+									isDeleting={deleteRecoveryMutation.isPending}
+									onReprocess={() => processRecoveryMutation.mutate({ recoveryId: recovery.id })}
+									onDelete={() => deleteVoiceMemoRecovery(recovery)}
+									styles={styles}
+								/>
+							))}
+						</View>
+					) : null}
 				</View>
 			</BottomSheet>
+
+			<NativeModal
+				visible={videoRecorderOpen}
+				animationType='slide'
+				presentationStyle='fullScreen'
+				onRequestClose={() => {
+					if (!isVideoRecording && !isVideoSaving) setVideoRecorderOpen(false);
+				}}
+			>
+				<View style={styles.videoScreen}>
+					<CameraView
+						ref={cameraRef}
+						active={videoRecorderOpen}
+						facing='front'
+						mirror
+						mode='video'
+						style={styles.cameraPreview}
+						videoQuality='720p'
+					/>
+					<View style={styles.videoTopBar}>
+						<Pressable
+							disabled={isVideoRecording || isVideoSaving}
+							onPress={() => setVideoRecorderOpen(false)}
+							style={styles.videoCloseButton}
+						>
+							<Text style={styles.videoCloseText}>Close</Text>
+						</Pressable>
+					</View>
+					<View style={styles.videoControls}>
+						<AnimatedTranscript
+							text={videoTranscript || (isVideoRecording ? 'Listening...' : '')}
+							styles={styles}
+						/>
+						<Pressable
+							disabled={isVideoSaving}
+							onPress={() => void toggleVideoRecording()}
+							style={styles.recordButtonShell}
+						>
+							<Animated.View
+								style={[
+									styles.recordButton,
+									isVideoRecording && styles.recordButtonActive,
+									{
+										transform: [
+											{
+												scale: recordPulse.interpolate({
+													inputRange: [0, 1],
+													outputRange: [1, 1.08],
+												}),
+											},
+										],
+									},
+								]}
+							>
+								<View style={isVideoRecording ? styles.stopIcon : styles.recordButtonCore} />
+							</Animated.View>
+						</Pressable>
+						<Text style={styles.videoStatus}>
+							{isVideoSaving
+								? 'Saving...'
+								: isVideoRecording && videoStartedAt
+									? formatDuration((Date.now() - videoStartedAt) / 1000)
+									: 'Tap to record'}
+						</Text>
+					</View>
+				</View>
+			</NativeModal>
 
 			<EntryDetailSheet
 				entry={selectedEntry}
@@ -715,14 +1053,18 @@ function PendingVoiceMemoCard({
 					<Tag small>{memo.transcriptionStatus}</Tag>
 				</View>
 				<Text style={styles.muted}>
-					{memo.fileName} - {formatDuration(memo.durationSeconds)} - {formatBytes(memo.audioBytes)}
+					{memo.mediaKind === 'video' ? (memo.videoFileName ?? memo.fileName) : memo.fileName} -{' '}
+					{formatDuration(memo.durationSeconds)} -{' '}
+					{formatBytes(memo.mediaKind === 'video' ? memo.videoBytes : memo.audioBytes)}
 				</Text>
 				<Pressable
 					onPress={() => {
-						void Linking.openURL(voiceMemoAudioUrl(memo.id));
+						void Linking.openURL(
+							memo.mediaKind === 'video' ? voiceMemoVideoUrl(memo.id) : voiceMemoAudioUrl(memo.id),
+						);
 					}}
 				>
-					<Text style={styles.linkText}>Open audio</Text>
+					<Text style={styles.linkText}>Open {memo.mediaKind === 'video' ? 'video' : 'audio'}</Text>
 				</Pressable>
 				<Text style={styles.bodyPreview} numberOfLines={3}>
 					{memo.transcript?.trim() || memo.notes.trim() || 'No transcript yet'}
@@ -754,12 +1096,16 @@ function PendingVoiceMemoCard({
 function RecoveryMemoCard({
 	recovery,
 	isProcessing,
+	isDeleting,
 	onReprocess,
+	onDelete,
 	styles,
 }: {
 	recovery: DiaryPendingVoiceMemoRecovery;
 	isProcessing: boolean;
+	isDeleting: boolean;
 	onReprocess: () => void;
+	onDelete: () => void;
 	styles: ReturnType<typeof logStyles>;
 }) {
 	return (
@@ -770,8 +1116,11 @@ function RecoveryMemoCard({
 					<Tag small>{recovery.status}</Tag>
 				</View>
 				<Text style={styles.muted}>
-					{recovery.fileName} - {formatDuration(recovery.durationSeconds)} -{' '}
-					{formatBytes(recovery.audioBytes)}
+					{recovery.mediaKind === 'video'
+						? (recovery.videoFileName ?? recovery.fileName)
+						: recovery.fileName}{' '}
+					- {formatDuration(recovery.durationSeconds)} -{' '}
+					{formatBytes(recovery.mediaKind === 'video' ? recovery.videoBytes : recovery.audioBytes)}
 				</Text>
 				<Text style={styles.bodyPreview} numberOfLines={4}>
 					{recovery.transcript?.trim() || 'No transcript yet'}
@@ -781,9 +1130,14 @@ function RecoveryMemoCard({
 						{recovery.error}
 					</Text>
 				) : null}
-				<Button size='small' onPress={onReprocess} loading={isProcessing}>
-					Reprocess
-				</Button>
+				<View style={styles.actionRow}>
+					<Button size='small' onPress={onReprocess} loading={isProcessing}>
+						Reprocess
+					</Button>
+					<Button size='small' onPress={onDelete} loading={isDeleting}>
+						Delete
+					</Button>
+				</View>
 			</View>
 		</View>
 	);
@@ -799,14 +1153,49 @@ function VoiceMemoButton({
 	return (
 		<Pressable
 			onPress={() => {
-				void Linking.openURL(voiceMemoAudioUrl(memo.id));
+				void Linking.openURL(
+					memo.mediaKind === 'video' ? voiceMemoVideoUrl(memo.id) : voiceMemoAudioUrl(memo.id),
+				);
 			}}
 			style={styles.voiceMemoPill}
 		>
 			<Text style={styles.voiceMemoText}>
-				{formatDuration(memo.durationSeconds)} - {memo.transcriptionStatus}
+				{memo.mediaKind === 'video' ? 'Video' : 'Audio'} - {formatDuration(memo.durationSeconds)} -{' '}
+				{memo.transcriptionStatus}
 			</Text>
 		</Pressable>
+	);
+}
+
+function AnimatedTranscript({
+	text,
+	styles,
+}: {
+	text: string;
+	styles: ReturnType<typeof logStyles>;
+}) {
+	const words = text.trim().split(/\s+/).filter(Boolean).slice(-26);
+
+	if (words.length === 0) {
+		return <View style={styles.liveTranscriptBox} />;
+	}
+
+	return (
+		<View style={styles.liveTranscriptBox}>
+			<Text style={styles.liveTranscriptText} numberOfLines={3}>
+				{words.map((word, index) => (
+					<Text
+						key={`${word}-${index}`}
+						style={[
+							styles.liveTranscriptWord,
+							{ opacity: 0.28 + ((index + 1) / words.length) * 0.72 },
+						]}
+					>
+						{word}{' '}
+					</Text>
+				))}
+			</Text>
+		</View>
 	);
 }
 
@@ -1076,6 +1465,104 @@ function logStyles(isDark: boolean) {
 			color: '#1677ff',
 			fontSize: 12,
 			fontWeight: '700' as const,
+		},
+		videoScreen: {
+			backgroundColor: '#000',
+			flex: 1,
+		},
+		cameraPreview: {
+			flex: 1,
+		},
+		videoTopBar: {
+			left: 0,
+			paddingHorizontal: 18,
+			paddingTop: 58,
+			position: 'absolute' as const,
+			right: 0,
+			top: 0,
+		},
+		videoCloseButton: {
+			alignSelf: 'flex-start' as const,
+			backgroundColor: 'rgba(0, 0, 0, 0.42)',
+			borderColor: 'rgba(255, 255, 255, 0.32)',
+			borderRadius: 999,
+			borderWidth: 1,
+			paddingHorizontal: 14,
+			paddingVertical: 8,
+		},
+		videoCloseText: {
+			color: '#fff',
+			fontSize: 14,
+			fontWeight: '800' as const,
+		},
+		videoControls: {
+			alignItems: 'center' as const,
+			bottom: 36,
+			gap: 12,
+			left: 0,
+			paddingHorizontal: 24,
+			position: 'absolute' as const,
+			right: 0,
+		},
+		liveTranscriptBox: {
+			alignItems: 'center' as const,
+			height: 82,
+			justifyContent: 'flex-end' as const,
+			paddingHorizontal: 8,
+		},
+		liveTranscriptText: {
+			color: '#fff',
+			fontSize: 19,
+			fontWeight: '800' as const,
+			lineHeight: 27,
+			textAlign: 'center' as const,
+			textShadowColor: 'rgba(0, 0, 0, 0.55)',
+			textShadowOffset: { width: 0, height: 1 },
+			textShadowRadius: 8,
+		},
+		liveTranscriptWord: {
+			color: '#fff',
+		},
+		recordButtonShell: {
+			alignItems: 'center' as const,
+			backgroundColor: 'rgba(255, 255, 255, 0.16)',
+			borderColor: 'rgba(255, 255, 255, 0.42)',
+			borderRadius: 999,
+			borderWidth: 4,
+			height: 90,
+			justifyContent: 'center' as const,
+			width: 90,
+		},
+		recordButton: {
+			alignItems: 'center' as const,
+			backgroundColor: '#ef233c',
+			borderRadius: 999,
+			height: 68,
+			justifyContent: 'center' as const,
+			width: 68,
+		},
+		recordButtonActive: {
+			borderRadius: 22,
+		},
+		recordButtonCore: {
+			backgroundColor: '#ef233c',
+			borderRadius: 999,
+			height: 54,
+			width: 54,
+		},
+		stopIcon: {
+			backgroundColor: '#fff',
+			borderRadius: 6,
+			height: 28,
+			width: 28,
+		},
+		videoStatus: {
+			color: '#fff',
+			fontSize: 13,
+			fontWeight: '800' as const,
+			textShadowColor: 'rgba(0, 0, 0, 0.6)',
+			textShadowOffset: { width: 0, height: 1 },
+			textShadowRadius: 6,
 		},
 	};
 }

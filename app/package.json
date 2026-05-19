@@ -20,6 +20,7 @@
 		"@trpc/tanstack-react-query": "11.13.4",
 		"expo": "~54.0.33",
 		"expo-audio": "~1.1.1",
+		"expo-camera": "~17.0.10",
 		"expo-constants": "~18.0.13",
 		"expo-document-picker": "~14.0.8",
 		"expo-file-system": "~19.0.22",

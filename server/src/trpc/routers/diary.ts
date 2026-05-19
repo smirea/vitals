@@ -4,6 +4,7 @@ import {
 	diaryAppendVoiceMemoDraftInputSchema,
 	diaryCreateEntryInputSchema,
 	diaryDeleteVoiceMemoInputSchema,
+	diaryDeleteVoiceMemoRecoveryInputSchema,
 	diaryFailVoiceMemoInputSchema,
 	diaryFinishVoiceMemoDraftInputSchema,
 	diaryProcessVoiceMemoInputSchema,
@@ -17,9 +18,11 @@ import {
 	appendDiaryVoiceMemoDraft,
 	createDiaryEntry,
 	deleteDiaryVoiceMemo,
+	deleteDiaryVoiceMemoRecovery,
 	failDiaryVoiceMemo,
 	finishDiaryVoiceMemoDraft,
 	getDiaryVoiceMemoAudio,
+	getDiaryVoiceMemoVideo,
 	listDiaryEntries,
 	listPendingDiaryVoiceMemoRecoveries,
 	listPendingDiaryVoiceMemos,
@@ -33,7 +36,7 @@ import {
 } from 'server/db/diary.ts';
 import { createRouter, publicProcedure } from 'server/trpc/shared.ts';
 
-export { getDiaryVoiceMemoAudio };
+export { getDiaryVoiceMemoAudio, getDiaryVoiceMemoVideo };
 
 export const diaryRouter = createRouter({
 	list: publicProcedure.query(({ ctx }) => listDiaryEntries(ctx.db)),
@@ -62,6 +65,9 @@ export const diaryRouter = createRouter({
 	processVoiceMemoRecovery: publicProcedure
 		.input(diaryProcessVoiceMemoRecoveryInputSchema)
 		.mutation(({ ctx, input }) => processDiaryVoiceMemoRecovery(ctx.db, input)),
+	deleteVoiceMemoRecovery: publicProcedure
+		.input(diaryDeleteVoiceMemoRecoveryInputSchema)
+		.mutation(({ ctx, input }) => deleteDiaryVoiceMemoRecovery(ctx.db, input)),
 	failVoiceMemo: publicProcedure
 		.input(diaryFailVoiceMemoInputSchema)
 		.mutation(({ ctx, input }) => failDiaryVoiceMemo(ctx.db, input)),

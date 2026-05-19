@@ -34,7 +34,14 @@
 			[
 				"expo-audio",
 				{
-					"microphonePermission": "Allow Vitals to record voice memos."
+					"microphonePermission": "Allow Vitals to record diary audio."
+				}
+			],
+			[
+				"expo-camera",
+				{
+					"cameraPermission": "Allow Vitals to record video logs.",
+					"microphonePermission": "Allow Vitals to record video log audio."
 				}
 			],
 			[

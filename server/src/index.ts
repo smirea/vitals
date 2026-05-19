@@ -1,6 +1,6 @@
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 
-import { getDiaryVoiceMemoAudio } from 'server/trpc/routers/diary.ts';
+import { getDiaryVoiceMemoAudio, getDiaryVoiceMemoVideo } from 'server/trpc/routers/diary.ts';
 import { getLabDocumentPdf, startLabProcessor } from 'server/trpc/routers/labs.ts';
 import { getDatabase } from 'server/db/client.ts';
 import { getStaticImage } from 'server/db/staticImages.ts';
@@ -86,6 +86,32 @@ function getDiaryVoiceMemoAudioResponse(req: Request) {
 	headers.set('Content-Disposition', `inline; filename="${voiceMemo.fileName.replace(/"/g, '')}"`);
 
 	return new Response(new Uint8Array(voiceMemo.audioData), {
+		status: 200,
+		headers,
+	});
+}
+
+function getDiaryVoiceMemoVideoResponse(req: Request) {
+	const match = new URL(req.url).pathname.match(/^\/diary\/voice-memos\/(\d+)\/video$/);
+	if (!match) {
+		return null;
+	}
+
+	const voiceMemoId = Number.parseInt(match[1] ?? '', 10);
+	if (!Number.isFinite(voiceMemoId) || voiceMemoId <= 0) {
+		return Response.json({ ok: false, error: 'Invalid voice memo id' }, { status: 400 });
+	}
+
+	const voiceMemo = getDiaryVoiceMemoVideo(getDatabase(), voiceMemoId);
+	if (!voiceMemo?.videoData || !voiceMemo.fileName || !voiceMemo.mimeType) {
+		return Response.json({ ok: false, error: 'Voice memo video not found' }, { status: 404 });
+	}
+
+	const headers = new Headers(getCorsHeaders(req));
+	headers.set('Content-Type', voiceMemo.mimeType || 'application/octet-stream');
+	headers.set('Content-Disposition', `inline; filename="${voiceMemo.fileName.replace(/"/g, '')}"`);
+
+	return new Response(new Uint8Array(voiceMemo.videoData), {
 		status: 200,
 		headers,
 	});
@@ -431,6 +457,7 @@ const server = Bun.serve<DiarySttSocketData>({
 			Response.json({ ok: false, error: 'Not found' }, { status: 404 }),
 		'/diary/voice-memos/*': (req: Request) =>
 			getDiaryVoiceMemoAudioResponse(req) ??
+			getDiaryVoiceMemoVideoResponse(req) ??
 			Response.json({ ok: false, error: 'Not found' }, { status: 404 }),
 		'/*': Response.json({ ok: false, error: 'Not found' }, { status: 404 }),
 	},
