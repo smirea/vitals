@@ -878,7 +878,7 @@ function DiaryRouteComponent() {
 							columns={pendingVoiceMemoColumns}
 							dataSource={pendingVoiceMemos}
 							pagination={false}
-							scroll={{ x: 1400 }}
+							scroll={{ x: 1200 }}
 						/>
 					</Card>
 				) : null}
@@ -915,7 +915,7 @@ function DiaryRouteComponent() {
 						columns={columns}
 						dataSource={entries}
 						pagination={false}
-						scroll={{ x: 1280 }}
+						scroll={{ x: 1100 }}
 						expandable={{
 							expandedRowKeys,
 							onExpandedRowsChange: keys => setExpandedRowKeys([...keys]),
@@ -1036,14 +1036,16 @@ function DiaryRouteComponent() {
 		return [
 			{
 				title: 'When',
-				dataIndex: 'createdAt',
-				key: 'createdAt',
-				width: 180,
-				render: (createdAt: string) => (
-					<Space direction='vertical' size={0}>
-						<Typography.Text>{formatDiaryDate(createdAt)}</Typography.Text>
-						<Typography.Text type='secondary'>{formatDiaryTime(createdAt)}</Typography.Text>
-					</Space>
+				key: 'when',
+				width: 280,
+				render: (_: unknown, row: DiaryPendingVoiceMemo) => (
+					<PendingVoiceMemoMetaCell
+						memo={row}
+						tagOptions={tagOptions}
+						loading={addVoiceMemoTagsMutation.isPending && addingTagsVoiceMemoId === row.id}
+						disabled={addVoiceMemoTagsMutation.isPending}
+						onAddTags={handleAddTagsToVoiceMemo}
+					/>
 				),
 			},
 			{
@@ -1054,44 +1056,9 @@ function DiaryRouteComponent() {
 				render: (status: string) => <Tag>{status}</Tag>,
 			},
 			{
-				title: 'Location',
-				key: 'location',
-				width: 180,
-				render: (_: unknown, row: DiaryPendingVoiceMemo) => (
-					<PendingLocationCell location={row.location} />
-				),
-			},
-			{
-				title: 'Tags',
-				key: 'tags',
-				width: 220,
-				render: (_: unknown, row: DiaryPendingVoiceMemo) => (
-					<Space direction='vertical' size={6} style={{ width: '100%' }}>
-						{row.tags.length > 0 ? (
-							<Space size={[4, 4]} wrap>
-								{row.tags.map(tag => (
-									<Tag key={tag.id} color={tag.color}>
-										{tag.name}
-									</Tag>
-								))}
-							</Space>
-						) : (
-							<Typography.Text type='secondary'>No tags</Typography.Text>
-						)}
-						<TagAddControl
-							targetId={row.id}
-							tagOptions={tagOptions}
-							loading={addVoiceMemoTagsMutation.isPending && addingTagsVoiceMemoId === row.id}
-							disabled={addVoiceMemoTagsMutation.isPending}
-							onAddTags={handleAddTagsToVoiceMemo}
-						/>
-					</Space>
-				),
-			},
-			{
 				title: 'Media',
 				key: 'media',
-				width: 360,
+				width: 280,
 				render: (_: unknown, row: DiaryPendingVoiceMemo) => (
 					<PendingVoiceMemoMedia memo={row} onPlayVideo={() => openVideoMemo(row)} />
 				),
@@ -1180,44 +1147,16 @@ function DiaryRouteComponent() {
 		return [
 			{
 				title: 'When',
-				dataIndex: 'createdAt',
-				key: 'createdAt',
-				width: 140,
-				render: (createdAt: string) => (
-					<Typography.Text>{formatDiaryDate(createdAt)}</Typography.Text>
-				),
-			},
-			{
-				title: 'Location',
-				key: 'location',
-				width: 180,
-				render: (_: unknown, row: DiaryEntry) => <LocationCell location={row.location} />,
-			},
-			{
-				title: 'Tags',
-				key: 'tags',
-				width: 220,
+				key: 'when',
+				width: 280,
 				render: (_: unknown, row: DiaryEntry) => (
-					<Space direction='vertical' size={6} style={{ width: '100%' }}>
-						{row.tags.length > 0 ? (
-							<Space size={[4, 4]} wrap>
-								{row.tags.map(tag => (
-									<Tag key={tag.id} color={tag.color}>
-										{tag.name}
-									</Tag>
-								))}
-							</Space>
-						) : (
-							<Typography.Text type='secondary'>No tags</Typography.Text>
-						)}
-						<TagAddControl
-							targetId={row.id}
-							tagOptions={tagOptions}
-							loading={addEntryTagsMutation.isPending && addingTagsEntryId === row.id}
-							disabled={addEntryTagsMutation.isPending}
-							onAddTags={handleAddTagsToEntry}
-						/>
-					</Space>
+					<DiaryEntryMetaCell
+						entry={row}
+						tagOptions={tagOptions}
+						loading={addEntryTagsMutation.isPending && addingTagsEntryId === row.id}
+						disabled={addEntryTagsMutation.isPending}
+						onAddTags={handleAddTagsToEntry}
+					/>
 				),
 			},
 			{
@@ -1234,9 +1173,9 @@ function DiaryRouteComponent() {
 				),
 			},
 			{
-				title: 'Voice memos',
+				title: 'Media',
 				key: 'voiceMemos',
-				width: 360,
+				width: 280,
 				render: (_: unknown, row: DiaryEntry) => (
 					<VoiceMemosCell memos={row.voiceMemos} onPlayVideo={openVideoMemo} />
 				),
@@ -1296,6 +1235,77 @@ function PendingLocationCell(props: { location: DiaryPendingVoiceMemo['location'
 		<Typography.Link href={mapsUrl(location)} target='_blank' rel='noreferrer'>
 			{name}
 		</Typography.Link>
+	);
+}
+
+function DiaryEntryMetaCell(props: {
+	entry: DiaryEntry;
+	tagOptions: Array<{ label: string; value: string }>;
+	loading: boolean;
+	disabled: boolean;
+	onAddTags: (entryId: number, tagNames: string[]) => void;
+}) {
+	return (
+		<Space direction='vertical' size={6} className='diary-meta-cell'>
+			<DiaryTimeCell createdAt={props.entry.createdAt} />
+			<LocationCell location={props.entry.location} />
+			<DiaryTagList tags={props.entry.tags} />
+			<TagAddControl
+				targetId={props.entry.id}
+				tagOptions={props.tagOptions}
+				loading={props.loading}
+				disabled={props.disabled}
+				onAddTags={props.onAddTags}
+			/>
+		</Space>
+	);
+}
+
+function PendingVoiceMemoMetaCell(props: {
+	memo: DiaryPendingVoiceMemo;
+	tagOptions: Array<{ label: string; value: string }>;
+	loading: boolean;
+	disabled: boolean;
+	onAddTags: (voiceMemoId: number, tagNames: string[]) => void;
+}) {
+	return (
+		<Space direction='vertical' size={6} className='diary-meta-cell'>
+			<DiaryTimeCell createdAt={props.memo.createdAt} />
+			<PendingLocationCell location={props.memo.location} />
+			<DiaryTagList tags={props.memo.tags} />
+			<TagAddControl
+				targetId={props.memo.id}
+				tagOptions={props.tagOptions}
+				loading={props.loading}
+				disabled={props.disabled}
+				onAddTags={props.onAddTags}
+			/>
+		</Space>
+	);
+}
+
+function DiaryTimeCell(props: { createdAt: string }) {
+	return (
+		<Space direction='vertical' size={0}>
+			<Typography.Text>{formatDiaryDate(props.createdAt)}</Typography.Text>
+			<Typography.Text type='secondary'>{formatDiaryTime(props.createdAt)}</Typography.Text>
+		</Space>
+	);
+}
+
+function DiaryTagList(props: { tags: DiaryEntry['tags'] | DiaryPendingVoiceMemo['tags'] }) {
+	if (props.tags.length === 0) {
+		return null;
+	}
+
+	return (
+		<Space size={[4, 4]} wrap>
+			{props.tags.map(tag => (
+				<Tag key={tag.id} color={tag.color}>
+					{tag.name}
+				</Tag>
+			))}
+		</Space>
 	);
 }
 
@@ -1407,6 +1417,7 @@ function DiaryVideoMemoItem(props: {
 	onPlayVideo: () => void;
 }) {
 	const fileName = getMemoDisplayFileName(props.memo);
+	const duration = getDurationBadge(props.memo.durationSeconds);
 
 	return (
 		<button
@@ -1423,20 +1434,7 @@ function DiaryVideoMemoItem(props: {
 					src={`${voiceMemoVideoUrl(props.memo.id)}#t=0.001`}
 					className='diary-video-thumb'
 				/>
-			</span>
-			<span className='diary-video-memo-info'>
-				<Typography.Text strong ellipsis>
-					{fileName}
-				</Typography.Text>
-				<Typography.Text type='secondary'>
-					{formatDuration(props.memo.durationSeconds)}
-				</Typography.Text>
-				<Typography.Text type='secondary'>{props.memo.transcriptionStatus}</Typography.Text>
-				{props.memo.processedAt ? (
-					<Typography.Text type='secondary'>
-						processed {formatDiaryTime(props.memo.processedAt)}
-					</Typography.Text>
-				) : null}
+				{duration ? <span className='diary-video-duration'>{duration}</span> : null}
 			</span>
 		</button>
 	);
@@ -1773,6 +1771,14 @@ function getMemoDisplayBytes(
 	memo: Pick<DiaryPendingVoiceMemo, 'mediaKind' | 'audioBytes' | 'videoBytes'>,
 ) {
 	return memo.mediaKind === 'video' ? memo.videoBytes : memo.audioBytes;
+}
+
+function getDurationBadge(value: number | null) {
+	if (!Number.isFinite(value)) {
+		return null;
+	}
+
+	return formatDuration(value);
 }
 
 function formatBytes(value: number) {
