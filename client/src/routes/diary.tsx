@@ -1365,7 +1365,7 @@ function TranscriptPreview(props: { entry: DiaryEntry; onClick: () => void }) {
 	return (
 		<Typography.Paragraph
 			className='diary-transcript-preview'
-			ellipsis={{ rows: 2 }}
+			ellipsis={{ rows: 12 }}
 			onClick={props.onClick}
 		>
 			{transcript}
