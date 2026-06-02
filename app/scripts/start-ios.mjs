@@ -1,10 +1,15 @@
 import { spawnSync } from 'node:child_process';
 
 const simulatorName = 'iPhone 15 Pro';
+const commandEnv = {
+	...process.env,
+	DEVELOPER_DIR: process.env.DEVELOPER_DIR ?? '/Applications/Xcode.app/Contents/Developer',
+};
 
 function read(command, args) {
 	const result = spawnSync(command, args, {
 		encoding: 'utf8',
+		env: commandEnv,
 	});
 	if (result.error) {
 		throw result.error;
@@ -21,6 +26,7 @@ function read(command, args) {
 
 function run(command, args) {
 	const result = spawnSync(command, args, {
+		env: commandEnv,
 		stdio: 'inherit',
 	});
 	if (result.error) {
@@ -72,6 +78,7 @@ try {
 	const simulator = findSimulator();
 	run('defaults', ['write', 'com.apple.iphonesimulator', 'CurrentDeviceUDID', simulator.udid]);
 	const expo = spawnSync('expo', ['start', '--ios'], {
+		env: commandEnv,
 		stdio: 'inherit',
 	});
 	if (expo.error) {
