@@ -70,6 +70,7 @@ import {
 	type SourceFilterMode,
 } from './labs/_labs';
 import type { LabImportDocument } from '../utils/api';
+import { withAuthToken } from '../utils/auth';
 import createLocalStorage from '../utils/createLocalStorage';
 import { useTRPC } from '../utils/trpc';
 
@@ -1399,7 +1400,9 @@ function buildLabsDocumentGroupId() {
 }
 
 function buildLabsDocumentPreviewUrl(documentId: number) {
-	return `${import.meta.env.VITE_API_URL.trim()}/asset/lab_documents/${documentId}/pdf`;
+	return withAuthToken(
+		`${import.meta.env.VITE_API_URL.trim()}/asset/lab_documents/${documentId}/pdf`,
+	);
 }
 
 function useViewport() {

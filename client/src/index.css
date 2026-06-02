@@ -42,6 +42,36 @@ body,
 	min-height: 0;
 }
 
+.auth-screen {
+	display: flex;
+	min-height: 100vh;
+	align-items: center;
+	justify-content: center;
+	padding: 24px;
+	background: #f6f7f9;
+}
+
+.app-theme-dark .auth-screen {
+	background: #0f172a;
+}
+
+.auth-form {
+	display: flex;
+	width: min(100%, 360px);
+	flex-direction: column;
+	align-items: center;
+	gap: 12px;
+}
+
+.auth-password-row {
+	width: 100%;
+}
+
+.auth-password-row .ant-input-affix-wrapper,
+.auth-password-row .ant-btn {
+	height: 40px;
+}
+
 .app-nav {
 	position: relative;
 	display: flex;

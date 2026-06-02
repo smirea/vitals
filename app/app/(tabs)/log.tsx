@@ -1,5 +1,6 @@
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from 'server/trpc/index.ts';
+import { withNativeAuthToken } from '@/src/api/auth';
 import { API_BASE_URL, useTRPC } from '@/src/api/trpc';
 import { ActivityIndicator, Modal, Steps, Tag, Toast } from '@ant-design/react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -164,11 +165,11 @@ function mapsUrl(location: { latitude: number; longitude: number }) {
 }
 
 function voiceMemoAudioUrl(voiceMemoId: number) {
-	return `${API_BASE_URL}/asset/diary_voice_memos/${voiceMemoId}/audio`;
+	return withNativeAuthToken(`${API_BASE_URL}/asset/diary_voice_memos/${voiceMemoId}/audio`);
 }
 
 function voiceMemoVideoUrl(voiceMemoId: number) {
-	return `${API_BASE_URL}/asset/diary_voice_memos/${voiceMemoId}/video`;
+	return withNativeAuthToken(`${API_BASE_URL}/asset/diary_voice_memos/${voiceMemoId}/video`);
 }
 
 function audioFileNameFromUri(uri: string) {

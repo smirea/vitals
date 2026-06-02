@@ -1,44 +1,12 @@
 import { QueryClient } from '@tanstack/react-query';
 import { createTRPCClient, httpBatchLink, httpLink, splitLink } from '@trpc/client';
 import { createTRPCContext } from '@trpc/tanstack-react-query';
-import Constants from 'expo-constants';
-import { Platform } from 'react-native';
 
 import type { AppRouter } from 'server/trpc/index.ts';
+import { API_BASE_URL } from '@/src/api/base-url';
+import { getNativeAuthHeaders, nativeAuthFetch } from '@/src/api/auth';
 
-const API_PORT = '6001';
-
-function getApiBaseUrl() {
-	if (Platform.OS === 'web') {
-		const hostname = typeof window === 'undefined' ? '127.0.0.1' : window.location.hostname;
-		return `http://${hostname}:${API_PORT}`;
-	}
-
-	const hostUri = Constants.expoConfig?.hostUri;
-	if (!hostUri) {
-		throw new Error(
-			'Expo hostUri is missing; start Expo on LAN so Vitals can find the laptop API.',
-		);
-	}
-
-	const expoUrl = new URL(`http://${hostUri}`);
-	if (expoUrl.hostname.endsWith('.exp.direct')) {
-		throw new Error(
-			'Expo tunnel host cannot expose the local Vitals API; use LAN mode or set up an API tunnel.',
-		);
-	}
-
-	expoUrl.protocol = 'http:';
-	expoUrl.port = API_PORT;
-	expoUrl.pathname = '';
-	expoUrl.search = '';
-	expoUrl.hash = '';
-
-	return expoUrl.origin;
-}
-
-export const API_BASE_URL = getApiBaseUrl();
-
+export { API_BASE_URL };
 export const { TRPCProvider, useTRPC, useTRPCClient } = createTRPCContext<AppRouter>();
 
 export function createQueryClient() {
@@ -59,9 +27,13 @@ export function createNativeTrpcClient() {
 				condition: op => op.path === 'sensors.runExtractor',
 				true: httpLink({
 					url: `${API_BASE_URL}/trpc`,
+					headers: getNativeAuthHeaders,
+					fetch: nativeAuthFetch,
 				}),
 				false: httpBatchLink({
 					url: `${API_BASE_URL}/trpc`,
+					headers: getNativeAuthHeaders,
+					fetch: nativeAuthFetch,
 				}),
 			}),
 		],
@@ -69,7 +41,9 @@ export function createNativeTrpcClient() {
 }
 
 export async function fetchServerStatus() {
-	const response = await fetch(`${API_BASE_URL}/status`);
+	const response = await fetch(`${API_BASE_URL}/status`, {
+		headers: getNativeAuthHeaders(),
+	});
 	if (!response.ok) {
 		throw new Error(`Server status failed with ${response.status}`);
 	}

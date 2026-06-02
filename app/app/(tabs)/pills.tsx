@@ -1,5 +1,6 @@
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from 'server/trpc/index.ts';
+import { withNativeAuthToken } from '@/src/api/auth';
 import { API_BASE_URL, useTRPC } from '@/src/api/trpc';
 import { ActivityIndicator, Card, Modal } from '@ant-design/react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -495,12 +496,12 @@ function normalizeImageUrl(dataUrl: string) {
 	if (dataUrl.includes('/api/asset/')) {
 		const [, path] = dataUrl.split('/api/asset/');
 		if (!path) return dataUrl;
-		return `${API_BASE_URL}/asset/${path}`;
+		return withNativeAuthToken(`${API_BASE_URL}/asset/${path}`);
 	}
 	if (dataUrl.includes('/api/db-image/')) {
 		const [, path] = dataUrl.split('/api/db-image/');
 		if (!path) return dataUrl;
-		return `${API_BASE_URL}/db-image/${path}`;
+		return withNativeAuthToken(`${API_BASE_URL}/db-image/${path}`);
 	}
 	return dataUrl;
 }

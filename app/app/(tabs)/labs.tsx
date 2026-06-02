@@ -17,6 +17,7 @@ import {
 	View,
 	useColorScheme,
 } from 'react-native';
+import { withNativeAuthToken } from '@/src/api/auth';
 import { API_BASE_URL, useTRPC } from '@/src/api/trpc';
 import { Button, FloatingActionButton, IconButton } from '@/src/components/button';
 import { BottomSheet } from '@/src/components/mobile-ui';
@@ -777,7 +778,9 @@ export default function LabsScreen() {
 							setShowFlaggedPreviewOnly(false);
 						}}
 						onOpenPdf={document => {
-							void Linking.openURL(`${API_BASE_URL}/asset/lab_documents/${document.id}/pdf`);
+							void Linking.openURL(
+								withNativeAuthToken(`${API_BASE_URL}/asset/lab_documents/${document.id}/pdf`),
+							);
 						}}
 						onRetryDocument={document => {
 							void retryDocumentMutation.mutateAsync({ documentId: document.id });
@@ -811,7 +814,9 @@ export default function LabsScreen() {
 				onShowFlaggedOnlyChange={setShowFlaggedPreviewOnly}
 				onClose={() => setPreviewDocument(null)}
 				onOpenPdf={document => {
-					void Linking.openURL(`${API_BASE_URL}/asset/lab_documents/${document.id}/pdf`);
+					void Linking.openURL(
+						withNativeAuthToken(`${API_BASE_URL}/asset/lab_documents/${document.id}/pdf`),
+					);
 				}}
 				styles={styles}
 			/>

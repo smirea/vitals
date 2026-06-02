@@ -3,6 +3,7 @@ import { createTRPCClient, httpBatchLink, httpLink, splitLink } from '@trpc/clie
 import { createTRPCContext } from '@trpc/tanstack-react-query';
 
 import type { AppRouter } from 'server/trpc/index.ts';
+import { authFetch, getAuthHeaders } from './auth';
 
 export const { TRPCProvider, useTRPC, useTRPCClient } = createTRPCContext<AppRouter>();
 
@@ -24,9 +25,13 @@ export function createBrowserTrpcClient() {
 				condition: op => op.path === 'sensors.runExtractor',
 				true: httpLink({
 					url: `/api/trpc`,
+					headers: getAuthHeaders,
+					fetch: authFetch,
 				}),
 				false: httpBatchLink({
 					url: `/api/trpc`,
+					headers: getAuthHeaders,
+					fetch: authFetch,
 				}),
 			}),
 		],

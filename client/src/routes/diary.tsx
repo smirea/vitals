@@ -33,6 +33,7 @@ import type {
 	DiaryPendingVoiceMemoRecovery,
 	DiaryVoiceMemo,
 } from '../utils/api';
+import { withAuthToken } from '../utils/auth';
 import { PageNav } from '../components/PageNav';
 import { useTRPC } from '../utils/trpc';
 
@@ -1503,7 +1504,7 @@ function getDiarySttWebSocketUrl() {
 	const port = apiUrl.port || (host === 'localhost' ? '6001' : '');
 	const url = new URL('/diary/stt/live', `${apiUrl.protocol}//${host}${port ? `:${port}` : ''}`);
 	url.protocol = 'ws:';
-	return url.toString();
+	return withAuthToken(url.toString());
 }
 
 function createLiveTranscriptionConnectionError(
@@ -1748,11 +1749,11 @@ function extensionFromMimeType(mimeType: string) {
 }
 
 function voiceMemoAudioUrl(voiceMemoId: number) {
-	return `/api/asset/diary_voice_memos/${voiceMemoId}/audio`;
+	return withAuthToken(`/api/asset/diary_voice_memos/${voiceMemoId}/audio`);
 }
 
 function voiceMemoVideoUrl(voiceMemoId: number) {
-	return `/api/asset/diary_voice_memos/${voiceMemoId}/video`;
+	return withAuthToken(`/api/asset/diary_voice_memos/${voiceMemoId}/video`);
 }
 
 function getMemoDisplayFileName(

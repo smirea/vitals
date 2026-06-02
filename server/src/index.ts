@@ -1,5 +1,6 @@
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 
+import { createServerJwt, verifyServerJwt } from 'server/auth.ts';
 import { resolveAssetByRecord, type ResolvedAsset } from 'server/db/assets.ts';
 import { getDatabase } from 'server/db/client.ts';
 import env from 'server/env.ts';
@@ -53,6 +54,10 @@ type ElevenLabsSttEvent = {
 	error?: string;
 	detail?: string;
 };
+type ServerRouteHandler = (
+	req: Request,
+	server: Bun.Server<DiarySttSocketData>,
+) => Response | undefined | Promise<Response | undefined>;
 
 function getCorsHeaders(req: Request) {
 	const origin = req.headers.get('origin');
@@ -62,8 +67,95 @@ function getCorsHeaders(req: Request) {
 		'Access-Control-Allow-Origin': allowedOrigin,
 		'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
 		'Access-Control-Allow-Headers':
-			req.headers.get('access-control-request-headers') ?? 'content-type',
+			req.headers.get('access-control-request-headers') ?? 'content-type,authorization',
 	};
+}
+
+function getOptionsResponse(req: Request) {
+	return new Response(null, {
+		status: 204,
+		headers: getCorsHeaders(req),
+	});
+}
+
+function jsonWithCors(req: Request, body: unknown, init?: ResponseInit) {
+	const headers = new Headers(init?.headers);
+	for (const [key, value] of Object.entries(getCorsHeaders(req))) {
+		headers.set(key, value);
+	}
+
+	return Response.json(body, {
+		...init,
+		headers,
+	});
+}
+
+function getRequestAuthToken(req: Request) {
+	const authorization = req.headers.get('authorization');
+	const [scheme, token] = authorization?.split(/\s+/, 2) ?? [];
+	if (scheme?.toLowerCase() === 'bearer' && token) {
+		return token;
+	}
+
+	return new URL(req.url).searchParams.get('token');
+}
+
+async function getUnauthorizedResponse(req: Request) {
+	const token = getRequestAuthToken(req);
+	if (token && (await verifyServerJwt(token))) {
+		return null;
+	}
+
+	return jsonWithCors(
+		req,
+		{ ok: false, error: 'Unauthorized' },
+		{
+			status: 401,
+			headers: {
+				'WWW-Authenticate': 'Bearer',
+			},
+		},
+	);
+}
+
+function withServerAuth(handler: ServerRouteHandler): ServerRouteHandler {
+	return async (req, server) => {
+		if (req.method === 'OPTIONS') {
+			return getOptionsResponse(req);
+		}
+
+		const unauthorizedResponse = await getUnauthorizedResponse(req);
+		if (unauthorizedResponse) {
+			return unauthorizedResponse;
+		}
+
+		return handler(req, server);
+	};
+}
+
+async function getAuthTokenResponse(req: Request) {
+	if (req.method === 'OPTIONS') {
+		return getOptionsResponse(req);
+	}
+	if (req.method !== 'POST') {
+		return jsonWithCors(req, { ok: false, error: 'Method not allowed' }, { status: 405 });
+	}
+
+	let payload: { password?: unknown };
+	try {
+		payload = (await req.json()) as { password?: unknown };
+	} catch {
+		return jsonWithCors(req, { ok: false, error: 'Invalid JSON body' }, { status: 400 });
+	}
+
+	if (payload.password !== env.SERVER_PASSWORD) {
+		return jsonWithCors(req, { ok: false, error: 'Invalid password' }, { status: 401 });
+	}
+
+	return jsonWithCors(req, {
+		ok: true,
+		...(await createServerJwt()),
+	});
 }
 
 const assetTables = new Set<AssetTable>(['lab_documents', 'pill_images', 'diary_voice_memos']);
@@ -428,8 +520,9 @@ const server = Bun.serve<DiarySttSocketData>({
 	port,
 	idleTimeout: 255,
 	routes: {
-		'/status': Response.json({ ok: true }),
-		'/diary/stt/live': (req: Request, server: Bun.Server<DiarySttSocketData>) => {
+		'/auth/token': getAuthTokenResponse,
+		'/status': withServerAuth((req: Request) => jsonWithCors(req, { ok: true })),
+		'/diary/stt/live': withServerAuth((req: Request, server: Bun.Server<DiarySttSocketData>) => {
 			if (req.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
 				return Response.json({ ok: false, error: 'Expected WebSocket upgrade' }, { status: 400 });
 			}
@@ -441,15 +534,8 @@ const server = Bun.serve<DiarySttSocketData>({
 			if (!upgraded) {
 				return Response.json({ ok: false, error: 'WebSocket upgrade failed' }, { status: 400 });
 			}
-		},
-		'/trpc/*': async (req: Request) => {
-			if (req.method === 'OPTIONS') {
-				return new Response(null, {
-					status: 204,
-					headers: getCorsHeaders(req),
-				});
-			}
-
+		}),
+		'/trpc/*': withServerAuth(async (req: Request) => {
 			const response = await fetchRequestHandler({
 				endpoint: '/trpc',
 				req,
@@ -467,20 +553,30 @@ const server = Bun.serve<DiarySttSocketData>({
 				statusText: response.statusText,
 				headers: nextHeaders,
 			});
-		},
-		'/asset/*': async (req: Request) =>
-			(await getAssetResponse(req)) ??
-			Response.json({ ok: false, error: 'Not found' }, { status: 404 }),
-		'/labs/documents/*': async (req: Request) =>
-			(await getLegacyLabDocumentPdfResponse(req)) ??
-			Response.json({ ok: false, error: 'Not found' }, { status: 404 }),
-		'/db-image/*': async (req: Request) =>
-			(await getLegacyStaticImageResponse(req)) ??
-			Response.json({ ok: false, error: 'Not found' }, { status: 404 }),
-		'/diary/voice-memos/*': async (req: Request) =>
-			(await getLegacyDiaryVoiceMemoResponse(req)) ??
-			Response.json({ ok: false, error: 'Not found' }, { status: 404 }),
-		'/*': Response.json({ ok: false, error: 'Not found' }, { status: 404 }),
+		}),
+		'/asset/*': withServerAuth(
+			async (req: Request) =>
+				(await getAssetResponse(req)) ??
+				jsonWithCors(req, { ok: false, error: 'Not found' }, { status: 404 }),
+		),
+		'/labs/documents/*': withServerAuth(
+			async (req: Request) =>
+				(await getLegacyLabDocumentPdfResponse(req)) ??
+				jsonWithCors(req, { ok: false, error: 'Not found' }, { status: 404 }),
+		),
+		'/db-image/*': withServerAuth(
+			async (req: Request) =>
+				(await getLegacyStaticImageResponse(req)) ??
+				jsonWithCors(req, { ok: false, error: 'Not found' }, { status: 404 }),
+		),
+		'/diary/voice-memos/*': withServerAuth(
+			async (req: Request) =>
+				(await getLegacyDiaryVoiceMemoResponse(req)) ??
+				jsonWithCors(req, { ok: false, error: 'Not found' }, { status: 404 }),
+		),
+		'/*': withServerAuth((req: Request) =>
+			jsonWithCors(req, { ok: false, error: 'Not found' }, { status: 404 }),
+		),
 	},
 	websocket: {
 		data: createDiarySttSocketData(),
