@@ -1,12 +1,13 @@
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 
-import { getDiaryVoiceMemoAudio, getDiaryVoiceMemoVideo } from 'server/trpc/routers/diary.ts';
-import { getLabDocumentPdf, startLabProcessor } from 'server/trpc/routers/labs.ts';
+import { resolveAssetByRecord, type ResolvedAsset } from 'server/db/assets.ts';
 import { getDatabase } from 'server/db/client.ts';
-import { getStaticImage } from 'server/db/staticImages.ts';
 import env from 'server/env.ts';
 import { appRouter, createTrpcContext } from 'server/trpc/index.ts';
-import { isStaticImageTable } from 'server/utils/getStaticImageUrl.ts';
+import { startLabProcessor } from 'server/trpc/routers/labs.ts';
+import { type AssetKind, type AssetTable } from 'server/utils/assetUrls.ts';
+import { getS3Asset, getSignedS3AssetUrl, s3BodyToReadableStream } from 'server/utils/s3Assets.ts';
+import { s3PathUtil } from 'shared/s3PathUtil.ts';
 
 const port = env.API_PORT;
 const elevenLabsRealtimeSpeechToTextUrl = new URL(
@@ -65,100 +66,133 @@ function getCorsHeaders(req: Request) {
 	};
 }
 
-function getDiaryVoiceMemoAudioResponse(req: Request) {
-	const match = new URL(req.url).pathname.match(/^\/diary\/voice-memos\/(\d+)\/audio$/);
-	if (!match) {
-		return null;
+const assetTables = new Set<AssetTable>(['lab_documents', 'pill_images', 'diary_voice_memos']);
+const assetKinds = new Set<AssetKind>(['pdf', 'image', 'audio', 'video']);
+
+function parsePositiveInteger(value: string | undefined, label: string) {
+	const id = Number.parseInt(value ?? '', 10);
+	if (!Number.isFinite(id) || id <= 0) {
+		throw new Error(`Invalid ${label}`);
+	}
+	return id;
+}
+
+async function getAssetDeliveryResponse(req: Request, asset: ResolvedAsset) {
+	const url = new URL(req.url);
+	if (url.searchParams.get('proxy') !== 'true') {
+		const signedUrl = await getSignedS3AssetUrl(asset.s3Path);
+		const headers = new Headers(getCorsHeaders(req));
+		headers.set('Cache-Control', 'no-store');
+		headers.set('Location', signedUrl);
+		return new Response(null, {
+			status: 302,
+			headers,
+		});
 	}
 
-	const voiceMemoId = Number.parseInt(match[1] ?? '', 10);
-	if (!Number.isFinite(voiceMemoId) || voiceMemoId <= 0) {
-		return Response.json({ ok: false, error: 'Invalid voice memo id' }, { status: 400 });
-	}
-
-	const voiceMemo = getDiaryVoiceMemoAudio(getDatabase(), voiceMemoId);
-	if (!voiceMemo) {
-		return Response.json({ ok: false, error: 'Voice memo not found' }, { status: 404 });
-	}
-
+	const object = await getS3Asset({
+		s3Path: asset.s3Path,
+		range: req.headers.get('range'),
+	});
 	const headers = new Headers(getCorsHeaders(req));
-	headers.set('Content-Type', voiceMemo.mimeType || 'application/octet-stream');
-	headers.set('Content-Disposition', `inline; filename="${voiceMemo.fileName.replace(/"/g, '')}"`);
+	headers.set('Content-Type', object.ContentType ?? asset.mimeType);
+	headers.set('Content-Disposition', getInlineContentDisposition(asset.fileName));
 	headers.set('Cache-Control', 'no-store');
+	if (object.ContentLength !== undefined) {
+		headers.set('Content-Length', String(object.ContentLength));
+	}
+	if (object.ContentRange) {
+		headers.set('Content-Range', object.ContentRange);
+	}
+	if (object.ETag) {
+		headers.set('ETag', object.ETag);
+	}
+	if (object.LastModified) {
+		headers.set('Last-Modified', object.LastModified.toUTCString());
+	}
+	headers.set('Accept-Ranges', object.AcceptRanges ?? 'bytes');
 
-	return new Response(new Uint8Array(voiceMemo.audioData), {
-		status: 200,
+	return new Response(s3BodyToReadableStream(object.Body), {
+		status: object.ContentRange ? 206 : 200,
 		headers,
 	});
 }
 
-function getDiaryVoiceMemoVideoResponse(req: Request) {
-	const match = new URL(req.url).pathname.match(/^\/diary\/voice-memos\/(\d+)\/video$/);
+function getInlineContentDisposition(fileName: string) {
+	const fallbackFileName = fileName.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, '');
+	return `inline; filename="${fallbackFileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+}
+
+async function getAssetResponse(req: Request) {
+	const pathname = new URL(req.url).pathname;
+	const s3Match = pathname.match(/^\/asset\/s3\/([^/]+)\/(.+)$/);
+	if (s3Match) {
+		const bucket = decodeURIComponent(s3Match[1] ?? '');
+		const key = decodeURIComponent(s3Match[2] ?? '');
+		const s3Path = s3PathUtil.create(bucket, key);
+		const fileName = key.split('/').at(-1) ?? 'asset';
+		return getAssetDeliveryResponse(req, {
+			s3Path,
+			fileName,
+			mimeType: 'application/octet-stream',
+			sizeBytes: 0,
+		});
+	}
+
+	const match = pathname.match(/^\/asset\/([^/]+)\/(\d+)(?:\/([^/]+))?$/);
 	if (!match) {
 		return null;
 	}
 
-	const voiceMemoId = Number.parseInt(match[1] ?? '', 10);
-	if (!Number.isFinite(voiceMemoId) || voiceMemoId <= 0) {
-		return Response.json({ ok: false, error: 'Invalid voice memo id' }, { status: 400 });
+	const table = match[1] as AssetTable | undefined;
+	const id = parsePositiveInteger(match[2], 'asset id');
+	const kind = match[3] as AssetKind | undefined;
+	if (!table || !assetTables.has(table)) {
+		return Response.json({ ok: false, error: 'Invalid asset table' }, { status: 400 });
+	}
+	if (kind && !assetKinds.has(kind)) {
+		return Response.json({ ok: false, error: 'Invalid asset kind' }, { status: 400 });
 	}
 
-	const voiceMemo = getDiaryVoiceMemoVideo(getDatabase(), voiceMemoId);
-	if (!voiceMemo?.videoData || !voiceMemo.fileName || !voiceMemo.mimeType) {
-		return Response.json({ ok: false, error: 'Voice memo video not found' }, { status: 404 });
+	const asset = resolveAssetByRecord(getDatabase(), table, id, kind);
+	if (!asset) {
+		return Response.json({ ok: false, error: 'Asset not found' }, { status: 404 });
 	}
 
-	const headers = new Headers(getCorsHeaders(req));
-	headers.set('Content-Type', voiceMemo.mimeType || 'application/octet-stream');
-	headers.set('Content-Disposition', `inline; filename="${voiceMemo.fileName.replace(/"/g, '')}"`);
-	headers.set('Accept-Ranges', 'bytes');
-	headers.set('Cache-Control', 'no-store');
+	return getAssetDeliveryResponse(req, asset);
+}
 
-	const videoData = new Uint8Array(voiceMemo.videoData);
-	const range = req.headers.get('range');
-	if (!range) {
-		headers.set('Content-Length', String(videoData.byteLength));
-		return new Response(videoData, {
-			status: 200,
-			headers,
-		});
+async function getLegacyLabDocumentPdfResponse(req: Request) {
+	const match = new URL(req.url).pathname.match(/^\/labs\/documents\/(\d+)\/pdf$/);
+	if (!match) return null;
+
+	const documentId = parsePositiveInteger(match[1], 'document id');
+	const asset = resolveAssetByRecord(getDatabase(), 'lab_documents', documentId, 'pdf');
+	if (!asset) return Response.json({ ok: false, error: 'Document not found' }, { status: 404 });
+	return getAssetDeliveryResponse(req, asset);
+}
+
+async function getLegacyStaticImageResponse(req: Request) {
+	const match = new URL(req.url).pathname.match(/^\/db-image\/pill_images\/(\d+)$/);
+	if (!match) return null;
+
+	const id = parsePositiveInteger(match[1], 'image id');
+	const asset = resolveAssetByRecord(getDatabase(), 'pill_images', id, 'image');
+	if (!asset) return Response.json({ ok: false, error: 'Image not found' }, { status: 404 });
+	return getAssetDeliveryResponse(req, asset);
+}
+
+async function getLegacyDiaryVoiceMemoResponse(req: Request) {
+	const match = new URL(req.url).pathname.match(/^\/diary\/voice-memos\/(\d+)\/(audio|video)$/);
+	if (!match) return null;
+
+	const voiceMemoId = parsePositiveInteger(match[1], 'voice memo id');
+	const kind = match[2] as 'audio' | 'video';
+	const asset = resolveAssetByRecord(getDatabase(), 'diary_voice_memos', voiceMemoId, kind);
+	if (!asset) {
+		return Response.json({ ok: false, error: 'Voice memo asset not found' }, { status: 404 });
 	}
-
-	const matchRange = range.match(/^bytes=(\d*)-(\d*)$/);
-	if (!matchRange) {
-		return Response.json({ ok: false, error: 'Invalid range header' }, { status: 416 });
-	}
-
-	const requestedStart = matchRange[1] ? Number.parseInt(matchRange[1], 10) : null;
-	const requestedEnd = matchRange[2] ? Number.parseInt(matchRange[2], 10) : null;
-	const suffixLength = requestedStart === null && requestedEnd !== null ? requestedEnd : null;
-	const start =
-		suffixLength === null
-			? (requestedStart ?? 0)
-			: Math.max(videoData.byteLength - suffixLength, 0);
-	const end =
-		suffixLength === null
-			? requestedEnd === null
-				? videoData.byteLength - 1
-				: Math.min(requestedEnd, videoData.byteLength - 1)
-			: videoData.byteLength - 1;
-
-	if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start) {
-		headers.set('Content-Range', `bytes */${videoData.byteLength}`);
-		return new Response(null, {
-			status: 416,
-			headers,
-		});
-	}
-
-	const chunk = videoData.slice(start, end + 1);
-	headers.set('Content-Length', String(chunk.byteLength));
-	headers.set('Content-Range', `bytes ${start}-${end}/${videoData.byteLength}`);
-
-	return new Response(chunk, {
-		status: 206,
-		headers,
-	});
+	return getAssetDeliveryResponse(req, asset);
 }
 
 function createDiarySttSocketData(): DiarySttSocketData {
@@ -387,69 +421,6 @@ function appendTranscript(existingText: string, nextText: string) {
 	return `${existing} ${next}`;
 }
 
-function getLabDocumentPdfResponse(req: Request) {
-	const match = new URL(req.url).pathname.match(/^\/labs\/documents\/(\d+)\/pdf$/);
-	if (!match) {
-		return null;
-	}
-
-	const documentId = Number.parseInt(match[1] ?? '', 10);
-	if (!Number.isFinite(documentId) || documentId <= 0) {
-		return Response.json({ ok: false, error: 'Invalid document id' }, { status: 400 });
-	}
-
-	const document = getLabDocumentPdf(getDatabase(), documentId);
-	if (!document) {
-		return Response.json({ ok: false, error: 'Document not found' }, { status: 404 });
-	}
-
-	const headers = new Headers(getCorsHeaders(req));
-	headers.set('Content-Type', document.mimeType || 'application/pdf');
-	headers.set('Content-Disposition', `inline; filename="${document.fileName.replace(/"/g, '')}"`);
-
-	return new Response(new Uint8Array(document.pdfData), {
-		status: 200,
-		headers,
-	});
-}
-
-function getStaticImageResponse(req: Request) {
-	const match = new URL(req.url).pathname.match(/^\/db-image\/([^/]+)\/(\d+)$/);
-	if (!match) {
-		return null;
-	}
-
-	const table = match[1];
-	const id = Number.parseInt(match[2] ?? '', 10);
-	if (!table || !isStaticImageTable(table)) {
-		return Response.json({ ok: false, error: 'Invalid image table' }, { status: 400 });
-	}
-	if (!Number.isFinite(id) || id <= 0) {
-		return Response.json({ ok: false, error: 'Invalid image id' }, { status: 400 });
-	}
-
-	const image = getStaticImage(getDatabase(), table, id);
-	if (!image) {
-		return Response.json({ ok: false, error: 'Image not found' }, { status: 404 });
-	}
-
-	const headers = new Headers(getCorsHeaders(req));
-	headers.set('Content-Type', image.mimeType);
-	const fallbackFileName = image.fileName.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, '');
-	headers.set(
-		'Content-Disposition',
-		`inline; filename="${fallbackFileName}"; filename*=UTF-8''${encodeURIComponent(image.fileName)}`,
-	);
-	headers.set('Cache-Control', 'public, max-age=31536000, immutable');
-	const body = new ArrayBuffer(image.data.byteLength);
-	new Uint8Array(body).set(image.data);
-
-	return new Response(body, {
-		status: 200,
-		headers,
-	});
-}
-
 startLabProcessor();
 
 const server = Bun.serve<DiarySttSocketData>({
@@ -497,15 +468,17 @@ const server = Bun.serve<DiarySttSocketData>({
 				headers: nextHeaders,
 			});
 		},
-		'/labs/documents/*': (req: Request) =>
-			getLabDocumentPdfResponse(req) ??
+		'/asset/*': async (req: Request) =>
+			(await getAssetResponse(req)) ??
 			Response.json({ ok: false, error: 'Not found' }, { status: 404 }),
-		'/db-image/*': (req: Request) =>
-			getStaticImageResponse(req) ??
+		'/labs/documents/*': async (req: Request) =>
+			(await getLegacyLabDocumentPdfResponse(req)) ??
 			Response.json({ ok: false, error: 'Not found' }, { status: 404 }),
-		'/diary/voice-memos/*': (req: Request) =>
-			getDiaryVoiceMemoAudioResponse(req) ??
-			getDiaryVoiceMemoVideoResponse(req) ??
+		'/db-image/*': async (req: Request) =>
+			(await getLegacyStaticImageResponse(req)) ??
+			Response.json({ ok: false, error: 'Not found' }, { status: 404 }),
+		'/diary/voice-memos/*': async (req: Request) =>
+			(await getLegacyDiaryVoiceMemoResponse(req)) ??
 			Response.json({ ok: false, error: 'Not found' }, { status: 404 }),
 		'/*': Response.json({ ok: false, error: 'Not found' }, { status: 404 }),
 	},

@@ -23,8 +23,6 @@ import {
 	deleteDiaryVoiceMemoRecovery,
 	failDiaryVoiceMemo,
 	finishDiaryVoiceMemoDraft,
-	getDiaryVoiceMemoAudio,
-	getDiaryVoiceMemoVideo,
 	listDiaryEntries,
 	listPendingDiaryVoiceMemoRecoveries,
 	listPendingDiaryVoiceMemos,
@@ -39,8 +37,6 @@ import {
 	uploadDiaryVoiceMemo,
 } from 'server/db/diary.ts';
 import { createRouter, publicProcedure } from 'server/trpc/shared.ts';
-
-export { getDiaryVoiceMemoAudio, getDiaryVoiceMemoVideo };
 
 export const diaryRouter = createRouter({
 	list: publicProcedure.query(({ ctx }) => listDiaryEntries(ctx.db)),

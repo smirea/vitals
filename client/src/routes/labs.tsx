@@ -1399,7 +1399,7 @@ function buildLabsDocumentGroupId() {
 }
 
 function buildLabsDocumentPreviewUrl(documentId: number) {
-	return `${import.meta.env.VITE_API_URL.trim()}/labs/documents/${documentId}/pdf`;
+	return `${import.meta.env.VITE_API_URL.trim()}/asset/lab_documents/${documentId}/pdf`;
 }
 
 function useViewport() {

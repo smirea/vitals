@@ -14,6 +14,7 @@ import convert, { getMeasureKind } from 'convert';
 import typedUnits from './units.json';
 import models from 'server/utils/models';
 import { cleanLabReferenceRangeInPlace } from './lab-reference-ranges';
+import { createContentAddressedS3Path, uploadS3Asset } from 'server/utils/s3Assets';
 
 const tmpDir = path.join('/tmp', 'vitals');
 fs.mkdirSync(tmpDir, { recursive: true });
@@ -68,12 +69,24 @@ void createScript(async () => {
 		console.log(style.label('existing document', `#${existing.id}, will overwrite results`));
 		documentId = existing.id;
 	} else {
+		const s3Path = createContentAddressedS3Path({
+			tableName: 'lab_documents',
+			fileName,
+			body: pdfData,
+		});
+		await uploadS3Asset({
+			s3Path,
+			body: pdfData,
+			contentType: 'application/pdf',
+		});
+
 		const inserted = db
 			.insert(labDocuments)
 			.values({
 				fileName,
 				mimeType: 'application/pdf',
-				pdfData,
+				s3Path,
+				sizeBytes: pdfData.byteLength,
 				sha256,
 				status: 'pending',
 				statusText: 'Queued for import',

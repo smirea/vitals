@@ -574,13 +574,15 @@ function PillsRouteComponent() {
 	}
 
 	function handleParseImages() {
-		if (watchedImages.length === 0) {
+		const parseableImages = watchedImages.filter(image => image.dataUrl.startsWith('data:'));
+		if (parseableImages.length === 0) {
+			message.info('Add a newly selected image before parsing.');
 			return;
 		}
 
 		setImageError(null);
 		extractionMutation.mutate({
-			images: getImagePayload(watchedImages),
+			images: getImagePayload(parseableImages),
 		});
 	}
 

@@ -1748,11 +1748,11 @@ function extensionFromMimeType(mimeType: string) {
 }
 
 function voiceMemoAudioUrl(voiceMemoId: number) {
-	return `/api/diary/voice-memos/${voiceMemoId}/audio`;
+	return `/api/asset/diary_voice_memos/${voiceMemoId}/audio`;
 }
 
 function voiceMemoVideoUrl(voiceMemoId: number) {
-	return `/api/diary/voice-memos/${voiceMemoId}/video`;
+	return `/api/asset/diary_voice_memos/${voiceMemoId}/video`;
 }
 
 function getMemoDisplayFileName(

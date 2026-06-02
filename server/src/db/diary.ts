@@ -20,6 +20,12 @@ import {
 	type TagRow,
 } from 'server/db/schema.ts';
 import models, { transcribeAudioWithElevenLabs } from 'server/utils/models.ts';
+import {
+	createContentAddressedS3Path,
+	getS3Asset,
+	s3BodyToReadableStream,
+	uploadS3Asset,
+} from 'server/utils/s3Assets.ts';
 
 const optionalLocationNumberSchema = z.number().finite().nullable().optional();
 const NEARBY_LOCATION_DISTANCE_METERS = 100;
@@ -664,7 +670,7 @@ function getDiaryRecoveryMetadataRecords() {
 function buildDiaryPayload(args: {
 	entryRows: DiaryEntryRow[];
 	locationRows: LocationRow[];
-	voiceMemoRows: Array<Omit<DiaryVoiceMemoRow, 'audioData' | 'videoData'>>;
+	voiceMemoRows: DiaryVoiceMemoRow[];
 	entryTagRows: DiaryEntryTagRow[];
 	tagRows: TagRow[];
 }) {
@@ -680,6 +686,8 @@ function buildDiaryPayload(args: {
 			mimeType: string;
 			videoFileName: string | null;
 			videoMimeType: string | null;
+			audioS3Path: string;
+			videoS3Path: string | null;
 			durationSeconds: number | null;
 			transcriptionStatus: DiaryVoiceMemoRow['transcriptionStatus'];
 			transcript: string | null;
@@ -701,6 +709,8 @@ function buildDiaryPayload(args: {
 			mimeType: row.mimeType,
 			videoFileName: row.videoFileName,
 			videoMimeType: row.videoMimeType,
+			audioS3Path: row.audioS3Path,
+			videoS3Path: row.videoS3Path,
 			durationSeconds: row.durationSeconds,
 			transcriptionStatus: row.transcriptionStatus,
 			transcript: row.transcript,
@@ -791,6 +801,10 @@ function getDiaryRecords(db: DiaryReadDb, entryIds?: number[]) {
 			mimeType: diaryVoiceMemos.mimeType,
 			videoFileName: diaryVoiceMemos.videoFileName,
 			videoMimeType: diaryVoiceMemos.videoMimeType,
+			audioS3Path: diaryVoiceMemos.audioS3Path,
+			audioSizeBytes: diaryVoiceMemos.audioSizeBytes,
+			videoS3Path: diaryVoiceMemos.videoS3Path,
+			videoSizeBytes: diaryVoiceMemos.videoSizeBytes,
 			durationSeconds: diaryVoiceMemos.durationSeconds,
 			transcriptionStatus: diaryVoiceMemos.transcriptionStatus,
 			transcript: diaryVoiceMemos.transcript,
@@ -918,8 +932,8 @@ function getPendingVoiceMemoRecords(db: DiaryReadDb) {
 			mimeType: row.mimeType,
 			videoFileName: row.videoFileName,
 			videoMimeType: row.videoMimeType,
-			audioBytes: row.audioData.byteLength,
-			videoBytes: row.videoData?.byteLength ?? 0,
+			audioBytes: row.audioSizeBytes,
+			videoBytes: row.videoSizeBytes,
 			durationSeconds: row.durationSeconds,
 			transcriptionStatus: row.transcriptionStatus,
 			transcript: row.transcript,
@@ -1106,6 +1120,35 @@ async function insertDiaryVoiceMemoFromMedia(
 		transcript: string | null;
 	},
 ) {
+	const audioS3Path = createContentAddressedS3Path({
+		tableName: 'diary_voice_memos',
+		parts: ['audio'],
+		fileName: input.fileName,
+		body: input.audioData,
+	});
+	await uploadS3Asset({
+		s3Path: audioS3Path,
+		body: input.audioData,
+		contentType: input.mimeType,
+	});
+
+	const videoS3Path =
+		input.videoData && input.videoFileName && input.videoMimeType
+			? createContentAddressedS3Path({
+					tableName: 'diary_voice_memos',
+					parts: ['video'],
+					fileName: input.videoFileName,
+					body: input.videoData,
+				})
+			: null;
+	if (videoS3Path && input.videoData && input.videoMimeType) {
+		await uploadS3Asset({
+			s3Path: videoS3Path,
+			body: input.videoData,
+			contentType: input.videoMimeType,
+		});
+	}
+
 	const locationId = await resolveLocation(db, input.location);
 	return db.transaction(tx => {
 		const insertedEntry = tx
@@ -1130,10 +1173,12 @@ async function insertDiaryVoiceMemoFromMedia(
 				mediaKind: input.mediaKind,
 				fileName: input.fileName,
 				mimeType: input.mimeType,
-				audioData: input.audioData,
+				audioS3Path,
+				audioSizeBytes: input.audioData.byteLength,
 				videoFileName: input.videoFileName,
 				videoMimeType: input.videoMimeType,
-				videoData: input.videoData,
+				videoS3Path,
+				videoSizeBytes: input.videoData?.byteLength ?? 0,
 				durationSeconds: input.durationSeconds,
 				transcriptionStatus: 'uploaded',
 				transcript: input.transcript,
@@ -1963,12 +2008,16 @@ async function processDiaryVoiceMemo(
 			);
 		}
 
+		const audioObject = await getS3Asset({ s3Path: voiceMemo.audioS3Path });
+		const audioData = Buffer.from(
+			await new Response(s3BodyToReadableStream(audioObject.Body)).arrayBuffer(),
+		);
 		const transcript =
 			normalizeOptionalText(streamingTranscript) ??
 			normalizeOptionalText(
 				(
 					await transcribeAudioWithElevenLabs({
-						audioData: voiceMemo.audioData,
+						audioData,
 						fileName: voiceMemo.fileName,
 						mimeType: voiceMemo.mimeType,
 					})
@@ -2053,34 +2102,4 @@ async function processDiaryVoiceMemo(
 		}
 		throw error;
 	}
-}
-
-export function getDiaryVoiceMemoAudio(db: VitalsDatabase, voiceMemoId: number) {
-	return (
-		db
-			.select({
-				id: diaryVoiceMemos.id,
-				fileName: diaryVoiceMemos.fileName,
-				mimeType: diaryVoiceMemos.mimeType,
-				audioData: diaryVoiceMemos.audioData,
-			})
-			.from(diaryVoiceMemos)
-			.where(eq(diaryVoiceMemos.id, voiceMemoId))
-			.get() ?? null
-	);
-}
-
-export function getDiaryVoiceMemoVideo(db: VitalsDatabase, voiceMemoId: number) {
-	return (
-		db
-			.select({
-				id: diaryVoiceMemos.id,
-				fileName: diaryVoiceMemos.videoFileName,
-				mimeType: diaryVoiceMemos.videoMimeType,
-				videoData: diaryVoiceMemos.videoData,
-			})
-			.from(diaryVoiceMemos)
-			.where(eq(diaryVoiceMemos.id, voiceMemoId))
-			.get() ?? null
-	);
 }

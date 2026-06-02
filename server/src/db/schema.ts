@@ -1,13 +1,5 @@
 import { relations, sql } from 'drizzle-orm';
-import {
-	blob,
-	index,
-	integer,
-	real,
-	sqliteTable,
-	text,
-	uniqueIndex,
-} from 'drizzle-orm/sqlite-core';
+import { index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 const labDocumentStatusValues = ['pending', 'processing', 'completed', 'failed'] as const;
 const pillTimingValues = ['morning', 'afternoon', 'evening'] as const;
@@ -35,7 +27,8 @@ export const labDocuments = sqliteTable(
 		id: integer('id').primaryKey({ autoIncrement: true }),
 		fileName: text('file_name').notNull(),
 		mimeType: text('mime_type').notNull(),
-		pdfData: blob('pdf_data', { mode: 'buffer' }).notNull(),
+		s3Path: text('s3_path').notNull(),
+		sizeBytes: integer('size_bytes').notNull(),
 		sha256: text('sha256').notNull(),
 		status: text('status', { enum: labDocumentStatusValues }).notNull().default('pending'),
 		statusText: text('status_text').notNull().default('Queued for import'),
@@ -165,7 +158,9 @@ export const pillImages = sqliteTable(
 			.references(() => pills.id, { onDelete: 'cascade' }),
 		sortOrder: integer('sort_order').notNull(),
 		fileName: text('file_name').notNull(),
-		dataUrl: text('data_url').notNull(),
+		mimeType: text('mime_type').notNull(),
+		s3Path: text('s3_path').notNull(),
+		sizeBytes: integer('size_bytes').notNull(),
 	},
 	table => [index('pill_images_pill_sort_idx').on(table.pillId, table.sortOrder)],
 );
@@ -253,10 +248,12 @@ export const diaryVoiceMemos = sqliteTable(
 		mediaKind: text('media_kind', { enum: diaryMemoKindValues }).notNull().default('audio'),
 		fileName: text('file_name').notNull(),
 		mimeType: text('mime_type').notNull(),
-		audioData: blob('audio_data', { mode: 'buffer' }).notNull(),
+		audioS3Path: text('audio_s3_path').notNull(),
+		audioSizeBytes: integer('audio_size_bytes').notNull(),
 		videoFileName: text('video_file_name'),
 		videoMimeType: text('video_mime_type'),
-		videoData: blob('video_data', { mode: 'buffer' }),
+		videoS3Path: text('video_s3_path'),
+		videoSizeBytes: integer('video_size_bytes').notNull().default(0),
 		durationSeconds: real('duration_seconds'),
 		transcriptionStatus: text('transcription_status', { enum: voiceMemoStatusValues })
 			.notNull()

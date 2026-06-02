@@ -492,10 +492,17 @@ function createImageUid(
 }
 
 function normalizeImageUrl(dataUrl: string) {
-	if (!dataUrl.includes('/api/db-image/')) return dataUrl;
-	const [, path] = dataUrl.split('/api/db-image/');
-	if (!path) return dataUrl;
-	return `${API_BASE_URL}/db-image/${path}`;
+	if (dataUrl.includes('/api/asset/')) {
+		const [, path] = dataUrl.split('/api/asset/');
+		if (!path) return dataUrl;
+		return `${API_BASE_URL}/asset/${path}`;
+	}
+	if (dataUrl.includes('/api/db-image/')) {
+		const [, path] = dataUrl.split('/api/db-image/');
+		if (!path) return dataUrl;
+		return `${API_BASE_URL}/db-image/${path}`;
+	}
+	return dataUrl;
 }
 
 function isBase64DataImage(image: PillImageFormValue) {

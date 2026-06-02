@@ -13,6 +13,12 @@ import {
 	type LabDocumentRow,
 } from 'server/db/schema.ts';
 import { createRouter, publicProcedure } from 'server/trpc/shared.ts';
+import {
+	createContentAddressedS3Path,
+	getS3Asset,
+	s3BodyToReadableStream,
+	uploadS3Asset,
+} from 'server/utils/s3Assets.ts';
 
 const tmpDir = path.join('/tmp', 'vitals');
 fs.mkdirSync(tmpDir, { recursive: true });
@@ -103,7 +109,7 @@ export const labsRouter = createRouter({
 
 	uploadDocuments: publicProcedure
 		.input(labUploadDocumentsInputSchema)
-		.mutation(({ ctx, input }) => {
+		.mutation(async ({ ctx, input }) => {
 			const now = new Date().toISOString();
 			const queued: Array<{
 				id: number;
@@ -136,12 +142,24 @@ export const labsRouter = createRouter({
 					continue;
 				}
 
+				const s3Path = createContentAddressedS3Path({
+					tableName: 'lab_documents',
+					fileName: file.fileName,
+					body: pdfData,
+				});
+				await uploadS3Asset({
+					s3Path,
+					body: pdfData,
+					contentType: file.mimeType,
+				});
+
 				const inserted = ctx.db
 					.insert(labDocuments)
 					.values({
 						fileName: file.fileName,
 						mimeType: file.mimeType,
-						pdfData,
+						s3Path,
+						sizeBytes: pdfData.byteLength,
 						sha256,
 						status: 'pending',
 						statusText: 'Queued for import',
@@ -161,7 +179,7 @@ export const labsRouter = createRouter({
 				console.log(`[labs] #${inserted.id} ${inserted.fileName}: queued for import`);
 			}
 
-			processNextImport();
+			void processNextImport();
 			return { documents: queued };
 		}),
 
@@ -208,26 +226,8 @@ function requeueDocument(
 
 	console.log(`[labs] #${document.id} ${document.fileName}: queued for ${action}`);
 	forceParseDocumentIds.add(documentId);
-	processNextImport();
+	void processNextImport();
 	return { documentId };
-}
-
-export function getLabDocumentPdf(
-	db: ReturnType<typeof getDatabase>,
-	documentId: number,
-): Pick<LabDocumentRow, 'id' | 'fileName' | 'mimeType' | 'pdfData'> | null {
-	return (
-		db
-			.select({
-				id: labDocuments.id,
-				fileName: labDocuments.fileName,
-				mimeType: labDocuments.mimeType,
-				pdfData: labDocuments.pdfData,
-			})
-			.from(labDocuments)
-			.where(eq(labDocuments.id, documentId))
-			.get() ?? null
-	);
 }
 
 export function startLabProcessor() {
@@ -256,10 +256,10 @@ export function startLabProcessor() {
 		.where(and(eq(labDocuments.status, 'failed'), lt(labDocuments.retryCount, 3)))
 		.run();
 
-	processNextImport();
+	void processNextImport();
 }
 
-function processNextImport() {
+async function processNextImport() {
 	const db = getDatabase();
 	const busy = db
 		.select({ id: labDocuments.id })
@@ -272,7 +272,7 @@ function processNextImport() {
 		.select({
 			id: labDocuments.id,
 			fileName: labDocuments.fileName,
-			pdfData: labDocuments.pdfData,
+			s3Path: labDocuments.s3Path,
 			retryCount: labDocuments.retryCount,
 		})
 		.from(labDocuments)
@@ -292,7 +292,29 @@ function processNextImport() {
 		.run();
 
 	const tmpPath = path.join(tmpDir, `doc_${next.id}_${next.fileName}`);
-	fs.writeFileSync(tmpPath, new Uint8Array(next.pdfData));
+	try {
+		const object = await getS3Asset({ s3Path: next.s3Path });
+		const data = await new Response(s3BodyToReadableStream(object.Body)).arrayBuffer();
+		fs.writeFileSync(tmpPath, new Uint8Array(data));
+	} catch (error) {
+		const message = stripAnsi(error instanceof Error ? error.message : String(error)).trim();
+		const newRetryCount = next.retryCount + 1;
+		const fatal = newRetryCount >= 3;
+		console.error(`[labs] #${next.id}: import failed (retry ${newRetryCount}/3) — ${message}`);
+		db.update(labDocuments)
+			.set({
+				status: 'failed',
+				statusText: fatal ? 'Fatal: max retries exceeded' : 'Import failed',
+				statusUpdatedAt: new Date().toISOString(),
+				failedAt: new Date().toISOString(),
+				lastError: message,
+				retryCount: newRetryCount,
+			})
+			.where(eq(labDocuments.id, next.id))
+			.run();
+		void processNextImport();
+		return;
+	}
 
 	const scriptPath = path.resolve(
 		import.meta.dir,
@@ -329,6 +351,6 @@ function processNextImport() {
 				.where(eq(labDocuments.id, next.id))
 				.run();
 		}
-		processNextImport();
+		void processNextImport();
 	});
 }

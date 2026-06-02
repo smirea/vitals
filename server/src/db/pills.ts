@@ -19,7 +19,8 @@ import {
 	pills,
 	tags,
 } from 'server/db/schema.ts';
-import { getStaticImageUrl } from 'server/utils/getStaticImageUrl.ts';
+import { getAssetUrlForRecord } from 'server/utils/assetUrls.ts';
+import { createContentAddressedS3Path, uploadS3Asset } from 'server/utils/s3Assets.ts';
 import models from 'server/utils/models';
 
 const pillImageInputSchema = z.object({
@@ -154,6 +155,13 @@ type PillImageMetadataRow = {
 	pillId: number;
 	fileName: string;
 };
+type PreparedPillImageInput = z.infer<typeof pillImageInputSchema> & {
+	uploaded?: {
+		mimeType: string;
+		s3Path: string;
+		sizeBytes: number;
+	};
+};
 
 function getTodayDateString() {
 	const date = new Date();
@@ -267,14 +275,47 @@ function parseDataUrl(dataUrl: string) {
 
 	return {
 		mimeType: match[1],
-		data: match[2],
+		dataBase64: match[2],
+		data: Buffer.from(match[2], 'base64'),
 	};
+}
+
+async function preparePillImages(images: z.infer<typeof pillImageInputSchema>[]) {
+	return Promise.all(
+		images.map(async image => {
+			if (!image.dataUrl.startsWith('data:')) {
+				return image;
+			}
+
+			const parsedImage = parseDataUrl(image.dataUrl);
+			const s3Path = createContentAddressedS3Path({
+				tableName: 'pill_images',
+				parts: ['uploads'],
+				fileName: image.fileName,
+				body: parsedImage.data,
+			});
+			await uploadS3Asset({
+				s3Path,
+				body: parsedImage.data,
+				contentType: parsedImage.mimeType,
+			});
+
+			return {
+				...image,
+				uploaded: {
+					mimeType: parsedImage.mimeType,
+					s3Path,
+					sizeBytes: parsedImage.data.byteLength,
+				},
+			};
+		}),
+	);
 }
 
 function syncPillImages(args: {
 	db: PillsWriteDb;
 	pillId: number;
-	images: z.infer<typeof pillImageInputSchema>[];
+	images: PreparedPillImageInput[];
 }) {
 	const existingImages = args.db
 		.select({
@@ -288,13 +329,18 @@ function syncPillImages(args: {
 
 	for (const [index, image] of args.images.entries()) {
 		if (image.dataUrl.startsWith('data:')) {
+			if (!image.uploaded) {
+				throw new Error(`Image ${image.fileName} was not uploaded before saving.`);
+			}
 			args.db
 				.insert(pillImages)
 				.values({
 					pillId: args.pillId,
 					sortOrder: index,
 					fileName: image.fileName,
-					dataUrl: image.dataUrl,
+					mimeType: image.uploaded.mimeType,
+					s3Path: image.uploaded.s3Path,
+					sizeBytes: image.uploaded.sizeBytes,
 				})
 				.run();
 			continue;
@@ -474,7 +520,7 @@ function buildPillsPayload(args: {
 		list.push({
 			id: row.id,
 			fileName: row.fileName,
-			dataUrl: getStaticImageUrl('pill_images', row.id),
+			dataUrl: getAssetUrlForRecord('pill_images', row.id, 'image'),
 		});
 		imageMap.set(row.pillId, list);
 	}
@@ -696,7 +742,7 @@ export function searchPills(db: VitalsDatabase, input: z.infer<typeof pillSearch
 	);
 }
 
-export function upsertPill(db: VitalsDatabase, input: z.infer<typeof pillUpsertInputSchema>) {
+export async function upsertPill(db: VitalsDatabase, input: z.infer<typeof pillUpsertInputSchema>) {
 	const name = input.name.trim();
 	const normalizedValue = input.value.trim();
 	const normalizedUnit = input.unit.trim();
@@ -704,6 +750,7 @@ export function upsertPill(db: VitalsDatabase, input: z.infer<typeof pillUpsertI
 	const periods = sanitizePillPeriods({
 		input: input.periods,
 	});
+	const preparedImages = await preparePillImages(input.images);
 
 	if (periods.length === 0) {
 		// throw new Error('At least one pill date range is required.');
@@ -794,7 +841,7 @@ export function upsertPill(db: VitalsDatabase, input: z.infer<typeof pillUpsertI
 					.run();
 			}
 
-			syncPillImages({ db: tx, pillId, images: input.images });
+			syncPillImages({ db: tx, pillId, images: preparedImages });
 
 			for (const period of periods) {
 				let pillPeriodId = period.id ?? null;
@@ -876,7 +923,7 @@ export async function extractPillFromImages(input: z.infer<typeof pillImageExtra
 		const parsedImage = parseDataUrl(image.dataUrl);
 		return {
 			type: 'image' as const,
-			image: parsedImage.data,
+			image: parsedImage.dataBase64,
 			mediaType: parsedImage.mimeType,
 		};
 	});

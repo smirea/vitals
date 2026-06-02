@@ -164,11 +164,11 @@ function mapsUrl(location: { latitude: number; longitude: number }) {
 }
 
 function voiceMemoAudioUrl(voiceMemoId: number) {
-	return `${API_BASE_URL}/diary/voice-memos/${voiceMemoId}/audio`;
+	return `${API_BASE_URL}/asset/diary_voice_memos/${voiceMemoId}/audio`;
 }
 
 function voiceMemoVideoUrl(voiceMemoId: number) {
-	return `${API_BASE_URL}/diary/voice-memos/${voiceMemoId}/video`;
+	return `${API_BASE_URL}/asset/diary_voice_memos/${voiceMemoId}/video`;
 }
 
 function audioFileNameFromUri(uri: string) {
