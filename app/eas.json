@@ -1,0 +1,11 @@
+{
+	"build": {
+		"prod": {
+			"distribution": "internal",
+			"environment": "production",
+			"ios": {
+				"simulator": false
+			}
+		}
+	}
+}

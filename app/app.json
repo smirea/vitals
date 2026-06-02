@@ -14,7 +14,14 @@
 			"backgroundColor": "#ffffff"
 		},
 		"ios": {
-			"supportsTablet": true
+			"supportsTablet": true,
+			"bundleIdentifier": "com.stefan.vitals",
+			"infoPlist": {
+				"NSLocalNetworkUsageDescription": "Allow Vitals to connect to the Vitals server on your local network.",
+				"NSAppTransportSecurity": {
+					"NSAllowsLocalNetworking": true
+				}
+			}
 		},
 		"android": {
 			"adaptiveIcon": {

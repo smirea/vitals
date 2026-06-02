@@ -9,6 +9,7 @@ const env = z
 		CLIENT_PORT: z.coerce.number().int().min(1).max(65535),
 		VITE_HOST: z.string(),
 		VITE_API_URL: z.url(),
+		EXPO_PUBLIC_API_URL: z.url(),
 		OPENROUTER_API_KEY: z.string().regex(/^sk-or-v1-/),
 		MARKER_PDF_GEMINI_KEY: z.string(),
 		VITALS_DATA_DIR: z.string(),

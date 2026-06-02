@@ -1,7 +1,14 @@
-import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
 const API_PORT = '6001';
+
+function normalizeApiBaseUrl(value: string) {
+	const url = new URL(value);
+	url.pathname = url.pathname.replace(/\/+$/, '');
+	url.search = '';
+	url.hash = '';
+	return url.toString().replace(/\/$/, '');
+}
 
 function getApiBaseUrl() {
 	if (Platform.OS === 'web') {
@@ -9,27 +16,12 @@ function getApiBaseUrl() {
 		return `http://${hostname}:${API_PORT}`;
 	}
 
-	const hostUri = Constants.expoConfig?.hostUri;
-	if (!hostUri) {
-		throw new Error(
-			'Expo hostUri is missing; start Expo on LAN so Vitals can find the laptop API.',
-		);
+	const apiUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
+	if (!apiUrl) {
+		throw new Error('EXPO_PUBLIC_API_URL is required for the native Vitals app.');
 	}
 
-	const expoUrl = new URL(`http://${hostUri}`);
-	if (expoUrl.hostname.endsWith('.exp.direct')) {
-		throw new Error(
-			'Expo tunnel host cannot expose the local Vitals API; use LAN mode or set up an API tunnel.',
-		);
-	}
-
-	expoUrl.protocol = 'http:';
-	expoUrl.port = API_PORT;
-	expoUrl.pathname = '';
-	expoUrl.search = '';
-	expoUrl.hash = '';
-
-	return expoUrl.origin;
+	return normalizeApiBaseUrl(apiUrl);
 }
 
 export const API_BASE_URL = getApiBaseUrl();
