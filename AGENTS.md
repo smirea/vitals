@@ -6,6 +6,8 @@ Never ever write a fallback or silently fail: it's ok to throw errors and when s
 
 All the environment variables are in `.env` and `.env.local` and are managed with the global `env-manager` utility
 
+S3 asset paths include `AWS_PREFIX` after the app root: `s3://<bucket>/vitals/<AWS_PREFIX>/<table>/...`. Use `dev` for local/new writes unless explicitly testing or moving production-backed assets.
+
 # Broad guidelines
 
 This is an information dense, concise but comprehensive tool to analyze all sorts of information about 1 person: medical information such as labs, food tracking, supplement tracking,workouts and the like
