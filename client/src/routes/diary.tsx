@@ -1500,10 +1500,9 @@ function createStreamingTranscriptDeferred(): StreamingTranscriptDeferred {
 
 function getDiarySttWebSocketUrl() {
 	const apiUrl = new URL(import.meta.env.VITE_API_URL.trim());
-	const host = apiUrl.hostname.endsWith('.localhost') ? 'localhost' : apiUrl.hostname;
-	const port = apiUrl.port || (host === 'localhost' ? '6001' : '');
-	const url = new URL('/diary/stt/live', `${apiUrl.protocol}//${host}${port ? `:${port}` : ''}`);
-	url.protocol = 'ws:';
+	const apiPath = apiUrl.pathname.replace(/\/$/, '');
+	const url = new URL(`${apiPath}/diary/stt/live`, apiUrl.origin);
+	url.protocol = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:';
 	return withAuthToken(url.toString());
 }
 

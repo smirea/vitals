@@ -1400,9 +1400,7 @@ function buildLabsDocumentGroupId() {
 }
 
 function buildLabsDocumentPreviewUrl(documentId: number) {
-	return withAuthToken(
-		`${import.meta.env.VITE_API_URL.trim()}/asset/lab_documents/${documentId}/pdf`,
-	);
+	return withAuthToken(`/api/asset/lab_documents/${documentId}/pdf`);
 }
 
 function useViewport() {

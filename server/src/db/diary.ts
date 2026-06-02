@@ -7,6 +7,7 @@ import { z } from 'zod';
 
 import type { VitalsDatabase } from 'server/db/client.ts';
 import { ensureTagsByNames } from 'server/db/tags.ts';
+import env from 'server/env.ts';
 import {
 	diaryEntries,
 	diaryEntryTags,
@@ -31,7 +32,10 @@ const optionalLocationNumberSchema = z.number().finite().nullable().optional();
 const NEARBY_LOCATION_DISTANCE_METERS = 100;
 const NOMINATIM_REVERSE_URL = 'https://nominatim.openstreetmap.org/reverse';
 const projectRoot = path.resolve(import.meta.dir, '..', '..', '..');
-const DIARY_RECOVERY_ROOT = path.join(projectRoot, 'data', 'diary');
+const vitalsDataDir = path.isAbsolute(env.VITALS_DATA_DIR)
+	? env.VITALS_DATA_DIR
+	: path.resolve(projectRoot, env.VITALS_DATA_DIR);
+const DIARY_RECOVERY_ROOT = path.join(vitalsDataDir, 'diary');
 
 const nominatimReverseResponseSchema = z.object({
 	display_name: z.string().optional(),
