@@ -6,7 +6,7 @@
 	"scripts": {
 		"start": "expo start",
 		"android": "expo start --android",
-		"ios": "bun scripts/start-ios.mjs",
+		"ios": "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer expo start --ios",
 		"web": "expo start --web",
 		"typecheck": "tsc --noEmit"
 	},
