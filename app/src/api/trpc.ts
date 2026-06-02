@@ -2,12 +2,18 @@ import { QueryClient } from '@tanstack/react-query';
 import { createTRPCClient, httpBatchLink, httpLink, splitLink } from '@trpc/client';
 import { createTRPCContext } from '@trpc/tanstack-react-query';
 import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 
 import type { AppRouter } from 'server/trpc/index.ts';
 
 const API_PORT = '6001';
 
 function getApiBaseUrl() {
+	if (Platform.OS === 'web') {
+		const hostname = typeof window === 'undefined' ? '127.0.0.1' : window.location.hostname;
+		return `http://${hostname}:${API_PORT}`;
+	}
+
 	const hostUri = Constants.expoConfig?.hostUri;
 	if (!hostUri) {
 		throw new Error(
