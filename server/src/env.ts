@@ -17,6 +17,7 @@ const env = z
 		AWS_SESSION_TOKEN: z.string().optional(),
 		VITALS_S3_BUCKET: z.string(),
 		VITALS_S3_PREFIX: z.string(),
+		AWS_PREFIX: z.string(),
 		ELEVENLABS_API_KEY: z.string(),
 	})
 	.parse(process.env);

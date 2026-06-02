@@ -26,7 +26,13 @@ const s3Client = new S3Client({
 export type AssetBody = Buffer | Uint8Array;
 
 export function createVitalsS3Path(tableName: string, ...parts: string[]) {
-	return s3PathUtil.join(env.VITALS_S3_BUCKET, env.VITALS_S3_PREFIX, tableName, ...parts);
+	return s3PathUtil.join(
+		env.VITALS_S3_BUCKET,
+		env.VITALS_S3_PREFIX,
+		env.AWS_PREFIX,
+		tableName,
+		...parts,
+	);
 }
 
 export function createContentAddressedS3Path(input: {
