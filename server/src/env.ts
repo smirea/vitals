@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 const env = z
 	.object({
-		SERVER_SECRET: z.string().regex(/^.{32,}$/),
+		SERVER_SECRET: z.string(),
 		SERVER_PASSWORD: z.string(),
 		API_PORT: z.coerce.number().int().min(1).max(65535),
 		CLIENT_PORT: z.coerce.number().int().min(1).max(65535),
