@@ -1,7 +1,7 @@
 {
 	"expo": {
 		"name": "Vitals",
-		"slug": "vitals-mobile",
+		"slug": "vitals",
 		"version": "1.0.0",
 		"orientation": "portrait",
 		"icon": "./assets/images/icon.png",
@@ -17,6 +17,7 @@
 			"supportsTablet": true,
 			"bundleIdentifier": "com.stefan.vitals",
 			"infoPlist": {
+				"ITSAppUsesNonExemptEncryption": false,
 				"NSLocalNetworkUsageDescription": "Allow Vitals to connect to the Vitals server on your local network.",
 				"NSAppTransportSecurity": {
 					"NSAllowsLocalNetworking": true
@@ -29,7 +30,14 @@
 				"backgroundColor": "#ffffff"
 			},
 			"edgeToEdgeEnabled": true,
-			"predictiveBackGestureEnabled": false
+			"predictiveBackGestureEnabled": false,
+			"permissions": [
+				"android.permission.RECORD_AUDIO",
+				"android.permission.MODIFY_AUDIO_SETTINGS",
+				"android.permission.CAMERA",
+				"android.permission.ACCESS_COARSE_LOCATION",
+				"android.permission.ACCESS_FINE_LOCATION"
+			]
 		},
 		"web": {
 			"bundler": "metro",
@@ -68,6 +76,13 @@
 		],
 		"experiments": {
 			"typedRoutes": true
-		}
+		},
+		"extra": {
+			"router": {},
+			"eas": {
+				"projectId": "f99c1f75-dfe5-4428-9dc0-65043f42105e"
+			}
+		},
+		"owner": "stefanmirea"
 	}
 }
