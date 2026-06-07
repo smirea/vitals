@@ -279,6 +279,44 @@ function getDiaryRecoveryVideoPath(createdAt: string, fileName: string) {
 	return path.join(dirPath, fileName);
 }
 
+async function probeMediaDurationSeconds(mediaPath: string) {
+	const proc = Bun.spawn({
+		cmd: [
+			'ffprobe',
+			'-v',
+			'error',
+			'-show_entries',
+			'format=duration',
+			'-of',
+			'default=noprint_wrappers=1:nokey=1',
+			mediaPath,
+		],
+		stdout: 'pipe',
+		stderr: 'pipe',
+	});
+	const [stdout, stderr, exitCode] = await Promise.all([
+		new Response(proc.stdout).text(),
+		new Response(proc.stderr).text(),
+		proc.exited,
+	]);
+
+	if (exitCode !== 0) {
+		throw new Error(
+			`ffprobe failed to read diary media duration: ${stderr.trim() || `exit ${exitCode}`}`,
+		);
+	}
+
+	const rawDuration = stdout.trim();
+	const durationSeconds = Number(rawDuration);
+	if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+		throw new Error(
+			`ffprobe returned an invalid diary media duration for ${mediaPath}: ${rawDuration || 'empty output'}`,
+		);
+	}
+
+	return durationSeconds;
+}
+
 async function extractAudioFromVideoFile(videoPath: string, audioPath: string) {
 	const proc = Bun.spawn({
 		cmd: [
@@ -329,10 +367,12 @@ async function readDiaryRecoveryMediaForDatabase(
 
 	let audioData = fs.readFileSync(recoveryRecord.audioPath);
 	const videoData = recoveryRecord.videoPath ? fs.readFileSync(recoveryRecord.videoPath) : null;
+	let durationSeconds = recoveryRecord.durationSeconds;
 	if (recoveryRecord.mediaKind === 'video') {
 		if (!recoveryRecord.videoPath || !videoData || videoData.byteLength === 0) {
 			throw new Error(`Diary recovery ${recoveryLabel} did not receive video.`);
 		}
+		durationSeconds = await probeMediaDurationSeconds(recoveryRecord.videoPath);
 		if (audioData.byteLength === 0) {
 			audioData = await extractAudioFromVideoFile(
 				recoveryRecord.videoPath,
@@ -346,6 +386,7 @@ async function readDiaryRecoveryMediaForDatabase(
 	return {
 		audioData,
 		videoData,
+		durationSeconds,
 	};
 }
 
@@ -1390,15 +1431,25 @@ export async function saveDiaryVoiceMemo(
 	input: z.infer<typeof diaryUploadVoiceMemoInputSchema>,
 ) {
 	const audioData = Buffer.from(input.dataBase64, 'base64');
-	const videoData = input.videoDataBase64 ? Buffer.from(input.videoDataBase64, 'base64') : null;
 	const recovery = createDiaryVoiceMemoRecovery(input, audioData);
 	let recoveryRecord = recovery.record;
 
 	try {
+		const media = await readDiaryRecoveryMediaForDatabase(recoveryRecord, recovery.metadataPath);
 		recoveryRecord = updateDiaryVoiceMemoRecovery(
 			recovery.metadataPath,
 			recoveryRecord,
 			'saving_to_database',
+			{
+				audioBytes: media.audioData.byteLength,
+				videoBytes: media.videoData?.byteLength ?? 0,
+				durationSeconds: media.durationSeconds,
+			},
+			{
+				audioBytes: media.audioData.byteLength,
+				videoBytes: media.videoData?.byteLength ?? 0,
+				durationSeconds: media.durationSeconds,
+			},
 		);
 		const { entryId, voiceMemoId } = await insertDiaryVoiceMemoFromMedia(db, {
 			createdAt: new Date().toISOString(),
@@ -1408,11 +1459,11 @@ export async function saveDiaryVoiceMemo(
 			mediaKind: input.mediaKind,
 			fileName: input.fileName.trim(),
 			mimeType: input.mimeType.trim(),
-			audioData,
+			audioData: media.audioData,
 			videoFileName: input.videoFileName?.trim() ?? null,
 			videoMimeType: input.videoMimeType?.trim() ?? null,
-			videoData,
-			durationSeconds: nullableNumber(input.durationSeconds),
+			videoData: media.videoData,
+			durationSeconds: media.durationSeconds,
 			transcript: normalizeOptionalText(input.transcript),
 		});
 
@@ -1610,7 +1661,7 @@ export async function finishDiaryVoiceMemoDraft(
 	const recovery = findDiaryRecoveryById(input.recoveryId);
 	let recoveryRecord = recovery.record;
 	try {
-		const { audioData, videoData } = await readDiaryRecoveryMediaForDatabase(
+		const { audioData, videoData, durationSeconds } = await readDiaryRecoveryMediaForDatabase(
 			recoveryRecord,
 			input.recoveryId,
 		);
@@ -1622,12 +1673,13 @@ export async function finishDiaryVoiceMemoDraft(
 			{
 				audioBytes: audioData.byteLength,
 				videoBytes: videoData?.byteLength ?? 0,
-				durationSeconds: nullableNumber(input.durationSeconds),
+				durationSeconds,
 				transcript: normalizeOptionalText(input.transcript) ?? recoveryRecord.transcript,
 			},
 			{
 				audioBytes: audioData.byteLength,
 				videoBytes: videoData?.byteLength ?? 0,
+				durationSeconds,
 			},
 		);
 		const inserted = await insertDiaryVoiceMemoFromMedia(db, {
@@ -1642,7 +1694,7 @@ export async function finishDiaryVoiceMemoDraft(
 			videoFileName: recoveryRecord.videoFileName,
 			videoMimeType: recoveryRecord.videoMimeType,
 			videoData,
-			durationSeconds: recoveryRecord.durationSeconds,
+			durationSeconds,
 			transcript: recoveryRecord.transcript,
 		});
 
@@ -1719,7 +1771,7 @@ export async function processDiaryVoiceMemoRecovery(
 	let voiceMemoId = recoveryRecord.voiceMemoId;
 
 	if (!voiceMemoId) {
-		const { audioData, videoData } = await readDiaryRecoveryMediaForDatabase(
+		const { audioData, videoData, durationSeconds } = await readDiaryRecoveryMediaForDatabase(
 			recoveryRecord,
 			resolvedMetadataPath,
 		);
@@ -1730,11 +1782,13 @@ export async function processDiaryVoiceMemoRecovery(
 			{
 				audioBytes: audioData.byteLength,
 				videoBytes: videoData?.byteLength ?? 0,
+				durationSeconds,
 			},
 			{
 				audioPath: recoveryRecord.audioPath,
 				audioBytes: audioData.byteLength,
 				videoBytes: videoData?.byteLength ?? 0,
+				durationSeconds,
 			},
 		);
 		const inserted = await insertDiaryVoiceMemoFromMedia(db, {
@@ -1749,7 +1803,7 @@ export async function processDiaryVoiceMemoRecovery(
 			videoFileName: recoveryRecord.videoFileName,
 			videoMimeType: recoveryRecord.videoMimeType,
 			videoData,
-			durationSeconds: recoveryRecord.durationSeconds,
+			durationSeconds,
 			transcript: recoveryRecord.transcript,
 		});
 
