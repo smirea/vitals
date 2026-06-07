@@ -6,9 +6,13 @@ import { tanstackRouter } from '@tanstack/router-plugin/vite';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import { z } from 'zod';
 
-const clientEnvSchema = z.object({
+const devEnvSchema = z.object({
+	API_PORT: z.coerce.number().int().min(1).max(65535),
 	CLIENT_PORT: z.coerce.number().int().min(1).max(65535),
 	VITE_HOST: z.string(),
+});
+
+const buildEnvSchema = z.object({
 	VITE_API_URL: z.url(),
 });
 
@@ -16,36 +20,38 @@ export default defineConfig(async ({ command, mode }) => {
 	const projectRoot = path.resolve(import.meta.dirname, '..');
 
 	Object.assign(process.env, loadEnv(mode, projectRoot, ''));
-	const env = clientEnvSchema.parse(process.env);
+	const plugins = [
+		tsconfigPaths(),
+		tanstackRouter({
+			target: 'react',
+			autoCodeSplitting: true,
+			routeFileIgnorePattern: '(^|/)_[^_].+',
+		}) as any,
+		react(),
+	];
 
-	const clientPort = env.CLIENT_PORT;
+	if (command !== 'serve') {
+		buildEnvSchema.parse(process.env);
+		return { plugins };
+	}
+
+	const devEnv = devEnvSchema.parse(process.env);
 
 	return {
-		server:
-			command === 'serve'
-				? {
-						port: clientPort,
-						strictPort: true,
-						allowedHosts: [env.VITE_HOST],
-						proxy: {
-							'/api': {
-								target: env.VITE_API_URL,
-								changeOrigin: true,
-								secure: false,
-								ws: true,
-								rewrite: (path: string) => path.replace(/^\/api/, ''),
-							},
-						},
-					}
-				: undefined,
-		plugins: [
-			tsconfigPaths(),
-			tanstackRouter({
-				target: 'react',
-				autoCodeSplitting: true,
-				routeFileIgnorePattern: '(^|/)_[^_].+',
-			}) as any,
-			react(),
-		],
+		server: {
+			port: devEnv.CLIENT_PORT,
+			strictPort: true,
+			allowedHosts: [devEnv.VITE_HOST],
+			proxy: {
+				'/api': {
+					target: `http://127.0.0.1:${devEnv.API_PORT}`,
+					changeOrigin: true,
+					secure: false,
+					ws: true,
+					rewrite: (path: string) => path.replace(/^\/api/, ''),
+				},
+			},
+		},
+		plugins,
 	};
 });

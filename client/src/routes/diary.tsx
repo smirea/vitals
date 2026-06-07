@@ -1499,7 +1499,9 @@ function createStreamingTranscriptDeferred(): StreamingTranscriptDeferred {
 }
 
 function getDiarySttWebSocketUrl() {
-	const apiUrl = new URL(import.meta.env.VITE_API_URL.trim());
+	const apiUrl = import.meta.env.DEV
+		? new URL('/api', window.location.origin)
+		: new URL(import.meta.env.VITE_API_URL.trim());
 	const apiPath = apiUrl.pathname.replace(/\/$/, '');
 	const url = new URL(`${apiPath}/diary/stt/live`, apiUrl.origin);
 	url.protocol = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:';
