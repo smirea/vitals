@@ -53,6 +53,7 @@ import type {
 	PillRecord,
 } from '../utils/api';
 import { PageNav } from '../components/PageNav';
+import { withAuthToken } from '../utils/auth';
 import { useTRPC } from '../utils/trpc';
 
 const pillsSearchSchema = z.object({
@@ -1393,7 +1394,7 @@ function PillsRouteComponent() {
 									}}
 								>
 									<Image
-										src={image.dataUrl}
+										src={getPillImageSrc(image.dataUrl)}
 										alt={image.fileName}
 										width={IMAGE_TILE_SIZE}
 										height={IMAGE_TILE_SIZE}
@@ -1974,6 +1975,12 @@ function getImagePayload(images: PillImageFormValue[]) {
 	}));
 }
 
+function getPillImageSrc(dataUrl: string) {
+	return dataUrl.startsWith('/api/asset/') || dataUrl.startsWith('/api/db-image/')
+		? withAuthToken(dataUrl)
+		: dataUrl;
+}
+
 function removeImageByUid(images: PillImageFormValue[], uid: string) {
 	return images.filter(image => image.uid !== uid);
 }
@@ -2233,7 +2240,7 @@ function renderImages(images: PillImage[]) {
 				{images.map(image => (
 					<Image
 						key={image.id}
-						src={image.dataUrl}
+						src={getPillImageSrc(image.dataUrl)}
 						alt={image.fileName}
 						width={44}
 						height={44}
