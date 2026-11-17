@@ -60,7 +60,7 @@
 		"zod": "^4.3.6"
 	},
 	"devDependencies": {
-		"better-sqlite3": "^12.8.0",
+		"better-sqlite3": "^13.2.0",
 		"drizzle-kit": "0.31.10"
 	}
 }
