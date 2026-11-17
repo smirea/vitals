@@ -30,5 +30,5 @@
 		"noUnusedParameters": false,
 		"noPropertyAccessFromIndexSignature": false
 	},
-	"exclude": ["app"]
+	"exclude": ["app", "**/dist"]
 }
