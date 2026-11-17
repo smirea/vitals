@@ -6,6 +6,7 @@
 		"module": "Preserve",
 		"moduleDetection": "force",
 		"jsx": "react-jsx",
+		"types": ["bun"],
 		"allowJs": true,
 		"paths": {
 			"shared/*": ["./shared/*"],
@@ -29,5 +30,5 @@
 		"noUnusedParameters": false,
 		"noPropertyAccessFromIndexSignature": false
 	},
-	"exclude": ["app"]
+	"exclude": ["app", "**/dist"]
 }

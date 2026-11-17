@@ -9,6 +9,6 @@ pre-commit:
       run: bunx oxfmt --ignore-path .oxfmtignore --no-error-on-unmatched-pattern {staged_files}
       stage_fixed: true
     typecheck:
-      run: bunx --bun tsgo --noEmit
+      run: bun run typecheck
     test:
-      run: bun test --pass-with-no-tests
+      run: bun run test
